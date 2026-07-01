@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.pyo
+.env
+.git
+.gitignore
+*.md
+*.log
+backups/
+data/patterns.json
+memory/
+config/gmail_credentials.json
+config/token.json
+.jarvis_scatter/
+node_modules/

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body { width: 340px; background: #020c14; color: #d7f5ef; font-family: monospace; padding: 12px; }
+  h1 { font-size: 14px; color: #00d4ff; letter-spacing: .2em; margin: 0 0 10px; }
+  #status { font-size: 10px; color: #517686; margin-bottom: 10px; }
+  #chat-log { max-height: 200px; overflow-y: auto; font-size: 12px; margin-bottom: 8px; }
+  .msg { margin-bottom: 6px; }
+  .msg.user::before { content: "> "; color: #00d4ff; }
+  .msg.ai::before { content: "< "; color: #517686; }
+  input, button { font-family: monospace; }
+  #input-row { display: flex; gap: 6px; }
+  #msg-input { flex: 1; background: #04384a; border: 1px solid #143; color: #d7f5ef; padding: 6px; }
+  #send-btn, .quick-btn { background: #04384a; border: 1px solid #143; color: #00d4ff; padding: 6px 10px; cursor: pointer; }
+  #quick-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .quick-btn { font-size: 10px; }
+</style>
+</head>
+<body>
+<h1>J.A.R.V.I.S</h1>
+<div id="status">Connecting...</div>
+<div id="chat-log"></div>
+<div id="input-row">
+  <input id="msg-input" type="text" placeholder="Ask JARVIS..." />
+  <button id="send-btn">Send</button>
+</div>
+<div id="quick-row">
+  <div class="quick-btn" id="summarize-btn">Summarize page</div>
+  <div class="quick-btn" id="analyze-btn">Analyze page</div>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

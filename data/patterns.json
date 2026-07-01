@@ -1,0 +1,24 @@
+{
+  "hourly": {
+    "13": [
+      "Afternoon Jarvis"
+    ],
+    "17": [
+      "say only the word OK"
+    ]
+  },
+  "daily": {
+    "Wednesday": [
+      "Afternoon Jarvis",
+      "say only the word OK"
+    ]
+  },
+  "sequences": [
+    "Afternoon Jarvis",
+    "say only the word OK"
+  ],
+  "topics": {
+    "jarvis": 1,
+    "afternoon": 1
+  }
+}

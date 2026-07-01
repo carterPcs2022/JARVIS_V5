@@ -1,0 +1,19 @@
+{
+  "name": "J.A.R.V.I.S V5",
+  "short_name": "JARVIS",
+  "description": "Just A Rather Very Intelligent System — Stark Industries",
+  "start_url": "/hud",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#020c14",
+  "theme_color": "#00d4ff",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "/hud/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/hud/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Desktop HUD", "url": "/hud/desktop", "description": "Full Iron Man desktop dashboard" },
+    { "name": "Mobile HUD",  "url": "/hud/mobile",  "description": "Mobile-optimized dashboard" }
+  ]
+}

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="JARVIS" />
+  <meta name="theme-color" content="#020c14" />
+  <title>J.A.R.V.I.S V5</title>
+  <link rel="stylesheet" href="/hud/static/style.css" />
+  <link rel="manifest" href="/hud/static/manifest.json" />
+</head>
+
+<body>
+  <div id="hud">
+
+    <!-- ── Header ───────────────────────────────────────────────── -->
+    <header class="hud-header">
+      <div class="logo">J.A.R.V.I.S</div>
+      <div class="version">V5.0</div>
+      <div id="status-dot" class="status-dot"></div>
+      <div id="status-text" class="status-text">CONNECTING…</div>
+      <button id="voice-btn" class="hdr-btn" title="Tap to speak">🎙</button>
+      <button id="proto-btn" class="hdr-btn" title="Protocol status" onclick="toggleProtocols()">🛡</button>
+    </header>
+
+    <!-- ── Protocol panel (collapsible) ─────────────────────────── -->
+    <div id="proto-panel" class="proto-panel hidden">
+      <div class="proto-title">STARK PROTOCOLS</div>
+      <div id="proto-list"></div>
+    </div>
+
+    <!-- ── Live metrics ─────────────────────────────────────────── -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-label">CPU</div>
+        <div class="arc-wrap">
+          <div class="arc-bg"></div>
+          <div class="arc-fill" id="arc-cpu"></div>
+          <div class="arc-value" id="val-cpu">—</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">RAM</div>
+        <div class="arc-wrap">
+          <div class="arc-bg"></div>
+          <div class="arc-fill" id="arc-ram"></div>
+          <div class="arc-value" id="val-ram">—</div>
+        </div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">DISK</div>
+        <div class="arc-wrap">
+          <div class="arc-bg"></div>
+          <div class="arc-fill" id="arc-disk"></div>
+          <div class="arc-value" id="val-disk">—</div>
+        </div>
+      </div>
+      <div class="metric-info">
+        <div class="info-row"><span class="info-key">MODEL</span><span class="info-val" id="val-model">—</span></div>
+        <div class="info-row"><span class="info-key">PROVIDER</span><span class="info-val" id="val-provider">—</span>
+        </div>
+        <div class="info-row"><span class="info-key">LATENCY</span><span class="info-val" id="val-latency">—</span>
+        </div>
+        <div class="info-row"><span class="info-key">MODE</span><span class="info-val" id="val-mode">—</span></div>
+        <div class="info-row"><span class="info-key">UPTIME</span><span class="info-val ok" id="val-uptime">—</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Chat log ─────────────────────────────────────────────── -->
+    <div id="chat-log"></div>
+
+    <!-- ── Quick commands ───────────────────────────────────────── -->
+    <div class="quick-row" id="quick-row">
+      <button class="quick-btn" onclick="quickSend('status')">Status</button>
+      <button class="quick-btn" onclick="quickSend(\" what's playing\")">🎵</button>
+      <button class="quick-btn" onclick="quickSend('check my email')">📧</button>
+      <button class="quick-btn" onclick="quickSend('take a screenshot')">📸</button>
+      <button class="quick-btn" onclick="quickSend('mute')">🔇</button>
+    </div>
+
+    <!-- ── Input ────────────────────────────────────────────────── -->
+    <div class="input-row">
+      <input id="msg-input" type="text" inputmode="text" placeholder="Command, sir…" autocomplete="off"
+        autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <button id="send-btn">▶</button>
+      <button id="voice-btn-inline" class="voice-inline">🎙</button>
+    </div>
+
+    <!-- ── Event log ────────────────────────────────────────────── -->
+    <div id="event-log">
+      <div class="event-log-label">EVENT STREAM</div>
+      <div id="event-items"></div>
+    </div>
+
+  </div>
+  <script src="/hud/static/app.js"></script>
+</body>
+
+</html>

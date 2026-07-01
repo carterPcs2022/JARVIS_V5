@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "JARVIS",
+  "version": "1.0",
+  "description": "JARVIS in every webpage — ask about the page, summarize, fact-check.",
+  "permissions": ["activeTab", "storage", "contextMenus"],
+  "host_permissions": ["http://localhost:8000/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"] }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  }
+}

@@ -1,0 +1,342 @@
+"""server/api.py — JARVIS V5 FastAPI application."""
+from fastapi import FastAPI, BackgroundTasks, Depends, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+import os
+
+from utils.security import add_cors, verify_token
+from server.websocket import router as ws_router
+from server.routes.chat        import router as chat_router
+from server.routes.telemetry   import router as telemetry_router
+from server.routes.diagnostics import router as diag_router
+from server.routes.health      import router as health_router
+from server.routes.memory      import router as memory_router
+from server.routes.voice       import router as voice_router
+from server.routes.mac         import router as mac_router
+from server.routes.protocols   import router as protocols_router
+from server.routes.scatter     import router as scatter_router
+from server.routes.search      import router as search_router
+from server.routes.mark        import router as mark_router
+from server.routes.stark_extra import router as stark_extra_router
+from server.routes.final_features import router as final_router, protected as final_protected_router
+
+app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
+add_cors(app)
+
+app.include_router(ws_router)
+app.include_router(health_router)
+app.include_router(chat_router)
+app.include_router(telemetry_router)
+app.include_router(diag_router)
+app.include_router(memory_router)
+app.include_router(voice_router)
+app.include_router(mac_router)
+app.include_router(protocols_router)
+app.include_router(scatter_router)
+app.include_router(search_router)
+app.include_router(mark_router)
+app.include_router(stark_extra_router)
+app.include_router(final_router)
+app.include_router(final_protected_router)
+
+HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
+
+
+@app.get("/hud")
+async def hud_router(request: Request):
+    """Detect device type from User-Agent and serve correct HUD.
+    Respects ?view=desktop or ?view=mobile query param."""
+    view = request.query_params.get("view", "auto")
+
+    if view == "desktop":
+        return FileResponse(HUD_DIR / "desktop.html")
+    if view == "mobile":
+        return FileResponse(HUD_DIR / "index.html")
+
+    ua = request.headers.get("user-agent", "").lower()
+    is_mobile = any(kw in ua for kw in ["iphone", "android", "mobile", "tablet", "ipad"])
+
+    return FileResponse(HUD_DIR / ("index.html" if is_mobile else "desktop.html"))
+
+
+@app.get("/hud/desktop")
+async def hud_desktop():
+    return FileResponse(HUD_DIR / "desktop.html")
+
+
+@app.get("/hud/mobile")
+async def hud_mobile_view():
+    return FileResponse(HUD_DIR / "index.html")
+
+
+@app.get("/hud/status")
+async def hud_status():
+    """Single combined endpoint both HUDs poll every few seconds."""
+    from core.tools.system import snapshot
+    from utils.diagnostics import full_diagnostic
+    from core.memory import memory_stats
+    from services.sentinel import summary as threat_summary
+    from core.event_bus import bus
+
+    try:
+        sys_snap = snapshot()
+    except Exception:
+        sys_snap = {}
+    try:
+        diag = full_diagnostic()
+    except Exception:
+        diag = {}
+    try:
+        mem = memory_stats()
+    except Exception:
+        mem = {}
+    try:
+        threat_sum = threat_summary()
+    except Exception:
+        threat_sum = {}
+    try:
+        recent_alerts = bus.get_pending()
+    except Exception:
+        recent_alerts = []
+    try:
+        from services.mark_system import mark_system
+        mark = mark_system.current_mark()
+    except Exception:
+        mark = {}
+    try:
+        from services.automation import check_friday_alive
+        friday_online = check_friday_alive()
+    except Exception:
+        friday_online = False
+
+    return {
+        "system": {
+            "cpu":          sys_snap.get("cpu_percent", 0),
+            "ram":          sys_snap.get("ram_used_pct", 0),
+            "disk":         sys_snap.get("disk_used_pct", 0),
+            "uptime_hours": sys_snap.get("uptime_hours", 0),
+        },
+        "brain": {
+            "status":   diag.get("brain", "UNKNOWN"),
+            "model":    diag.get("active_model", "—"),
+            "groq":     diag.get("groq_available", False),
+            "ollama":   diag.get("ollama_available", False),
+            "warnings": diag.get("warnings", []),
+        },
+        "memory": mem,
+        "security": {
+            "threats_24h":  threat_sum.get("last_24h", 0),
+            "by_severity":  threat_sum.get("by_severity", {}),
+            "baseline_set": threat_sum.get("baseline_set", False),
+        },
+        "mark":          mark,
+        "friday_online": friday_online,
+        "alerts":        recent_alerts[:10],
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+    }
+
+
+# Static assets (CSS/JS/icons) still served from hud_mobile/
+app.mount("/hud/static", StaticFiles(directory=str(HUD_DIR)), name="hud_static")
+
+
+@app.on_event("startup")
+async def startup():
+    import asyncio
+    from core.state import state
+    from services.sentinel import start as sentinel_start
+    from core.event_bus import bus
+    from core.llm.router import check_groq, check_ollama
+    from config.settings import IS_RAILWAY, ENVIRONMENT
+
+    state.set("environment", ENVIRONMENT)
+    print(f"[JARVIS] Environment: {ENVIRONMENT}")
+
+    # ── Protocol 11: Integrity Check — FIRST ─────────────────────────────────
+    from core.protocols import (
+        integrity_check_startup, register_dead_mans_switch,
+        start_endgame_loop, start_yinsen_watch
+    )
+    integrity_result = integrity_check_startup()
+    if integrity_result.get("modified"):
+        print(f"[P11 INTEGRITY] ⚠ Modified files: {integrity_result['modified']}")
+
+    # ── Protocol 2: Dead Man's Switch ────────────────────────────────────────
+    register_dead_mans_switch()
+
+    base_dir = str(Path(__file__).parent.parent)
+    sentinel_start(base_dir)  # loads a saved baseline from disk if one exists, else builds fresh
+
+    # ── Protocol 16: Endgame — hourly snapshot thread ─────────────────────────
+    start_endgame_loop()
+
+    # ── Protocol 9: Yinsen — idle check-in thread ────────────────────────────
+    start_yinsen_watch(hours=24)
+
+    # ── LLM probe in background ───────────────────────────────────────────────
+    async def _probe():
+        loop = asyncio.get_event_loop()
+        groq_ok   = await loop.run_in_executor(None, check_groq)
+        ollama_ok = await loop.run_in_executor(None, check_ollama)
+        state.update({
+            "groq_available":   groq_ok,
+            "ollama_available": ollama_ok,
+            "active_model":     ("groq" if groq_ok else "ollama" if ollama_ok else "none"),
+        })
+        if groq_ok:
+            bus.system("Groq LLM: online")
+            print("[JARVIS] Groq: ✓")
+        if ollama_ok:
+            bus.system("Ollama: online")
+            print("[JARVIS] Ollama: ✓")
+        if not groq_ok and not ollama_ok:
+            state.set("status", "degraded")
+            bus.alert("No LLM providers — Friday Protocol active.", "critical")
+            print("[JARVIS] ⚠ Friday Protocol engaged")
+
+    asyncio.create_task(_probe())
+
+    # ── Background scheduler (email alerts, system checks) ───────────────────
+    from services.scheduler import start as scheduler_start
+    scheduler_start()
+
+    # ── Messaging integrations (Telegram/Discord, if configured) ─────────────
+    try:
+        from services.messaging import start_all_background
+        start_all_background()
+    except Exception as e:
+        print(f"[JARVIS] Messaging integrations skipped: {e}")
+
+    # ── Ping FRIDAY on startup ────────────────────────────────────────────────
+    async def _ping_friday():
+        try:
+            from services.automation import check_friday_alive
+            ok = await loop.run_in_executor(None, check_friday_alive)
+            status = "online" if ok else "offline"
+            state.set("friday_online", ok)
+            bus.system(f"FRIDAY: {status}")
+            print(f"[JARVIS] FRIDAY: {'✓' if ok else '✗ (offline)'}")
+        except Exception:
+            pass
+    asyncio.create_task(_ping_friday())
+
+    state.set("status", "online")
+    bus.system("JARVIS V5 online. All systems nominal.")
+    print("\n╔══════════════════════════════════════╗")
+    print("║       J.A.R.V.I.S  V5.0  ONLINE     ║")
+    print("╚══════════════════════════════════════╝\n")
+
+    # ── Clear, actionable startup summary ─────────────────────────────────────
+    # Uses the cached health-check results from _probe() above when available
+    # (avoids a second live Groq call at startup); check_groq/check_ollama are
+    # cheap, synchronous, and cached for 30s, so a direct call is fine here.
+    _loop = asyncio.get_event_loop()
+    groq_ok = await _loop.run_in_executor(None, check_groq)
+    ollama_ok = await _loop.run_in_executor(None, check_ollama)
+    print("=" * 50)
+    print("JARVIS V5 STARTUP COMPLETE")
+    print("=" * 50)
+    print(f"  Groq:    {'✓ ONLINE' if groq_ok else '✗ OFFLINE'}")
+    print(f"  Ollama:  {'✓ ONLINE' if ollama_ok else '✗ OFFLINE (optional)'}")
+    print(f"  Port:    {os.environ.get('JARVIS_PORT', 8000)}")
+    print(f"  HUD:     http://localhost:8000/hud")
+    print(f"  Chat:    http://localhost:8000/stark/chat/simple")
+    print(f"  Docs:    http://localhost:8000/docs")
+    print("=" * 50 + "\n")
+
+
+@app.post("/stark/chat/simple")
+async def chat_simple(body: dict, request: Request):
+    """No-auth chat endpoint for local testing only. Self-restricted to
+    loopback requests regardless of JARVIS_API_TOKEN/DEV_MODE settings —
+    safe to leave in even outside dev mode since it can never be reached
+    from outside the machine it's running on."""
+    if request.client.host not in ("127.0.0.1", "localhost", "::1"):
+        raise HTTPException(403, "Local only")
+    from core.brain_v2 import brain
+    msg = body.get("message", "")
+    if not msg:
+        return {"error": "No message"}
+    return brain.process_dict(msg)
+
+
+# Extra routes that need BackgroundTasks or are too small for their own file
+@app.post("/stark/task", dependencies=[Depends(verify_token)])
+def run_task(body: dict, bg: BackgroundTasks):
+    from core.agents.planner_agent import run
+    task = body.get("task", "")
+    if body.get("async", False):
+        bg.add_task(run, task)
+        return {"status": "queued", "task": task}
+    return run(task)
+
+@app.post("/stark/task/parallel", dependencies=[Depends(verify_token)])
+def parallel_task(body: dict):
+    from core.agents.planner_agent import run_parallel
+    return run_parallel(body.get("task", ""), body.get("agents", 3))
+
+@app.get("/stark/threats", dependencies=[Depends(verify_token)])
+def threats():
+    from services.sentinel import summary
+    return summary()
+
+@app.get("/stark/threats/log", dependencies=[Depends(verify_token)])
+def threat_log():
+    from services.sentinel import threats
+    return threats(24)
+
+@app.post("/stark/baseline", dependencies=[Depends(verify_token)])
+def rebuild_baseline():
+    """Rebuild BOTH integrity baselines after intentional code changes:
+    services/sentinel.py's file-tamper baseline (persisted to memory/baseline.json)
+    AND Protocol 11's separate startup integrity check (core/protocols.py,
+    persisted to config/integrity_baseline.json). Call this once after you're
+    done editing so neither system flags your own changes as tampering on the
+    next restart."""
+    from services.sentinel import build_baseline
+    from core.protocols import integrity_update_baseline
+    base_dir = str(Path(__file__).parent.parent)
+    sentinel_result = build_baseline(base_dir)
+    integrity_update_baseline()
+    return {"sentinel_baseline": sentinel_result, "protocol_11_baseline": "updated"}
+
+@app.get("/stark/alerts", dependencies=[Depends(verify_token)])
+def alerts():
+    from core.event_bus import bus
+    return bus.get_pending()
+
+@app.get("/stark/friday", dependencies=[Depends(verify_token)])
+def friday_status():
+    from services.automation import check_friday_alive
+    from core.state import state
+    friday_url = os.environ.get("FRIDAY_URL", "http://localhost:8080")
+    online     = check_friday_alive()
+    state.set("friday_online", online)
+    return {"friday_url": friday_url, "friday_online": online}
+# (ElevenLabs voice endpoints live in server/routes/voice.py, prefix /stark/voice)
+
+@app.get("/stark/evolution", dependencies=[Depends(verify_token)])
+def evolution():
+    from core import evolution as evo
+    return evo.report()
+
+@app.post("/stark/backup", dependencies=[Depends(verify_token)])
+def backup():
+    from services.backup import backup_all
+    return backup_all()
+
+@app.get("/stark/briefing", dependencies=[Depends(verify_token)])
+def briefing():
+    from services.automation import morning_briefing
+    return {"briefing": morning_briefing()}
+
+@app.post("/stark/code/generate", dependencies=[Depends(verify_token)])
+def code_gen(body: dict):
+    from core.agents.coder import generate
+    return generate(body.get("description",""), body.get("language","python"))
+
+@app.post("/stark/research", dependencies=[Depends(verify_token)])
+def research(body: dict):
+    from core.agents.researcher import research as do_research
+    return do_research(body.get("topic",""), body.get("depth",3))

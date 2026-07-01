@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#020c14" />
+<link rel="manifest" href="/hud/static/manifest.json" />
+<title>J.A.R.V.I.S V5 — Desktop HUD</title>
+<style>
+  :root {
+    --bg: #020c14; --panel: #061620; --line: rgba(0,212,255,.16);
+    --core: #00d4ff; --core-dim: #04384a; --text: #d6f3ff; --dim: #517686;
+    --warn: #ffb454; --danger: #ff5470; --ok: #4caf50; --amber: #ff9800;
+    --mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden; background: var(--bg);
+    color: var(--text); font-family: var(--mono);
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0,212,255,.03) 0, rgba(0,212,255,.03) 1px, transparent 1px, transparent 3px);
+  }
+  .grid {
+    display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: 70px 1fr 60px;
+    height: 100vh; gap: 10px; padding: 10px;
+  }
+  header.top { grid-column: 1/4; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+  .arc-reactor { width: 44px; height: 44px; border-radius: 50%; position: relative;
+    background: radial-gradient(circle, var(--core) 0%, var(--core-dim) 70%);
+    box-shadow: 0 0 20px var(--core); animation: pulse-reactor 2.4s ease-in-out infinite; }
+  @keyframes pulse-reactor { 0%,100%{box-shadow:0 0 14px var(--core);} 50%{box-shadow:0 0 28px var(--core);} }
+  .wordmark { display: flex; align-items: center; gap: 14px; }
+  .wordmark .title { font-size: 22px; font-weight: 700; letter-spacing: .3em; color: var(--core); }
+  .wordmark .mark { font-size: 11px; color: var(--dim); letter-spacing: .12em; }
+  .top-right { display: flex; align-items: center; gap: 22px; font-size: 12px; color: var(--dim); }
+  .status-pill { display: flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: .1em; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  .dot.danger { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: blink .7s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .col { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
+  .col::-webkit-scrollbar { width: 4px; }
+  .col::-webkit-scrollbar-thumb { background: var(--core-dim); }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  .panel h2 { margin: 0 0 12px; font-size: 10px; letter-spacing: .16em; color: var(--dim);
+    text-transform: uppercase; font-weight: 600; }
+
+  .diag-row { margin-bottom: 12px; }
+  .diag-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; }
+  .diag-label b { color: var(--text); }
+  .bar-track { height: 6px; background: var(--core-dim); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; background: var(--core); transition: width .4s; }
+  .bar-fill.warn { background: var(--warn); }
+  .bar-fill.danger { background: var(--danger); }
+
+  .threat-count { font-size: 26px; font-weight: 700; color: var(--core); }
+  .threat-count.warn { color: var(--warn); }
+  .threat-count.danger { color: var(--danger); }
+
+  /* Center — chat */
+  .chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .chat-toolbar { display: flex; gap: 10px; margin-bottom: 10px; font-size: 10px; }
+  .toggle { padding: 4px 10px; border: 1px solid var(--line); border-radius: 3px; color: var(--dim);
+    cursor: pointer; letter-spacing: .08em; user-select: none; }
+  .toggle.active { color: var(--core); border-color: var(--core); box-shadow: 0 0 6px rgba(0,212,255,.3); }
+
+  #chat-log { flex: 1; overflow-y: auto; padding-right: 4px; }
+  .msg { margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+  .msg.user { color: var(--text); }
+  .msg.user::before { content: "YOU  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
+  .msg.ai { color: var(--core); }
+  .msg.ai::before { content: "JARVIS  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
+  .msg .body { white-space: pre-wrap; }
+  .typing { color: var(--dim); font-size: 12px; font-style: italic; }
+
+  .chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
+  #msg-input { flex: 1; background: var(--core-dim); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--text); padding: 10px 12px; font-family: var(--mono); font-size: 13px; }
+  #msg-input:focus { outline: none; border-color: var(--core); }
+  .icon-btn { background: var(--core-dim); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--core); padding: 0 14px; cursor: pointer; font-family: var(--mono); font-size: 13px; }
+  .icon-btn:hover { border-color: var(--core); }
+  .icon-btn.rec { color: var(--danger); border-color: var(--danger); }
+
+  /* Right — alerts + goals */
+  .alert-item { font-size: 11px; padding: 8px 0; border-top: 1px solid var(--line); color: var(--dim); }
+  .alert-item:first-child { border-top: none; }
+  .alert-item.warning { color: var(--warn); }
+  .alert-item.critical { color: var(--danger); }
+  .empty { color: var(--dim); font-size: 11px; padding: 12px 0; text-align: center; }
+
+  .goal-item { padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px; }
+  .goal-item:first-child { border-top: none; }
+  .goal-title { color: var(--text); margin-bottom: 4px; }
+
+  /* Bottom bar */
+  footer.bottom { grid-column: 1/4; display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--line); padding-top: 8px; font-size: 11px; color: var(--dim); }
+  .scenes { display: flex; gap: 8px; }
+  .scene-btn { padding: 4px 12px; border: 1px solid var(--line); border-radius: 3px; cursor: pointer;
+    color: var(--dim); letter-spacing: .05em; }
+  .scene-btn:hover { color: var(--core); border-color: var(--core); }
+  .footer-status { display: flex; gap: 18px; align-items: center; }
+  .sys-tag { display: flex; align-items: center; gap: 6px; }
+
+  @media (max-width: 1100px) {
+    .grid { grid-template-columns: 1fr; grid-template-rows: 70px auto auto auto 60px; }
+    .chat-panel { min-height: 400px; }
+  }
+</style>
+</head>
+<body>
+<div class="grid">
+
+  <header class="top">
+    <div class="wordmark">
+      <div class="arc-reactor"></div>
+      <div>
+        <div class="title">J.A.R.V.I.S</div>
+        <div class="mark" id="mark-line">MARK — · loading</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <div class="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">CONNECTING</span></div>
+      <div id="brain-line">MODEL: —</div>
+      <div id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- LEFT COLUMN -->
+  <div class="col">
+    <section class="panel">
+      <h2>Suit Diagnostics</h2>
+      <div class="diag-row">
+        <div class="diag-label"><span>REPULSORS (CPU)</span><b id="cpu-val">0%</b></div>
+        <div class="bar-track"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+      </div>
+      <div class="diag-row">
+        <div class="diag-label"><span>STRUCTURAL (RAM)</span><b id="ram-val">0%</b></div>
+        <div class="bar-track"><div class="bar-fill" id="ram-bar" style="width:0%"></div></div>
+      </div>
+      <div class="diag-row">
+        <div class="diag-label"><span>STORAGE (DISK)</span><b id="disk-val">0%</b></div>
+        <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+      </div>
+      <div class="diag-row" style="margin-bottom:0">
+        <div class="diag-label"><span>UPTIME</span><b id="uptime-val">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Sentinel Security</h2>
+      <div class="threat-count" id="threat-count">0</div>
+      <div style="font-size:11px;color:var(--dim);margin-top:4px">threats detected — last 24h</div>
+    </section>
+
+    <section class="panel">
+      <h2>Network Map</h2>
+      <div style="font-size:12px;line-height:1.8">
+        <div>Known devices: <b id="net-known" style="color:var(--text)">—</b></div>
+        <div>Unknown devices: <b id="net-unknown" style="color:var(--text)">—</b></div>
+        <div>Internet latency: <b id="net-latency" style="color:var(--text)">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Workshop</h2>
+      <div id="workshop-list"><div class="empty">No active projects.</div></div>
+    </section>
+  </div>
+
+  <!-- CENTER COLUMN -->
+  <div class="col chat-panel">
+    <section class="panel" style="flex:1;display:flex;flex-direction:column;min-height:0">
+      <div class="chat-toolbar">
+        <div class="toggle" id="toggle-cot">CHAIN OF THOUGHT</div>
+        <div class="toggle" id="toggle-reflect">REFLECTION</div>
+        <div class="toggle" id="toggle-voice">VOICE INPUT</div>
+      </div>
+      <div id="chat-log"></div>
+      <div class="chat-input-row">
+        <input id="msg-input" type="text" placeholder="Speak, sir." autocomplete="off" />
+        <button class="icon-btn" id="mic-btn">🎙</button>
+        <button class="icon-btn" id="send-btn">SEND</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- RIGHT COLUMN -->
+  <div class="col">
+    <section class="panel">
+      <h2>Voice Engine</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:13px;color:var(--core);font-weight:700" id="voice-engine-name">—</span>
+        <div class="toggle" id="toggle-mute" style="margin:0">MUTE</div>
+      </div>
+      <div class="diag-label"><span>CHARACTERS TODAY</span><b id="voice-chars-val">—</b></div>
+      <div class="bar-track"><div class="bar-fill" id="voice-chars-bar" style="width:0%"></div></div>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <div class="toggle" data-engine="elevenlabs">ELEVENLABS</div>
+        <div class="toggle" data-engine="edge">EDGE</div>
+        <div class="toggle" data-engine="pyttsx3">OFFLINE</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Live Alerts</h2>
+      <div id="alert-list"><div class="empty">No alerts.</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Consciousness Feed</h2>
+      <div id="consciousness-feed" style="font-size:12px;color:var(--dim);line-height:1.5">Awaiting reflection...</div>
+    </section>
+
+    <section class="panel">
+      <h2>Mission Objectives</h2>
+      <div id="goals-list"><div class="empty">No active goals.</div></div>
+    </section>
+  </div>
+
+  <footer class="bottom">
+    <div class="scenes">
+      <div class="scene-btn" data-scene="morning">MORNING</div>
+      <div class="scene-btn" data-scene="movie">MOVIE</div>
+      <div class="scene-btn" data-scene="night">NIGHT</div>
+      <div class="scene-btn" data-scene="away">AWAY</div>
+    </div>
+    <div class="footer-status">
+      <div class="sys-tag"><span class="dot" id="jarvis-dot"></span>JARVIS</div>
+      <div class="sys-tag"><span class="dot" id="friday-dot"></span>FRIDAY</div>
+      <div class="sys-tag">🔊 <span id="footer-voice-engine">—</span></div>
+      <div id="home-status">Lights: — · Lock: —</div>
+    </div>
+  </footer>
+</div>
+
+<script>
+const HOST   = location.hostname;
+const API    = `${location.protocol}//${HOST}:8000`;
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${HOST}:8000/ws/chat`;
+
+// Dev mode: skip the token prompt entirely on localhost — matches
+// DEV_MODE=true on the server, which bypasses auth for local requests.
+const DEV_MODE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+function getToken() { return localStorage.getItem('jarvis_token') || ''; }
+
+function ensureToken() {
+  // Accept a token via ?token=... query param for easy one-time setup, e.g.
+  // when opening the HUD on a phone from a link.
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get('token');
+  if (urlToken) {
+    localStorage.setItem('jarvis_token', urlToken);
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+
+  if (!getToken() && !DEV_MODE) {
+    const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
+    if (t) localStorage.setItem('jarvis_token', t);
+  }
+}
+
+function authHeaders() {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+async function jarvisGet(path) {
+  const r = await fetch(`${API}${path}`, { headers: authHeaders() });
+  return r.json();
+}
+async function jarvisPost(path, body = {}) {
+  const r = await fetch(`${API}${path}`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+  return r.json();
+}
+
+ensureToken();
+
+// ── Chat ───────────────────────────────────────────────────────────────────
+const chatLog = document.getElementById('chat-log');
+const input   = document.getElementById('msg-input');
+let ws, streamBubble = null;
+
+function appendMsg(role, text) {
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const body = document.createElement('div');
+  body.className = 'body';
+  body.textContent = text;
+  div.appendChild(body);
+  chatLog.appendChild(div);
+  chatLog.scrollTop = chatLog.scrollHeight;
+  return body;
+}
+
+function connectWs() {
+  try {
+    ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(getToken())}`);
+    ws.onopen = () => setStatus('online');
+    ws.onclose = () => { setStatus('offline'); setTimeout(connectWs, 3000); };
+    ws.onerror = () => setStatus('degraded');
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.type === 'stream_start') {
+          streamBubble = appendMsg('ai', '');
+        } else if (data.type === 'token') {
+          if (!streamBubble) streamBubble = appendMsg('ai', '');
+          streamBubble.textContent += data.token;
+          chatLog.scrollTop = chatLog.scrollHeight;
+        } else if (data.type === 'stream_end') {
+          if (streamBubble) streamBubble.textContent = data.response ?? streamBubble.textContent;
+          streamBubble = null;
+          playLatestVoice();
+        } else if (data.type === 'response') {
+          appendMsg('ai', data.response || '(no response)');
+          streamBubble = null;
+          playLatestVoice();
+        } else if (data.type === 'error') {
+          appendMsg('ai', `Error: ${data.message}`);
+          streamBubble = null;
+        } else if (data.type === 'event') {
+          pushAlert({ mode: data.severity || 'info', ts: new Date().toLocaleTimeString(), message: data.message });
+        }
+      } catch (err) {}
+    };
+  } catch (e) { setStatus('offline'); }
+}
+
+function sendMessage() {
+  const text = input.value.trim();
+  if (!text) return;
+  appendMsg('user', text);
+  input.value = '';
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ message: text }));
+  } else {
+    jarvisPost('/stark/chat', { message: text }).then(r => appendMsg('ai', r.response || '(no response)'));
+  }
+}
+
+document.getElementById('send-btn').addEventListener('click', sendMessage);
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+// Toggles
+['toggle-cot', 'toggle-reflect', 'toggle-voice'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function () {
+    this.classList.toggle('active');
+  });
+});
+
+// Voice input via Web Speech API
+const micBtn = document.getElementById('mic-btn');
+let recognition = null;
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.onresult = (e) => {
+    input.value = e.results[0][0].transcript;
+    sendMessage();
+  };
+  recognition.onend = () => micBtn.classList.remove('rec');
+  micBtn.addEventListener('click', () => {
+    micBtn.classList.add('rec');
+    recognition.start();
+  });
+} else {
+  micBtn.disabled = true;
+  micBtn.title = 'Speech recognition not supported in this browser';
+}
+
+// ── Status ───────────────────────────────────────────────────────────────────
+function setStatus(s) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-text');
+  const map = { online: ['', 'SYSTEMS ONLINE'], offline: ['danger', 'OFFLINE'], degraded: ['warn', 'DEGRADED'] };
+  const [cls, label] = map[s] || ['warn', s.toUpperCase()];
+  dot.className = 'dot' + (cls ? ' ' + cls : '');
+  txt.textContent = label;
+}
+
+function setBar(barId, valId, pct) {
+  pct = Math.round(pct || 0);
+  const bar = document.getElementById(barId);
+  bar.style.width = pct + '%';
+  bar.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
+  document.getElementById(valId).textContent = pct + '%';
+}
+
+function pushAlert(a) {
+  const list = document.getElementById('alert-list');
+  if (list.querySelector('.empty')) list.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'alert-item ' + (a.mode || a.severity || 'info');
+  div.textContent = `[${a.ts || ''}] ${a.message || a.text || ''}`;
+  list.prepend(div);
+  while (list.children.length > 20) list.lastChild.remove();
+}
+
+function formatUptime(hours) {
+  if (!hours) return '0h';
+  const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+  return `${h}h ${m}m`;
+}
+
+async function pollAll() {
+  try {
+    const d = await jarvisGet('/hud/status');
+
+    setBar('cpu-bar', 'cpu-val', d.system.cpu);
+    setBar('ram-bar', 'ram-val', d.system.ram);
+    setBar('disk-bar', 'disk-val', d.system.disk);
+    document.getElementById('uptime-val').textContent = formatUptime(d.system.uptime_hours);
+
+    document.getElementById('brain-line').textContent = `MODEL: ${(d.brain.model || '—').toUpperCase()}`;
+
+    const mem = d.memory || {};
+    const threatEl = document.getElementById('threat-count');
+    threatEl.textContent = d.security.threats_24h;
+    threatEl.className = 'threat-count' + (d.security.threats_24h > 5 ? ' danger' : d.security.threats_24h > 0 ? ' warn' : '');
+
+    if (d.mark && d.mark.mark) {
+      document.getElementById('mark-line').textContent =
+        `MARK ${d.mark.mark} — ${(d.mark.capabilities || []).length} capabilities online`;
+    }
+
+    document.getElementById('jarvis-dot').className = 'dot';
+    document.getElementById('friday-dot').className = 'dot' + (d.friday_online ? '' : ' warn');
+
+    if (d.alerts && d.alerts.length) {
+      document.getElementById('alert-list').innerHTML = '';
+      d.alerts.forEach(pushAlert);
+    }
+
+    const hasWarnings = (d.brain.warnings || []).length > 0;
+    setStatus(hasWarnings ? 'degraded' : 'online');
+  } catch (e) {
+    setStatus('offline');
+  }
+}
+
+async function fetchNetwork() {
+  try {
+    const d = await jarvisGet('/stark/network');
+    const devices = d.devices || [];
+    const known   = devices.filter(dev => dev.trusted).length;
+    const unknown = devices.filter(dev => !dev.trusted).length;
+    document.getElementById('net-known').textContent = known;
+    document.getElementById('net-unknown').textContent = unknown;
+  } catch (e) {}
+  try {
+    const h = await jarvisGet('/stark/network/internet');
+    document.getElementById('net-latency').textContent = h.latency_ms ? `${h.latency_ms}ms` : '—';
+  } catch (e) {}
+}
+
+async function fetchWorkshop() {
+  try {
+    const projects = await jarvisGet('/stark/workshop');
+    const list = document.getElementById('workshop-list');
+    if (!Array.isArray(projects) || !projects.length) { list.innerHTML = '<div class="empty">No active projects.</div>'; return; }
+    list.innerHTML = '';
+    projects.slice(0, 5).forEach(p => {
+      const div = document.createElement('div');
+      div.className = 'goal-item';
+      div.innerHTML = `<div class="goal-title">${p.name || 'Untitled'}</div><div style="color:var(--dim);font-size:11px">${p.status || ''}</div>`;
+      list.appendChild(div);
+    });
+  } catch (e) {}
+}
+
+async function fetchConsciousness() {
+  try {
+    const d = await jarvisGet('/stark/consciousness/today');
+    document.getElementById('consciousness-feed').textContent = d.reflection || 'No reflection yet today.';
+  } catch (e) {}
+}
+
+async function fetchGoals() {
+  try {
+    const d = await jarvisGet('/stark/tasks/today');
+    const list = document.getElementById('goals-list');
+    if (!d.priorities) { list.innerHTML = '<div class="empty">No active goals.</div>'; return; }
+    list.innerHTML = `<div class="goal-item"><div class="goal-title">${d.priorities}</div></div>`;
+  } catch (e) {}
+}
+
+// Scenes
+document.querySelectorAll('.scene-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const scene = btn.dataset.scene;
+    jarvisPost('/stark/mac/scene', { scene }).catch(() => {});
+    pushAlert({ mode: 'info', ts: new Date().toLocaleTimeString(), message: `Scene activated: ${scene}` });
+  });
+});
+
+// ── Voice engine (ElevenLabs cascade) ─────────────────────────────────────────
+let voiceMuted = localStorage.getItem('jarvis_voice_muted') === 'true';
+const muteToggle = document.getElementById('toggle-mute');
+if (voiceMuted) muteToggle.classList.add('active');
+muteToggle.addEventListener('click', () => {
+  voiceMuted = !voiceMuted;
+  localStorage.setItem('jarvis_voice_muted', voiceMuted);
+  muteToggle.classList.toggle('active', voiceMuted);
+});
+
+document.querySelectorAll('[data-engine]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-engine]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    jarvisPost('/stark/voice/engine', { engine: btn.dataset.engine }).catch(() => {});
+  });
+});
+
+let lastVoicePlay = 0;
+function playLatestVoice() {
+  if (voiceMuted) return;
+  const now = Date.now();
+  if (now - lastVoicePlay < 1000) return;  // debounce rapid stream_end/response
+  lastVoicePlay = now;
+  setTimeout(() => {
+    const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
+    audio.play().catch(() => {
+      // Autoplay blocked until user interacts with the page — safe to ignore.
+    });
+  }, 400); // small delay so the audio file has time to finish generating server-side
+}
+
+async function fetchVoiceStatus() {
+  try {
+    const s = await jarvisGet('/stark/voice/status');
+    document.getElementById('voice-engine-name').textContent = (s.active_engine || 'none').toUpperCase();
+    document.getElementById('footer-voice-engine').textContent = (s.active_engine || 'none').toUpperCase();
+  } catch (e) {}
+  try {
+    const u = await jarvisGet('/stark/voice/usage');
+    const budget = u.daily_budget || {};
+    const pct = budget.pct_used ?? 0;
+    document.getElementById('voice-chars-val').textContent = `${budget.chars_used ?? 0} / ${budget.chars_limit ?? '—'}`;
+    const bar = document.getElementById('voice-chars-bar');
+    bar.style.width = Math.min(100, pct) + '%';
+    bar.className = 'bar-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+  } catch (e) {}
+}
+
+function tickClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+}
+
+tickClock(); setInterval(tickClock, 1000);
+connectWs();
+// Main vitals poll (CPU/RAM/disk/brain/alerts) — 10s is plenty and halves the
+// request volume vs. the original 5s, easing pressure on Groq health checks.
+pollAll(); setInterval(pollAll, 10000);
+// Slow-changing panels (network scan, workshop, consciousness, goals, voice
+// budget) — these don't need to feel "live", so poll every 60s instead of 20s.
+fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus();
+setInterval(() => { fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus(); }, 60000);
+
+console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
+</script>
+</body>
+</html>

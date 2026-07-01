@@ -1,0 +1,14 @@
+.env
+__pycache__/
+*.pyc
+venv/
+.venv/
+memory/*.json
+logs/*.json
+backups/
+*.mp3
+*.wav
+jarvis_*.json
+budget.json
+.DS_Store
+build.log
