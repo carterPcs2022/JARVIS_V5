@@ -27,7 +27,6 @@ pypdf>=4.0.0
 python-docx>=1.1.0
 
 # Audio
-pygame>=2.5.0
 numpy>=1.26.0
 edge-tts>=6.1.0
 elevenlabs>=1.5.0
