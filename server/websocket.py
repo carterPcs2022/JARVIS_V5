@@ -9,6 +9,24 @@ router = APIRouter()
 _clients: dict = {}
 
 
+def _boot_greeting() -> str:
+    """JARVIS introduces himself on a brand-new install, or gives a
+    time-of-day acknowledgment on every connection after that."""
+    try:
+        from core.memory import get_short_term
+        first_time = len(get_short_term(1)) == 0
+    except Exception:
+        first_time = False
+
+    if first_time:
+        return "J.A.R.V.I.S. online. All systems nominal. I'm ready when you are, sir."
+
+    from datetime import datetime
+    hour = datetime.now().hour
+    time_of_day = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
+    return f"Good {time_of_day}. Systems online."
+
+
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket):
     await websocket.accept()
@@ -16,7 +34,7 @@ async def ws_chat(websocket: WebSocket):
     q: asyncio.Queue = asyncio.Queue(maxsize=50)
     _clients[cid] = q
     bus.subscribe_async_queue(q)
-    await websocket.send_json({"type": "system", "message": "JARVIS V5 online. All systems nominal."})
+    await websocket.send_json({"type": "system", "message": _boot_greeting()})
 
     async def _pump():
         while True:
@@ -45,7 +63,7 @@ async def ws_chat(websocket: WebSocket):
                 await websocket.send_json({"type": "response", **result})
 
     except WebSocketDisconnect:
-        pass
+        print(f"[JARVIS] Client disconnected — going quiet ({cid}).")
     except Exception as e:
         await websocket.send_json({"type": "error", "message": str(e)})
     finally:

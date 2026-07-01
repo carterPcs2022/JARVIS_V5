@@ -451,6 +451,23 @@ class Brain:
         except Exception:
             pass
 
+        # Note if this is essentially a repeated question — JARVIS uses
+        # judgment on whether to mention that ("You asked me this before")
+        # or just answer directly; we only give him the fact, not the phrasing.
+        try:
+            from core.memory import check_if_repeated
+            repeat = check_if_repeated(user_input)
+            if repeat and repeat.get("days_ago") is not None:
+                note = (
+                    f"[The user asked something very similar to this {repeat['days_ago']} "
+                    f"day(s) ago. Your previous answer was: \"{repeat['ai'][:300]}\". "
+                    f"Use your judgment — mention it briefly if useful, or just answer "
+                    f"directly if repeating yourself would be tedious.]"
+                )
+                intent.context = note + "\n\n" + intent.context
+        except Exception:
+            pass
+
         validation = self.validator.check(intent)
 
         if not validation.ok:

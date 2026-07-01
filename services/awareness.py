@@ -95,21 +95,70 @@ class SituationalAwareness:
         return narration
 
     def _fallback_narration(self, event_type: str, data: dict) -> str:
-        templates = {
-            "high_cpu":      "Sir, CPU utilisation has exceeded 85% for over two minutes. "
-                             f"Current load: {data.get('cpu_pct', '?')}%. "
-                             "I recommend identifying and terminating the offending process.",
-            "high_ram":      "Sir, memory pressure is critical at "
-                             f"{data.get('ram_pct', '?')}% utilisation. "
-                             "Consider closing applications or increasing swap.",
-            "high_disk":     f"Sir, disk usage on the primary volume has reached {data.get('disk_pct', '?')}%. "
-                             "Archival or cleanup is advised.",
-            "calendar_event": f"Sir, you have '{data.get('title', 'an event')}' starting in "
-                              f"{data.get('minutes_away', '?')} minutes.",
-            "goal_deadline":  f"Sir, the deadline for '{data.get('goal', 'a goal')}' is approaching: "
-                              f"{data.get('deadline', 'soon')}.",
+        """Rotates between multiple phrasings per event type so JARVIS doesn't
+        sound repetitive when the LLM is unavailable and this fallback carries
+        the narration load."""
+        import random
+
+        templates: dict[str, list[str]] = {
+            "high_cpu": [
+                "CPU has been above {cpu_pct}% for a couple of minutes now. "
+                "Worth identifying what's driving it.",
+                "Something is working your processor hard — {cpu_pct}% and climbing. "
+                "I'd recommend a look.",
+            ],
+            "high_ram": [
+                "Memory pressure is critical — {ram_pct}% utilization. "
+                "Closing a few applications would help.",
+                "RAM is at {ram_pct}%. Might be worth freeing some up before it slows things down.",
+            ],
+            "high_disk": [
+                "Disk usage has reached {disk_pct}%. You'll want to address that "
+                "before it becomes a problem.",
+                "{disk_pct}% disk usage. I can find the largest files if that would help.",
+            ],
+            "calendar_event": [
+                "You have '{title}' in {minutes_away} minutes.",
+                "'{title}' starts in {minutes_away} minutes.",
+            ],
+            "goal_deadline": [
+                "The deadline for '{goal}' is approaching: {deadline}.",
+                "Worth noting — '{goal}' is due {deadline}.",
+            ],
+            "new_device": [
+                "Unknown device joined your network — IP {ip}, manufacturer reads as {vendor}. "
+                "Shall I investigate?",
+                "There's a new face on the network. {ip} — {vendor} hardware. Not in my records.",
+            ],
+            "no_interaction": [
+                "You've been quiet for {hours} hours. Everything alright?",
+            ],
+            "goal_stalled": [
+                "The {goal} goal hasn't moved in {days} days.",
+                "Worth noting — {goal} has been stalled for {days} days now.",
+            ],
+            "groq_restored": [
+                "Primary systems back online.",
+            ],
+            "groq_down": [
+                "Groq is unreachable. Switching to local systems. Some capabilities will be limited.",
+            ],
         }
-        return templates.get(event_type, f"Sir, awareness event: {event_type}. Data: {data}")
+
+        options = templates.get(event_type)
+        if not options:
+            return f"Sir, awareness event: {event_type}. Data: {data}"
+
+        template = random.choice(options)
+        try:
+            return "Sir, " + template.format(**data)
+        except KeyError:
+            # Data didn't have every placeholder this variant needed — fall
+            # back to the first template, which is the most conservative.
+            try:
+                return "Sir, " + options[0].format(**data)
+            except KeyError:
+                return f"Sir, awareness event: {event_type}. Data: {data}"
 
     # ── Awareness loop ────────────────────────────────────────────────────────
 

@@ -245,6 +245,23 @@ async def startup():
     print(f"  Docs:    http://localhost:8000/docs")
     print("=" * 50 + "\n")
 
+    # ── Mark announcement ──────────────────────────────────────────────────────
+    try:
+        from services.mark_system import mark_system
+        import services.sentinel as sentinel_mod
+        mark = mark_system.current_mark()
+        sentinel_armed = "armed" if sentinel_mod._running else "standing by"
+        announcement = (
+            f"Mark {mark.get('mark','V')} online. "
+            f"{len(mark.get('capabilities', []))} capabilities active. "
+            f"{'Groq online.' if groq_ok else 'Groq offline — running on local systems.'} "
+            f"Sentinel {sentinel_armed}. Standing by."
+        )
+        print(announcement)
+        bus.system(announcement)
+    except Exception as e:
+        print(f"[JARVIS] Mark announcement skipped: {e}")
+
 
 @app.post("/stark/chat/simple")
 async def chat_simple(body: dict, request: Request):

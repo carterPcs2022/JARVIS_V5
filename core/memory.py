@@ -116,6 +116,42 @@ def recall_as_context(query: str) -> str:
     return "\n".join(lines)
 
 
+def check_if_repeated(query: str, threshold: float = 0.75) -> dict | None:
+    """Has the user asked essentially this before? Compares token-set overlap
+    (Jaccard similarity) against past user messages specifically — recall()
+    is TF-IDF relevance for general context, which isn't the same question as
+    "is this literally a repeat." Returns the most similar past entry (with
+    a computed 'similarity' and 'days_ago') if above threshold, else None."""
+    entries = _load(LONG_TERM_FILE)
+    if not entries:
+        return None
+
+    q_tokens = set(_tokenize(query))
+    if not q_tokens:
+        return None
+
+    best_entry, best_sim = None, 0.0
+    for e in entries:
+        user_tokens = set(_tokenize(e.get("user", "")))
+        if not user_tokens:
+            continue
+        intersection = len(q_tokens & user_tokens)
+        union = len(q_tokens | user_tokens)
+        sim = intersection / union if union else 0.0
+        if sim > best_sim:
+            best_sim, best_entry = sim, e
+
+    if not best_entry or best_sim < threshold:
+        return None
+
+    try:
+        days_ago = (datetime.now() - datetime.fromisoformat(best_entry["ts"])).days
+    except Exception:
+        days_ago = None
+
+    return {**best_entry, "similarity": round(best_sim, 3), "days_ago": days_ago}
+
+
 # ── Profile ───────────────────────────────────────────────────────────────────
 
 def get_profile() -> dict:
