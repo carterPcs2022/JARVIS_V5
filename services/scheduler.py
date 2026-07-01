@@ -36,6 +36,23 @@ def _system_check():
         log.debug("System check failed: %s", e)
 
 
+def _llm_health_refresh():
+    """core.state's groq_available/ollama_available otherwise only update
+    when an actual chat request succeeds or fails — so a single transient
+    429 or Ollama hiccup leaves /health reporting a stale, wrong status
+    indefinitely (nothing else ever flips it back). Refresh it periodically
+    from a real (rate-limit-cached) check instead."""
+    try:
+        from core.llm.router import check_groq, check_ollama
+        from core.state import state
+        state.update({
+            "groq_available":   check_groq(),
+            "ollama_available": check_ollama(),
+        })
+    except Exception as e:
+        log.debug("LLM health refresh failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -43,8 +60,9 @@ def start():
         _scheduler = BackgroundScheduler(daemon=True)
         _scheduler.add_job(_email_check,  "interval", minutes=15, id="email_check")
         _scheduler.add_job(_system_check, "interval", minutes=5,  id="system_check")
+        _scheduler.add_job(_llm_health_refresh, "interval", minutes=2, id="llm_health_refresh")
         _scheduler.start()
-        log.info("Scheduler started — email every 15m, system every 5m")
+        log.info("Scheduler started — email every 15m, system every 5m, LLM health every 2m")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

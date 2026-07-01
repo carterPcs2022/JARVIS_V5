@@ -90,11 +90,22 @@ class JarvisConsciousness:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def daily_reflection(self) -> str:
+    def daily_reflection(self, force: bool = False) -> str:
         """
         LLM generates a reflection on today's interactions.
         Stored in memory/journal.json with date tag. Returns the reflection string.
+
+        This is polled by the HUD every 60s — without caching, that's a live
+        LLM call every minute, forever, for content that's only meaningful to
+        regenerate a handful of times a day. Returns today's existing journal
+        entry if one exists, unless force=True.
         """
+        if not force:
+            today = _today_str()
+            for entry in reversed(self._load_journal()):
+                if entry.get("type") == "daily_reflection" and entry.get("date") == today:
+                    return entry["content"]
+
         turns = self._todays_turns()
         stats = self._memory_stats()
         user  = stats.get("user_name", "Sir")

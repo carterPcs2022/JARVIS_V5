@@ -20,6 +20,7 @@ from server.routes.search      import router as search_router
 from server.routes.mark        import router as mark_router
 from server.routes.stark_extra import router as stark_extra_router
 from server.routes.final_features import router as final_router, protected as final_protected_router
+from server.routes.glasses import router as glasses_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -39,6 +40,7 @@ app.include_router(mark_router)
 app.include_router(stark_extra_router)
 app.include_router(final_router)
 app.include_router(final_protected_router)
+app.include_router(glasses_router)
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 
@@ -68,6 +70,19 @@ async def hud_desktop():
 @app.get("/hud/mobile")
 async def hud_mobile_view():
     return FileResponse(HUD_DIR / "index.html")
+
+
+@app.get("/hud/sw.js")
+async def hud_service_worker():
+    """Served at exactly the path app.js registers (navigator.serviceWorker.
+    register('/hud/sw.js')) rather than under /hud/static/, so its default
+    scope covers /hud/, /hud/desktop, and /hud/mobile. Also means browsers
+    can actually re-fetch this file to detect updates — if it only existed
+    under /hud/static/sw.js, the registration URL itself would 404 and the
+    browser would never notice a new version, leaving old phones stuck on
+    a stale cached HUD indefinitely."""
+    return FileResponse(HUD_DIR / "sw.js", media_type="application/javascript",
+                        headers={"Service-Worker-Allowed": "/hud/", "Cache-Control": "no-cache"})
 
 
 @app.get("/hud/status")

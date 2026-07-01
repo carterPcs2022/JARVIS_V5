@@ -18,6 +18,7 @@ TASKS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/tasks.json")
 NOTES_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/notes.json")
 HABITS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/habits.json")
 CALENDAR_CACHE_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/calendar_cache.json")
+PRIORITIES_CACHE_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/priorities_cache.json")
 SHORT_TERM_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/short_term.json")
 
 
@@ -212,18 +213,32 @@ class ProductivityIntelligence:
             return tasks
         return [t for t in tasks if t.get("status") == filter]
 
-    def prioritize_today(self) -> str:
+    def prioritize_today(self, force: bool = False) -> str:
         """
         LLM reviews active tasks and calendar data, suggests top 3 for today.
         Returns prioritization string.
+
+        Polled by the HUD every 60s — cache per day (invalidated early if the
+        active task list actually changes) instead of calling the LLM fresh
+        on every single poll.
         """
         from core.llm.router import think
 
         active_tasks = self.task_list("active")
+        today = date.today().isoformat()
+        task_signature = [t.get("id") for t in active_tasks]
+
+        if not force:
+            cached = _load_json(PRIORITIES_CACHE_FILE, {})
+            if (cached.get("date") == today
+                    and cached.get("task_signature") == task_signature
+                    and cached.get("result")):
+                return cached["result"]
+
         calendar = _load_json(CALENDAR_CACHE_FILE, {})
 
         context = {
-            "today": date.today().isoformat(),
+            "today": today,
             "active_tasks": active_tasks[:20],  # Limit context
             "calendar_events_today": calendar.get("today", []) if isinstance(calendar, dict) else [],
         }
@@ -234,7 +249,9 @@ class ProductivityIntelligence:
             f"Consider priority, due dates, and calendar commitments. "
             f"Keep it under 150 words.\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
         )
-        return think(prompt)
+        result = think(prompt)
+        _save_json(PRIORITIES_CACHE_FILE, {"date": today, "task_signature": task_signature, "result": result})
+        return result
 
     # ─── NOTES ─────────────────────────────────────────────────────────────────
 

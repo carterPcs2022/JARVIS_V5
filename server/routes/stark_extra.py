@@ -287,17 +287,26 @@ def workshop_next(name: str):
 @router.get("/consciousness/journal")
 def consciousness_journal():
     from core.consciousness import consciousness
-    return consciousness.jarvis_journal()
+    try:
+        return consciousness.jarvis_journal()
+    except Exception as e:
+        return {"error": f"Journal unavailable: {e}"}
 
 @router.get("/consciousness/today")
 def consciousness_today():
     from core.consciousness import consciousness
-    return {"reflection": consciousness.daily_reflection()}
+    try:
+        return {"reflection": consciousness.daily_reflection()}
+    except Exception as e:
+        return {"reflection": "Reflection unavailable right now.", "error": str(e)}
 
 @router.post("/consciousness/opinion")
 def consciousness_opinion(body: dict):
     from core.consciousness import consciousness
-    return {"opinion": consciousness.express_opinion(body.get("topic", ""))}
+    try:
+        return {"opinion": consciousness.express_opinion(body.get("topic", ""))}
+    except Exception as e:
+        return {"opinion": "I don't have a formed opinion on that right now.", "error": str(e)}
 
 @router.get("/world")
 def world_summary():

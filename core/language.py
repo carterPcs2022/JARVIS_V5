@@ -9,15 +9,36 @@ _LANG_NAMES = {
 }
 
 
+_MIN_DETECT_LEN  = 20    # langdetect is unreliable below this — short common
+                          # English words/phrases ("ok", "nice", "sure", "yo",
+                          # even "hello") get confidently misdetected as
+                          # Slovak, Polish, French, Turkish, Finnish, etc.
+_MIN_CONFIDENCE = 0.85    # require high confidence even once long enough
+
+
 def detect_language(text: str) -> str:
-    """Detect language of input text. Returns ISO 639-1 code."""
+    """Detect language of input text. Returns ISO 639-1 code.
+
+    Defaults to English unless the input is long enough and the detector is
+    confident enough to trust — otherwise JARVIS can end up replying in a
+    language the user never used, from a single short message like "ok" or
+    "nice" being misread as Slovak or Polish."""
     if JARVIS_LANGUAGE != "auto":
         return JARVIS_LANGUAGE
-    if not text or len(text.strip()) < 4:
+
+    text = (text or "").strip()
+    if len(text) < _MIN_DETECT_LEN:
         return "en"
+
     try:
-        from langdetect import detect
-        return detect(text)
+        from langdetect import detect_langs
+        candidates = detect_langs(text)
+        if not candidates:
+            return "en"
+        top = candidates[0]
+        if top.prob < _MIN_CONFIDENCE:
+            return "en"
+        return top.lang
     except Exception:
         return "en"
 

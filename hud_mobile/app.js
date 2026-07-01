@@ -163,13 +163,22 @@
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       setStatus('offline');
-      addEvent('error', 'Disconnected — retrying in 5 s…');
+      // Close codes actually distinguish the failure mode — 1006 (abnormal)
+      // is what a network/proxy block looks like (never even handshakes),
+      // vs. a clean 1000/1001 which means the server or client closed it
+      // intentionally. Surfacing this beats a generic "error" message when
+      // debugging phone-specific connectivity (Private Relay, Low Data Mode,
+      // captive portals, etc. all tend to produce 1006 with no reason).
+      addEvent('error', `Disconnected (code ${e.code}${e.reason ? ': ' + e.reason : ''}) — retrying in 5s…`);
       reconnectTimer = setTimeout(connect, 5000);
     };
 
-    ws.onerror = () => addEvent('error', 'WebSocket error');
+    ws.onerror = (e) => {
+      addEvent('error', `WebSocket error — readyState ${ws.readyState}, target ${WS_URL}`);
+      console.error('[JARVIS] WebSocket error', { readyState: ws.readyState, url: WS_URL, event: e });
+    };
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
