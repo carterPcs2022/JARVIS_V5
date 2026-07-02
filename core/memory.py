@@ -28,6 +28,15 @@ def _save(path: Path, data):
 # ── Short-term memory ─────────────────────────────────────────────────────────
 
 def save_turn(user: str, ai: str):
+    # Protocol 26 — Shield: redact credit cards/SSNs/passwords/API keys
+    # before anything ever touches disk.
+    try:
+        from core.protocols import shield
+        user = shield.scan_and_redact(user)
+        ai   = shield.scan_and_redact(ai)
+    except Exception:
+        pass
+
     turns = _load(SHORT_TERM_FILE)
     turns.append({
         "user": user, "ai": ai,

@@ -316,3 +316,10 @@ INACTIVITY_DAYS         = int(os.getenv("INACTIVITY_DAYS", "30"))
 # ── Fitness ───────────────────────────────────────────────────────────────────
 DAILY_WATER_REMINDERS         = os.getenv("DAILY_WATER_REMINDERS", "true").lower() == "true"
 WATER_REMINDER_INTERVAL_HOURS = int(os.getenv("WATER_REMINDER_INTERVAL_HOURS", "2"))
+
+# ── Stark Protocols 18-35 ──────────────────────────────────────────────────────
+EMERGENCY_CONTACT_PHONE = os.getenv("EMERGENCY_CONTACT_PHONE", "")
+MORGAN_PASSPHRASE       = os.getenv("MORGAN_PASSPHRASE", "")
+LOKI_SURPRISE_HOUR      = int(os.getenv("LOKI_SURPRISE_HOUR", "9"))
+SATURDAY_MAX_WORK_DAYS  = int(os.getenv("SATURDAY_MAX_WORK_DAYS", "6"))
+BENCHMARK_DAY           = os.getenv("BENCHMARK_DAY", "sunday").lower()
