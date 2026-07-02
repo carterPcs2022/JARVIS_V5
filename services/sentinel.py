@@ -192,3 +192,24 @@ def threats(hours: int = 24) -> list:
         except: return []
     cutoff = datetime.now().timestamp() - hours * 3600
     return [t for t in log if datetime.fromisoformat(t["ts"]).timestamp() > cutoff]
+
+def analyze_threat(threat_data: dict) -> dict:
+    """JARVIS-style threat analysis — classifies, scores, and recommends a
+    response. Auto-triggers a critical alert if severe."""
+    from core.llm.router import think
+    analysis = think(
+        f"Analyze this security threat and recommend response:\n"
+        f"{json.dumps(threat_data, indent=2)}\n\n"
+        f'Reply as JSON: {{"threat_level": 1-10, "classification": str, '
+        f'"recommended_protocol": str, "immediate_action": str}}',
+        force_model="instant",
+    )
+    try:
+        result = json.loads(analysis.strip())
+        if result.get("threat_level", 0) >= 8:
+            from core.event_bus import bus
+            bus.alert(f"Severe threat detected. {result.get('immediate_action', '')}",
+                     severity="critical", category="THREAT")
+        return result
+    except Exception:
+        return {"threat_level": 5, "classification": "unknown", "recommended_protocol": "monitor"}

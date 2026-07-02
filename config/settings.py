@@ -338,3 +338,9 @@ USE_MOA            = os.getenv("USE_MOA", "false").lower() == "true"
 USE_VERIFICATION   = os.getenv("USE_VERIFICATION", "false").lower() == "true"
 USE_REFLEXION      = os.getenv("USE_REFLEXION", "false").lower() == "true"
 MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "2400"))
+
+# ── 10/10 upgrade: same pattern — background predictive pre-loading defaults
+# off (it's a standing 24/7 LLM-call generator otherwise; see
+# services/predictor.py for the full rationale). Everything else here is
+# cheap/free and always on.
+USE_BACKGROUND_PREDICTION = os.getenv("USE_BACKGROUND_PREDICTION", "false").lower() == "true"

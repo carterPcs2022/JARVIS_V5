@@ -148,6 +148,26 @@ class Reasoner:
         except Exception:
             lang = "en"
 
+        # Neurological mirroring — free (reads a cached profile, no LLM call)
+        try:
+            from core.neuro_mirror import neuro
+            style_prompt = neuro.get_style_prompt()
+            if style_prompt:
+                system_prompt += f"\n\n{style_prompt}"
+        except Exception:
+            pass
+
+        context = build_context(user_input, include_web=True)
+
+        # Domain expertise — free (keyword match against registered domains)
+        try:
+            from core.domain_expert import domain_expert
+            domain = domain_expert.detect_domain(user_input)
+            if domain:
+                context = domain_expert.get_domain_context(domain) + "\n\n" + context
+        except Exception:
+            pass
+
         return Intent(
             raw          = user_input,
             action       = action,
@@ -155,7 +175,7 @@ class Reasoner:
             needs_web    = needs_web,
             needs_agents = needs_agents,
             complexity   = complexity,
-            context      = build_context(user_input, include_web=True),
+            context      = context,
             system       = system_prompt,
             metadata     = {"language": lang},
         )
@@ -384,6 +404,29 @@ class Executor:
         result = dispatch(plan.intent.raw)
         return result, "", "mac"
 
+    def check_for_pushback(self, intent: Intent) -> str | None:
+        """Should JARVIS push back on this request? One LLM call — available
+        on demand, not run before every message (that would double the LLM
+        call cost of every single interaction). Protocol 18 (Sokovia) and
+        Protocol 1 (Bodyguard) already cover the pre-execution risk check
+        for the pipeline's default flow; this is for callers who explicitly
+        want the "are you sure, sir?" judgment call on a specific request."""
+        from core.llm.router import think
+        import json
+        result = think(
+            f"Should JARVIS push back on this request? Consider: safety, "
+            f"wisdom, better alternatives.\n\nRequest: {intent.raw}\n\n"
+            f'Reply as JSON: {{"should_pushback": bool, "reason": str, "pushback_message": str}}',
+            force_model="instant",
+        )
+        try:
+            data = json.loads(result.strip())
+            if data.get("should_pushback"):
+                return data.get("pushback_message", "I'd advise against that, sir.")
+        except Exception:
+            pass
+        return None
+
 
 # ── Brain (assembles everything) ──────────────────────────────────────────────
 
@@ -415,6 +458,15 @@ class Brain:
         analyze_message(user_input)
         bus.chat("user", user_input)
         state.set("last_interaction", datetime.now().isoformat())
+
+        # ── Predictive cache — free lookup, instant response if pre-loaded ────
+        try:
+            from services.predictor import predictor_engine
+            cached = predictor_engine.get_cached_response(user_input)
+            if cached:
+                return Result(response=cached["response"], ok=True, meta={"predicted": True})
+        except Exception:
+            pass
 
         # ── Protocol 14: Friday fallback if all LLMs offline ─────────────────
         from core.llm.router import check_groq, check_ollama

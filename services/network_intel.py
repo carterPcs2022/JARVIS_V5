@@ -524,3 +524,38 @@ class NetworkIntelligence:
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 network = NetworkIntelligence()
+
+
+def analyze_own_network_security() -> dict:
+    """JARVIS analyzes YOUR network for vulnerabilities. Own network only —
+    ethical security audit, not offensive scanning. Uses psutil directly
+    rather than shelling out to netstat/ps (neither is in core/tools/system.py's
+    shell command allowlist, and psutil is already a dependency here)."""
+    try:
+        conns = psutil.net_connections(kind="inet")
+        listening = [f"{c.laddr.ip}:{c.laddr.port}" for c in conns if c.status == "LISTEN" and c.laddr]
+        established = [f"{c.laddr.ip}:{c.laddr.port} -> {c.raddr.ip}:{c.raddr.port}"
+                       for c in conns if c.status == "ESTABLISHED" and c.laddr and c.raddr]
+    except Exception as e:
+        listening, established = [], [f"error: {e}"]
+
+    try:
+        procs = [f"{p.info['pid']} {p.info['name']}" for p in
+                 list(psutil.process_iter(["pid", "name"]))[:20]]
+    except Exception as e:
+        procs = [f"error: {e}"]
+
+    results = {
+        "open_ports": "\n".join(listening),
+        "active_connections": "\n".join(established[:30]),
+        "processes": "\n".join(procs),
+    }
+
+    from core.llm.router import think
+    analysis = think(
+        f"Analyze this network security data for potential vulnerabilities or concerns:\n"
+        f"{json.dumps(results, indent=2)[:1000]}\n\nReply as a JARVIS security brief.",
+        force_model="standard",
+    )
+    results["jarvis_analysis"] = analysis
+    return results

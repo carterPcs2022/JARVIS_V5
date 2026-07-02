@@ -142,6 +142,28 @@ def _p35_infinity_reflection():
         log.debug("Infinity monthly reflection failed: %s", e)
 
 
+def _weekly_active_learning_cycle():
+    """Fine-tune the personal model on the week's conversations + corrections.
+    Scheduled after Benchmark (3am) and Prometheus (4am) to avoid overlap."""
+    try:
+        from core.active_learning import learner
+        learner.weekly_learning_cycle()
+    except Exception as e:
+        log.debug("Weekly active learning cycle failed: %s", e)
+
+
+def _weekly_neuro_reanalysis():
+    try:
+        from core.neuro_mirror import neuro
+        from core.memory import _load
+        from config.settings import CONVERSATIONS_FILE
+        convs = _load(CONVERSATIONS_FILE) or []
+        if len(convs) >= 20:
+            neuro.analyze_thinking_style(convs)
+    except Exception as e:
+        log.debug("Weekly neuro reanalysis failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -181,9 +203,14 @@ def start():
         # Protocol 35 — Infinity reflection (1st of month, 2am)
         _scheduler.add_job(_p35_infinity_reflection, "cron", day=1, hour=2, id="p35_infinity")
 
+        # 10/10 upgrade: weekly fine-tuning + neuro reanalysis (Sunday, after
+        # Benchmark at 3am and Prometheus at 4am)
+        _scheduler.add_job(_weekly_active_learning_cycle, "cron", day_of_week="sun", hour=5, id="weekly_learning")
+        _scheduler.add_job(_weekly_neuro_reanalysis, "cron", day_of_week="sun", hour=6, id="weekly_neuro")
+
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
-                 "+ Protocols 19/24/25/28/29/30/31/32/35")
+                 "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

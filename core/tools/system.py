@@ -87,3 +87,30 @@ def run_shell(command: str, timeout: int = 10) -> dict:
 def disk_warning(threshold: float = 85.0) -> str | None:
     pct = psutil.disk_usage("/").percent
     return f"⚠️ Disk at {pct}%" if pct >= threshold else None
+
+
+def run_calculation(expression: str) -> dict:
+    """"JARVIS run the numbers." Safe math evaluation — no arbitrary code
+    execution. Falls back to the LLM only for expressions that aren't
+    valid pure-math (e.g. word problems)."""
+    import math
+    import re as _re
+
+    safe_names = {k: v for k, v in math.__dict__.items() if not k.startswith("__")}
+    safe_names["abs"] = abs
+    safe_names["round"] = round
+
+    clean = _re.sub(r"[^0-9+\-*/.()%^ ]", "", expression)
+    clean = clean.replace("^", "**")
+
+    try:
+        result = eval(clean, {"__builtins__": {}}, safe_names)
+        return {
+            "expression": expression, "result": result,
+            "formatted": f"{result:,}" if isinstance(result, (int, float)) else str(result),
+        }
+    except Exception:
+        from core.llm.router import think
+        answer = think(f"Calculate: {expression}\nReply with just the numeric answer.",
+                       force_model="instant")
+        return {"expression": expression, "result": answer, "method": "llm"}

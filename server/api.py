@@ -23,6 +23,7 @@ from server.routes.final_features import router as final_router, protected as fi
 from server.routes.glasses import router as glasses_router
 from server.routes.protocols_18_35 import router as protocols_18_35_router
 from server.routes.brain_enhancement import router as brain_enhancement_router
+from server.routes.final_upgrade import router as final_upgrade_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -45,6 +46,7 @@ app.include_router(final_protected_router)
 app.include_router(glasses_router)
 app.include_router(protocols_18_35_router)
 app.include_router(brain_enhancement_router)
+app.include_router(final_upgrade_router)
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 
@@ -268,6 +270,57 @@ async def startup():
             start_all_background()
         except Exception as e:
             print(f"[JARVIS] Messaging integrations skipped: {e}")
+
+        # ── Fine-tuning readiness check (I/O only, no LLM call) ───────────────
+        try:
+            from services.fine_tuning import fine_tuner
+            result = fine_tuner.prepare_training_data()
+            if result.get("ready"):
+                print(f"[JARVIS] Personal model ready ({result['count']} examples)")
+            else:
+                print(f"[JARVIS] {result.get('reason', '')}")
+        except Exception as e:
+            print(f"[JARVIS] Fine-tuning check skipped: {e}")
+
+        # ── Auto-register workshop domains (free — just reads/writes JSON) ────
+        try:
+            from core.domain_expert import domain_expert
+            domain_expert.auto_register_from_workshop()
+        except Exception as e:
+            print(f"[JARVIS] Domain auto-registration skipped: {e}")
+
+        # ── Neuro profile analysis — one LLM call, only if enough history ─────
+        try:
+            from core.neuro_mirror import neuro
+            from core.memory import _load
+            from config.settings import CONVERSATIONS_FILE
+            convs = _load(CONVERSATIONS_FILE) or []
+            if len(convs) >= 20:
+                neuro.analyze_thinking_style(convs)
+                print("[JARVIS] Neuro profile refreshed.")
+        except Exception as e:
+            print(f"[JARVIS] Neuro profile analysis skipped: {e}")
+
+        # ── Suit status report (pure computation, no LLM call) ────────────────
+        try:
+            from services.suit_diagnostics import suit_status_report
+            status = suit_status_report()
+            bus.system(status)
+            print(f"\n[JARVIS] {status}\n")
+        except Exception as e:
+            print(f"[JARVIS] Suit status skipped: {e}")
+
+        # ── Background predictive pre-loading — opt-in, off by default ────────
+        # (a standing 24/7 LLM-call generator once started; see
+        # services/predictor.py for the full rationale)
+        try:
+            from config.settings import USE_BACKGROUND_PREDICTION
+            if USE_BACKGROUND_PREDICTION:
+                from services.predictor import predictor_engine
+                predictor_engine.start_background_prediction()
+                print("[JARVIS] Background predictive pre-loading started (USE_BACKGROUND_PREDICTION=true).")
+        except Exception as e:
+            print(f"[JARVIS] Background prediction skipped: {e}")
 
         print("[JARVIS] Background LLM services started (30s post-boot delay elapsed).")
 

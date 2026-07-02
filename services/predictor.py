@@ -117,3 +117,99 @@ def predict_next_query(last_query: str) -> str | None:
     if "news" in low:
         return "today's headlines summary"
     return None
+
+
+# ── Predictive pre-loading — pre-generate likely responses ────────────────────
+#
+# SAFETY NOTE: preload_likely_response() runs the FULL brain pipeline (a real
+# LLM call) for a guessed query. start_background_prediction() would run this
+# every 60 seconds, forever, regardless of whether you're even at your
+# computer — a permanent background LLM-call generator. Given this session's
+# repeated fight against Groq rate limits, that loop is built but NOT started
+# automatically. Call predictor_engine.start_background_prediction() explicitly
+# if you want it, or trigger preload_likely_response() on-demand instead (e.g.
+# right when a physical button like the iPhone Action Button is pressed, so
+# it's at most one extra guess per deliberate action, not a standing loop).
+
+import threading
+import time as _time
+from collections import defaultdict as _defaultdict
+
+
+class PredictiveEngine:
+
+    def __init__(self):
+        self._prediction_cache: dict = {}
+        self._running = False
+
+    def preload_likely_response(self):
+        """Predict the most likely next query and pre-generate its response
+        into the cache. One real LLM call — call this deliberately, not on a loop."""
+        patterns = analyze_patterns()
+        candidates = patterns.get("common_this_hour", [])
+        if not candidates:
+            return
+        predicted = candidates[0]
+        if predicted in self._prediction_cache:
+            return
+
+        print(f"[Predictor] Pre-loading: {predicted[:50]}")
+        try:
+            from core.brain_v2 import brain
+            result = brain.process_dict(predicted)
+            self._prediction_cache[predicted] = {
+                "response": result["response"], "cached_at": _time.time(), "prediction": True,
+            }
+        except Exception as e:
+            print(f"[Predictor] Pre-load failed: {e}")
+
+    def get_cached_response(self, query: str) -> dict | None:
+        """Cache expires after 5 minutes."""
+        cached = self._prediction_cache.get(query)
+        if not cached:
+            return None
+        if _time.time() - cached["cached_at"] > 300:
+            del self._prediction_cache[query]
+            return None
+        print("[Predictor] Cache hit! Instant response.")
+        return cached
+
+    def start_background_prediction(self):
+        """Opt-in continuous prediction loop — NOT started by default (see
+        module-level safety note above). One real Groq call per minute,
+        forever, once started."""
+        if self._running:
+            return
+        self._running = True
+
+        def _loop():
+            while self._running:
+                try:
+                    self.preload_likely_response()
+                except Exception:
+                    pass
+                _time.sleep(60)
+
+        threading.Thread(target=_loop, daemon=True, name="jarvis-predictor").start()
+
+    def stop_background_prediction(self):
+        self._running = False
+
+
+predictor_engine = PredictiveEngine()
+
+
+def run_simulation(scenario: str, variables: dict | None = None, time_horizon: str = "1 week") -> dict:
+    """
+    Run a predictive simulation.
+    "JARVIS if I keep spending at this rate..." / "how long until disk is full?"
+    """
+    from core.llm.router import think
+    result = think(
+        f"Run a predictive simulation:\nScenario: {scenario}\n"
+        f"Variables: {json.dumps(variables or {})}\nTime horizon: {time_horizon}\n\n"
+        f"Provide: most likely outcome, best case, worst case, key risk factors, "
+        f"recommendation. Be specific with numbers.",
+        force_model="reasoning",
+    )
+    return {"scenario": scenario, "time_horizon": time_horizon, "simulation": result}

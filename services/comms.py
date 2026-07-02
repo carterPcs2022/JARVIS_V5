@@ -202,3 +202,10 @@ class CommunicationsIntelligence:
 
 # Module-level singleton
 comms = CommunicationsIntelligence()
+
+
+def instant_translate(text: str, from_lang: str = "auto", to_lang: str = "en") -> dict:
+    """"JARVIS translate." Thin wrapper over CommunicationsIntelligence.translation()
+    (which already tries LibreTranslate first, LLM fallback) for a simpler call shape."""
+    result = comms.translation(text, to_lang)
+    return {"original": text, "translated": result.get("translation", ""), "from": from_lang, "to": to_lang}
