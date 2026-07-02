@@ -63,26 +63,64 @@ _DEEP_KW = {
 
 
 def build_context(user_input: str, include_web: bool = True, deep: bool = False) -> str:
-    """Assemble full context string for a prompt."""
-    parts = []
+    """
+    Assemble full context string for a prompt, respecting a hard token
+    budget (MAX_CONTEXT_TOKENS). Priority order when trimming: recent
+    conversation > web results > long-term memory — recent turns are the
+    cheapest to lose relevance on if cut, long-term recall is the least
+    time-critical of the three.
+    """
+    from config.settings import MAX_CONTEXT_TOKENS
+
+    # Short-term conversation history — always included, highest priority
+    short = get_context_string(n=8)
 
     # Long-term memory recall
     ltm = recall_as_context(user_input)
-    if ltm:
-        parts.append(ltm)
 
     # Web context
+    web = ""
     if include_web:
         web = _get_web_context(user_input, deep=deep)
-        if web:
-            parts.append(web)
 
-    # Short-term conversation history
-    short = get_context_string(n=8)
+    def _tok_est(s: str) -> int:
+        return int(len(s.split()) * 1.3)  # rough words-to-tokens estimate
+
+    # Reserve budget in priority order (short-term first) but assemble the
+    # final string in the original [ltm, web, short] order — short-term
+    # stays closest to the actual user question in the final prompt, which
+    # tends to help recency-weighted attention.
+    budget = MAX_CONTEXT_TOKENS
+    include = {"short": "", "web": "", "ltm": ""}
+
     if short:
-        parts.append(short)
+        include["short"] = short
+        budget -= _tok_est(short)
 
-    return "\n\n".join(parts)
+    if web and budget > 0:
+        web_trimmed = _trim_to_budget(web, budget)
+        if web_trimmed:
+            include["web"] = web_trimmed
+            budget -= _tok_est(web_trimmed)
+
+    if ltm and budget > 0:
+        ltm_trimmed = _trim_to_budget(ltm, budget)
+        if ltm_trimmed:
+            include["ltm"] = ltm_trimmed
+
+    parts = [include["ltm"], include["web"], include["short"]]
+    return "\n\n".join(p for p in parts if p)
+
+
+def _trim_to_budget(text: str, budget_tokens: int) -> str:
+    """Trim text to roughly fit a token budget (word-boundary safe)."""
+    if budget_tokens <= 0:
+        return ""
+    max_words = max(10, int(budget_tokens / 1.3))
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    return " ".join(words[:max_words]) + " [truncated]"
 
 
 def build_system(custom: str | None = None) -> str:

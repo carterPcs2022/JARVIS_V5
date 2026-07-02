@@ -22,6 +22,7 @@ from server.routes.stark_extra import router as stark_extra_router
 from server.routes.final_features import router as final_router, protected as final_protected_router
 from server.routes.glasses import router as glasses_router
 from server.routes.protocols_18_35 import router as protocols_18_35_router
+from server.routes.brain_enhancement import router as brain_enhancement_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -43,6 +44,7 @@ app.include_router(final_router)
 app.include_router(final_protected_router)
 app.include_router(glasses_router)
 app.include_router(protocols_18_35_router)
+app.include_router(brain_enhancement_router)
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 

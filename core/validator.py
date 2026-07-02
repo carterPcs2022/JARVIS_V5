@@ -61,6 +61,11 @@ _STALE_KW = {
     "live", "right now", "this week", "2024", "2025", "2026",
 }
 
+_CONFIDENT_PATTERNS = [
+    r"\bdefinitely\b", r"\bcertainly\b", r"\balways\b", r"\bnever\b",
+    r"\bthe answer is\b", r"\byou must\b",
+]
+
 
 def score_confidence(query: str, response: str) -> int:
     score = 85  # start optimistic
@@ -69,6 +74,11 @@ def score_confidence(query: str, response: str) -> int:
     for pat in _HEDGE_PATTERNS:
         if re.search(pat, response, re.I):
             score -= 8
+
+    # Confident, declarative phrasing — modest boost, capped so it can't
+    # offset genuine uncertainty markers elsewhere in the same response.
+    confident_hits = sum(1 for p in _CONFIDENT_PATTERNS if re.search(p, response, re.I))
+    score += min(confident_hits * 3, 10)
 
     # Time-sensitive query
     q_low = query.lower()

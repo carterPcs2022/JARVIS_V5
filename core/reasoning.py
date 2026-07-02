@@ -54,3 +54,30 @@ def reason(question: str, context: str = "") -> dict:
         "answer":    final_answer,
         "used_cot":  True,
     }
+
+
+# ── Verification pass ──────────────────────────────────────────────────────────
+# Opt-in — 3 LLM calls (generate, challenge, synthesize). Not part of the
+# default reason() path above, which is already the pipeline's "complex
+# query" mode; this is for when you explicitly want the extra rigor.
+
+def reason_and_verify(question: str, context: str = "") -> dict:
+    """Three-stage reasoning: generate an answer, challenge it, synthesize
+    a verified final response that accounts for the challenge."""
+    draft = think(question, context, force_model="reasoning")
+
+    challenge_prompt = (
+        f"Original question: {question}\n\nProposed answer: {draft}\n\n"
+        f"Challenge this answer. What could be wrong? What's missing? "
+        f"What assumptions are made? Be specific and critical. One paragraph."
+    )
+    challenge = think(challenge_prompt, force_model="instant")
+
+    synthesis_prompt = (
+        f"Question: {question}\n\nInitial answer: {draft}\n\nCritique: {challenge}\n\n"
+        f"Given this critique, provide the best possible final answer. "
+        f"Acknowledge any genuine uncertainty."
+    )
+    final = think(synthesis_prompt, force_model="standard")
+
+    return {"answer": final, "draft": draft, "challenge": challenge, "verified": True, "used_cot": True}

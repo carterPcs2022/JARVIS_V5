@@ -49,7 +49,7 @@ async def stream_chat(messages: list[dict], max_tokens: int = 1024,
 
 
 def chat(messages: list[dict], max_tokens: int = 1024,
-         temperature: float = 0.7) -> dict:
+         temperature: float = 0.7, model: str | None = None) -> dict:
     if not GROQ_API_KEY:
         raise ValueError("GROQ_API_KEY not set")
 
@@ -58,7 +58,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         "Content-Type":  "application/json",
     }
     payload = {
-        "model":       GROQ_MODEL,
+        "model":       model or GROQ_MODEL,
         "messages":    messages,
         "max_tokens":  max_tokens,
         "temperature": temperature,

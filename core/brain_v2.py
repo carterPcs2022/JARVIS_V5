@@ -336,7 +336,10 @@ class Executor:
         if intent.context:
             messages.insert(1, {"role": "system",
                                 "content": f"Context:\n{intent.context}"})
-        r = llm_chat(messages, temperature=0.6)
+        # query=intent.raw enables smart model routing (zero extra cost —
+        # pattern classification only, no extra API call) so simple messages
+        # go to the fast/cheap tier and complex ones to a stronger model.
+        r = llm_chat(messages, temperature=0.6, query=intent.raw)
         return r["content"], r.get("model",""), r.get("provider","")
 
     def _cot(self, intent: Intent) -> tuple[str, str, str]:

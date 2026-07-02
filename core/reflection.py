@@ -66,3 +66,38 @@ def reflect(query: str, draft: str, threshold: int = THRESHOLD) -> dict:
         "was_rewritten": rewritten,
         "draft":        draft,
     }
+
+
+# ── Adversarial self-checking ─────────────────────────────────────────────────
+# Opt-in (2 extra LLM calls) — only worth running on responses that actually
+# make a claim or recommendation, and only when explicitly requested; not
+# wired into the default reflect() pass above.
+
+_ADVERSARIAL_TRIGGER_WORDS = [
+    "you should", "i recommend", "the best", "definitely",
+    "certainly", "always", "never", "is better", "is worse",
+]
+
+
+def adversarial_check(query: str, response: str) -> dict:
+    """JARVIS steelmans the opposite of his own answer. If the answer can't
+    withstand the strongest counterargument, it's flagged for review."""
+    if not any(w in response.lower() for w in _ADVERSARIAL_TRIGGER_WORDS):
+        return {"passed": True, "steelman": None}
+
+    steelman_prompt = (
+        f"Someone gave this answer to: '{query}'\n\nAnswer: {response}\n\n"
+        f"Give the strongest possible argument AGAINST this answer. "
+        f"Be specific. What's wrong, missing, or misleading?"
+    )
+    steelman = think(steelman_prompt)
+
+    counter_prompt = (
+        f"Original answer: {response}\n\nStrongest counterargument: {steelman}\n\n"
+        f"Can the original answer withstand this critique? "
+        f"Reply: HOLDS or WEAKENED, then one sentence why."
+    )
+    verdict = think(counter_prompt)
+
+    passed = "HOLDS" in verdict.upper()
+    return {"passed": passed, "steelman": steelman, "verdict": verdict, "flagged": not passed}

@@ -323,3 +323,18 @@ MORGAN_PASSPHRASE       = os.getenv("MORGAN_PASSPHRASE", "")
 LOKI_SURPRISE_HOUR      = int(os.getenv("LOKI_SURPRISE_HOUR", "9"))
 SATURDAY_MAX_WORK_DAYS  = int(os.getenv("SATURDAY_MAX_WORK_DAYS", "6"))
 BENCHMARK_DAY           = os.getenv("BENCHMARK_DAY", "sunday").lower()
+
+# ── Brain enhancement settings ─────────────────────────────────────────────────
+# Smart routing and tool calling are cheap (0-2 extra round-trips) and stay on
+# by default. Mixture-of-agents, verification, and reflexion each multiply
+# LLM call volume 2-3x *per message* — after this session spent significant
+# effort getting Groq rate-limiting under control, those default OFF. They're
+# fully built and available on demand (via API / force flags), just not
+# auto-triggered on every chat message where they'd immediately reintroduce
+# the same rate-limit problems.
+USE_SMART_ROUTING  = os.getenv("USE_SMART_ROUTING", "true").lower() == "true"
+USE_TOOL_CALLING   = os.getenv("USE_TOOL_CALLING", "true").lower() == "true"
+USE_MOA            = os.getenv("USE_MOA", "false").lower() == "true"
+USE_VERIFICATION   = os.getenv("USE_VERIFICATION", "false").lower() == "true"
+USE_REFLEXION      = os.getenv("USE_REFLEXION", "false").lower() == "true"
+MAX_CONTEXT_TOKENS = int(os.getenv("MAX_CONTEXT_TOKENS", "2400"))

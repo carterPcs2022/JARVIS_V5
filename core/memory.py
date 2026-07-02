@@ -224,3 +224,285 @@ def get_compression_summary() -> str | None:
         if "compression" in entry.get("tags", []):
             return entry.get("ai", "")
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Six-type memory architecture (working/short-term already exists above)
+# ═══════════════════════════════════════════════════════════════════════════
+
+from config.settings import BASE_DIR
+
+_EPISODIC_FILE   = BASE_DIR / "memory" / "episodic.json"
+_SEMANTIC_FILE   = BASE_DIR / "memory" / "semantic.json"
+_PROCEDURAL_FILE = BASE_DIR / "memory" / "procedural.json"
+_EMOTIONAL_FILE  = BASE_DIR / "memory" / "emotional.json"
+_PROSPECTIVE_FILE = BASE_DIR / "memory" / "prospective.json"
+
+
+def _tfidf_score(q_tokens: list[str], doc_tokens: list[str]) -> float:
+    if not doc_tokens:
+        return 0.0
+    tf = defaultdict(int)
+    for t in doc_tokens:
+        tf[t] += 1
+    return sum(tf.get(t, 0) / len(doc_tokens) for t in q_tokens)
+
+
+# ── 2. Episodic Memory — specific events and when they happened ─────────────
+
+def store_episode(event: str, importance: int = 5, emotions: list[str] | None = None,
+                   people: list[str] | None = None, tags: list[str] | None = None) -> dict:
+    """importance: 1-10, higher surfaces more readily in recall."""
+    episodes = _load(_EPISODIC_FILE)
+    if not isinstance(episodes, list):
+        episodes = []
+    episode = {
+        "id": str(len(episodes) + 1), "event": event, "ts": datetime.now().isoformat(),
+        "importance": max(1, min(10, importance)), "emotions": emotions or [],
+        "people": people or [], "tags": tags or [], "tokens": _tokenize(event),
+    }
+    episodes.append(episode)
+    episodes.sort(key=lambda x: x["importance"], reverse=True)
+    _save(_EPISODIC_FILE, episodes[:1000])
+    return episode
+
+
+def recall_episodes(query: str, k: int = 3) -> list[dict]:
+    episodes = _load(_EPISODIC_FILE)
+    if not isinstance(episodes, list) or not episodes:
+        return []
+    q_tokens = _tokenize(query)
+    scored = [
+        (_tfidf_score(q_tokens, ep.get("tokens", [])) * (1 + ep.get("importance", 5) / 10), ep)
+        for ep in episodes
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [ep for score, ep in scored[:k] if score > 0]
+
+
+# ── 3. Semantic Memory — discrete facts about the world ──────────────────────
+
+def extract_facts(conversation_turn: str) -> list[str]:
+    """Extract discrete, atomic, searchable facts from a piece of text.
+    Cheap keyword pre-check first — most messages don't state facts worth
+    extracting, and this avoids a wasted LLM call on those."""
+    STATEMENT_SIGNS = ("i am", "i'm", "my ", "i have", "i like", "i work",
+                       "i live", "i prefer", "i need", "i want")
+    low = (conversation_turn or "").lower()
+    if not any(s in low for s in STATEMENT_SIGNS):
+        return []
+
+    from core.llm.router import think
+    result = think(
+        f"Extract discrete facts from this text as a JSON array of strings. "
+        f"Each fact should be atomic and searchable. If there are no clear "
+        f"facts, return an empty array.\n\nText: {conversation_turn}\n\nJSON array only:",
+        force_model="instant", use_cache=True,
+    )
+    try:
+        clean = re.sub(r"```json|```", "", result).strip()
+        parsed = json.loads(clean)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def store_fact(fact: str, confidence: float = 0.9, source: str = "conversation",
+               category: str = "general") -> dict:
+    facts = _load(_SEMANTIC_FILE)
+    if not isinstance(facts, list):
+        facts = []
+
+    existing = recall_facts(fact, k=1)
+    if existing and _contradicts(fact, existing[0]["fact"]):
+        for f in facts:
+            if f["fact"] == existing[0]["fact"]:
+                f["fact"], f["confidence"] = fact, confidence
+                f["updated"] = datetime.now().isoformat()
+                _save(_SEMANTIC_FILE, facts)
+                return f
+
+    entry = {
+        "fact": fact, "confidence": confidence, "source": source, "category": category,
+        "ts": datetime.now().isoformat(), "tokens": _tokenize(fact),
+    }
+    facts.append(entry)
+    _save(_SEMANTIC_FILE, facts[-2000:])
+    return entry
+
+
+def recall_facts(query: str, k: int = 5) -> list[dict]:
+    facts = _load(_SEMANTIC_FILE)
+    if not isinstance(facts, list) or not facts:
+        return []
+    q_tokens = _tokenize(query)
+    scored = [
+        (_tfidf_score(q_tokens, f.get("tokens", [])) * f.get("confidence", 0.9), f)
+        for f in facts
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [f for score, f in scored[:k] if score > 0]
+
+
+def _contradicts(new_fact: str, old_fact: str) -> bool:
+    """Cheap heuristic first (avoids an LLM call for obviously-unrelated facts),
+    LLM check only when there's real token overlap worth verifying."""
+    new_tokens, old_tokens = set(_tokenize(new_fact)), set(_tokenize(old_fact))
+    if len(new_tokens & old_tokens) < 2:
+        return False
+    try:
+        from core.llm.router import think
+        result = think(
+            f"Do these two statements contradict each other?\n"
+            f"Statement 1: {old_fact}\nStatement 2: {new_fact}\nReply only: YES or NO",
+            force_model="instant", use_cache=True,
+        )
+        return "YES" in result.upper()
+    except Exception:
+        return False
+
+
+# ── 4. Procedural Memory — how to do things ───────────────────────────────────
+
+def store_procedure(task: str, steps: list[str], success_rate: float = 1.0) -> dict:
+    procs = _load(_PROCEDURAL_FILE)
+    if not isinstance(procs, list):
+        procs = []
+    proc = {
+        "task": task, "steps": steps, "success_rate": success_rate, "used_count": 0,
+        "ts": datetime.now().isoformat(), "tokens": _tokenize(task),
+    }
+    procs.append(proc)
+    _save(_PROCEDURAL_FILE, procs[-500:])
+    return proc
+
+
+def recall_procedure(task: str) -> dict | None:
+    procs = _load(_PROCEDURAL_FILE)
+    if not isinstance(procs, list) or not procs:
+        return None
+    q_tokens = _tokenize(task)
+    scored = [(_tfidf_score(q_tokens, p.get("tokens", [])), p) for p in procs]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    if not scored or scored[0][0] <= 0:
+        return None
+    best = scored[0][1]
+    best["used_count"] = best.get("used_count", 0) + 1
+    _save(_PROCEDURAL_FILE, procs)
+    return best
+
+
+# ── 5. Emotional Memory — what matters emotionally and why ───────────────────
+
+def store_emotional_memory(topic: str, emotion: str, intensity: int = 5, context: str = "") -> dict:
+    memories = _load(_EMOTIONAL_FILE)
+    if not isinstance(memories, list):
+        memories = []
+    memory = {
+        "topic": topic, "emotion": emotion, "intensity": max(1, min(10, intensity)),
+        "context": context, "ts": datetime.now().isoformat(), "tokens": _tokenize(topic),
+    }
+    memories.append(memory)
+    _save(_EMOTIONAL_FILE, memories[-500:])
+    return memory
+
+
+def get_emotional_context(topic: str) -> str:
+    memories = _load(_EMOTIONAL_FILE)
+    if not isinstance(memories, list) or not memories:
+        return ""
+    q_tokens = _tokenize(topic)
+    relevant = [m for m in memories if _tfidf_score(q_tokens, m.get("tokens", [])) > 0.3]
+    if not relevant:
+        return ""
+    emotions = [m["emotion"] for m in relevant[:3]]
+    return f"Emotional context: {', '.join(emotions)}"
+
+
+def detect_emotion_in_text(text: str) -> dict:
+    """Cheap keyword pre-check before spending an LLM call — most messages
+    are emotionally neutral and don't need one."""
+    NEUTRAL_SIGNS = len((text or "").split()) < 4
+    if NEUTRAL_SIGNS:
+        return {"emotion": "neutral", "intensity": 3, "should_acknowledge": False}
+    try:
+        from core.llm.router import think
+        result = think(
+            f"Detect the primary emotion in this text.\n"
+            f'Reply as JSON: {{"emotion": str, "intensity": 1-10, "should_acknowledge": bool}}\n\n'
+            f"Text: {text}",
+            force_model="instant", use_cache=True,
+        )
+        cleaned = re.sub(r"```json|```", "", result).strip()
+        return json.loads(cleaned)
+    except Exception:
+        return {"emotion": "neutral", "intensity": 5, "should_acknowledge": False}
+
+
+# ── 6. Prospective Memory — things to do in the future ───────────────────────
+
+def remember_to(task: str, when: str | None = None, trigger: str | None = None,
+                 priority: int = 5) -> dict:
+    todos = _load(_PROSPECTIVE_FILE)
+    if not isinstance(todos, list):
+        todos = []
+    todo = {
+        "task": task, "when": when, "trigger": trigger, "priority": priority,
+        "done": False, "ts": datetime.now().isoformat(),
+    }
+    todos.append(todo)
+    _save(_PROSPECTIVE_FILE, todos)
+    return todo
+
+
+def get_pending_reminders() -> list[dict]:
+    todos = _load(_PROSPECTIVE_FILE)
+    if not isinstance(todos, list):
+        return []
+    return [t for t in todos if not t.get("done")]
+
+
+def check_triggers(context: str) -> list[dict]:
+    pending = get_pending_reminders()
+    triggered = [t for t in pending if t.get("trigger") and t["trigger"].lower() in (context or "").lower()]
+    if triggered:
+        todos = _load(_PROSPECTIVE_FILE)
+        for t in todos:
+            if t in triggered:
+                t["done"] = True
+        _save(_PROSPECTIVE_FILE, todos)
+    return triggered
+
+
+# ── Universal recall — searches all six memory types + long-term vector store ─
+
+def universal_recall(query: str, k: int = 3) -> str:
+    parts = []
+
+    episodes = recall_episodes(query, k)
+    if episodes:
+        parts.append("Relevant memories:\n" + "\n".join(f"[{e['ts'][:10]}] {e['event']}" for e in episodes))
+
+    facts = recall_facts(query, k)
+    if facts:
+        parts.append("Known facts:\n" + "\n".join(f"• {f['fact']}" for f in facts))
+
+    procedure = recall_procedure(query)
+    if procedure:
+        steps = "\n".join(f"{i+1}. {s}" for i, s in enumerate(procedure["steps"][:3]))
+        parts.append(f"Known procedure for '{procedure['task']}':\n{steps}")
+
+    emotional = get_emotional_context(query)
+    if emotional:
+        parts.append(emotional)
+
+    pending = get_pending_reminders()
+    triggered = [p for p in pending if p.get("trigger") and p["trigger"].lower() in query.lower()]
+    if triggered:
+        parts.append("Reminder: " + "; ".join(t["task"] for t in triggered[:2]))
+
+    ltm = recall_as_context(query)
+    if ltm:
+        parts.append(ltm)
+
+    return "\n\n".join(parts)
