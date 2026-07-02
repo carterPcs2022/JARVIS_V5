@@ -323,7 +323,7 @@
   }
 
   pollMetrics();
-  setInterval(pollMetrics, 5000);
+  setInterval(pollMetrics, 30000);
 
   // ── URL shortcut handling (manifest shortcuts) ─────────────────────────────
   const urlParams = new URLSearchParams(location.search);

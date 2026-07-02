@@ -191,7 +191,7 @@ async def startup():
     # ── Protocol 9: Yinsen — idle check-in thread ────────────────────────────
     start_yinsen_watch(hours=24)
 
-    # ── LLM probe in background ───────────────────────────────────────────────
+    # ── LLM probe ──────────────────────────────────────────────────────────────
     async def _probe():
         loop = asyncio.get_event_loop()
         groq_ok   = await loop.run_in_executor(None, check_groq)
@@ -212,18 +212,64 @@ async def startup():
             bus.alert("No LLM providers — Friday Protocol active.", "critical")
             print("[JARVIS] ⚠ Friday Protocol engaged")
 
-    asyncio.create_task(_probe())
+    # ── Background LLM-touching services start 30s after boot ────────────────
+    # The LLM probe, scheduler (consciousness/awareness/workshop jobs all
+    # eventually call think()), and messaging bots all fire near-instantly on
+    # a cold boot otherwise — piling straight onto Groq's rate limit before
+    # the process has even finished coming up. Delaying them lets the server
+    # itself become ready (health checks, chat) without a startup Groq spike.
+    # This does NOT block app startup — /health etc. are live immediately.
+    async def _delayed_background_start():
+        try:
+            await _delayed_background_start_body()
+        except Exception:
+            import traceback
+            print("[JARVIS] _delayed_background_start crashed:")
+            traceback.print_exc()
 
-    # ── Background scheduler (email alerts, system checks) ───────────────────
-    from services.scheduler import start as scheduler_start
-    scheduler_start()
+    async def _delayed_background_start_body():
+        print("[JARVIS] Background services will start in 30s...")
+        await asyncio.sleep(30)
+        print("[JARVIS] 30s elapsed — starting background services now.")
+        await _probe()
 
-    # ── Messaging integrations (Telegram/Discord, if configured) ─────────────
-    try:
-        from services.messaging import start_all_background
-        start_all_background()
-    except Exception as e:
-        print(f"[JARVIS] Messaging integrations skipped: {e}")
+        groq_ok = state.get("groq_available", False)
+        ollama_ok = state.get("ollama_available", False)
+        print("=" * 50)
+        print("JARVIS V5 STARTUP COMPLETE")
+        print("=" * 50)
+        print(f"  Groq:    {'✓ ONLINE' if groq_ok else '✗ OFFLINE'}")
+        print(f"  Ollama:  {'✓ ONLINE' if ollama_ok else '✗ OFFLINE (optional)'}")
+        print("=" * 50 + "\n")
+
+        try:
+            from services.mark_system import mark_system
+            import services.sentinel as sentinel_mod
+            mark = mark_system.current_mark()
+            sentinel_armed = "armed" if sentinel_mod._running else "standing by"
+            announcement = (
+                f"Mark {mark.get('mark','V')} online. "
+                f"{len(mark.get('capabilities', []))} capabilities active. "
+                f"{'Groq online.' if groq_ok else 'Groq offline — running on local systems.'} "
+                f"Sentinel {sentinel_armed}. Standing by."
+            )
+            print(announcement)
+            bus.system(announcement)
+        except Exception as e:
+            print(f"[JARVIS] Mark announcement skipped: {e}")
+
+        from services.scheduler import start as scheduler_start
+        scheduler_start()
+
+        try:
+            from services.messaging import start_all_background
+            start_all_background()
+        except Exception as e:
+            print(f"[JARVIS] Messaging integrations skipped: {e}")
+
+        print("[JARVIS] Background LLM services started (30s post-boot delay elapsed).")
+
+    asyncio.create_task(_delayed_background_start())
 
     # ── Ping FRIDAY on startup ────────────────────────────────────────────────
     async def _ping_friday():
@@ -243,41 +289,11 @@ async def startup():
     print("\n╔══════════════════════════════════════╗")
     print("║       J.A.R.V.I.S  V5.0  ONLINE     ║")
     print("╚══════════════════════════════════════╝\n")
-
-    # ── Clear, actionable startup summary ─────────────────────────────────────
-    # Uses the cached health-check results from _probe() above when available
-    # (avoids a second live Groq call at startup); check_groq/check_ollama are
-    # cheap, synchronous, and cached for 30s, so a direct call is fine here.
-    _loop = asyncio.get_event_loop()
-    groq_ok = await _loop.run_in_executor(None, check_groq)
-    ollama_ok = await _loop.run_in_executor(None, check_ollama)
-    print("=" * 50)
-    print("JARVIS V5 STARTUP COMPLETE")
-    print("=" * 50)
-    print(f"  Groq:    {'✓ ONLINE' if groq_ok else '✗ OFFLINE'}")
-    print(f"  Ollama:  {'✓ ONLINE' if ollama_ok else '✗ OFFLINE (optional)'}")
     print(f"  Port:    {os.environ.get('JARVIS_PORT', 8000)}")
     print(f"  HUD:     http://localhost:8000/hud")
     print(f"  Chat:    http://localhost:8000/stark/chat/simple")
     print(f"  Docs:    http://localhost:8000/docs")
-    print("=" * 50 + "\n")
-
-    # ── Mark announcement ──────────────────────────────────────────────────────
-    try:
-        from services.mark_system import mark_system
-        import services.sentinel as sentinel_mod
-        mark = mark_system.current_mark()
-        sentinel_armed = "armed" if sentinel_mod._running else "standing by"
-        announcement = (
-            f"Mark {mark.get('mark','V')} online. "
-            f"{len(mark.get('capabilities', []))} capabilities active. "
-            f"{'Groq online.' if groq_ok else 'Groq offline — running on local systems.'} "
-            f"Sentinel {sentinel_armed}. Standing by."
-        )
-        print(announcement)
-        bus.system(announcement)
-    except Exception as e:
-        print(f"[JARVIS] Mark announcement skipped: {e}")
+    print("  Groq/Ollama status + Mark announcement in ~30s (post-boot delay)\n")
 
 
 @app.post("/stark/chat/simple")

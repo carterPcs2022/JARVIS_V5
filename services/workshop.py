@@ -152,7 +152,7 @@ class Workshop:
             f"active projects in JARVIS's professional style. Highlight progress, stale projects, "
             f"and what needs attention. Keep it under 200 words.\n\nActive projects:\n{context}"
         )
-        return think(prompt)
+        return think(prompt, use_cache=True)
 
     def suggest_next_step(self, project_name: str) -> str:
         """LLM suggests the next action based on project history."""
@@ -168,7 +168,7 @@ class Workshop:
             f"suggest the single most impactful next step. Be specific and actionable. "
             f"Keep it under 100 words.\n\nProject:\n{context}"
         )
-        return think(prompt)
+        return think(prompt, use_cache=True)
 
     def list_projects(self, status: Optional[str] = None) -> list:
         """

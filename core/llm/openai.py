@@ -69,10 +69,8 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                    json=payload, headers=headers)
 
         if r.status_code == 429:
-            retry_after = int(r.headers.get("retry-after", 5))
-            retry_after = min(retry_after, 15)  # don't block a request thread indefinitely
-            print(f"[Groq] Rate limited. Waiting {retry_after}s then retrying once...")
-            time.sleep(retry_after)
+            print("[Groq] Rate limited. Waiting 10s then retrying once...")
+            time.sleep(10)
             r = c.post(f"{GROQ_BASE_URL}/chat/completions",
                       json=payload, headers=headers)
 

@@ -69,10 +69,19 @@ def _log_threat(category: str, detail: str, severity: str = "medium"):
     log.append(entry)
     with open(THREAT_LOG, "w") as f:
         json.dump(log[-1000:], f, indent=2)
-    try:
-        from core.event_bus import bus
-        bus.alert(f"[SECURITY] {detail}", severity, category)
-    except: pass
+
+    # FILE_TAMPERED fires on every legitimate dev edit (this sentinel's own
+    # integrity baseline vs. Protocol 11's — same symptom, same fix: it was
+    # reaching the WebSocket chat via bus.alert() and drowning it in "a file
+    # changed" noise every time code gets edited. Still logged to disk and
+    # printed to the terminal either way. Real threats (CPU/RAM/disk spikes,
+    # brute-force attempts, unexpected ports) still alert normally.
+    if category != "FILE_TAMPERED":
+        try:
+            from core.event_bus import bus
+            bus.alert(f"[SECURITY] {detail}", severity, category)
+        except Exception:
+            pass
     print(f"[SENTINEL][{severity.upper()}] {category}: {detail}")
 
 _cooldowns: dict = {}

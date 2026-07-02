@@ -556,13 +556,16 @@ function tickClock() {
   document.getElementById('clock').textContent = new Date().toLocaleTimeString();
 }
 
+// Local clock display only — no network call, so this stays at 1s regardless
+// of the 30s-minimum policy below (that policy is about easing Groq load).
 tickClock(); setInterval(tickClock, 1000);
 connectWs();
-// Main vitals poll (CPU/RAM/disk/brain/alerts) — 10s is plenty and halves the
-// request volume vs. the original 5s, easing pressure on Groq health checks.
-pollAll(); setInterval(pollAll, 10000);
+// Main vitals poll (CPU/RAM/disk/brain/alerts) — 30s minimum on every
+// network-polling interval to keep background request volume off Groq's
+// rate limit.
+pollAll(); setInterval(pollAll, 30000);
 // Slow-changing panels (network scan, workshop, consciousness, goals, voice
-// budget) — these don't need to feel "live", so poll every 60s instead of 20s.
+// budget) — even less urgent, stay at 60s.
 fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus();
 setInterval(() => { fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus(); }, 60000);
 

@@ -294,15 +294,13 @@ def integrity_check_startup() -> dict:
     }
 
     if issues:
-        try:
-            from core.event_bus import bus
-            bus.alert(
-                f"[INTEGRITY] {len(issues)} file(s) modified while offline: "
-                f"{', '.join(issues)}",
-                "critical", "INTEGRITY"
-            )
-        except Exception:
-            pass
+        # Terminal only — this fires on every legitimate dev edit (any file
+        # in _WATCHED_FILES changing between restarts), so it was previously
+        # reaching the WebSocket via bus.alert() and polluting the chat log
+        # with what's usually just "I edited a file" noise, not a real
+        # security event. Still logged to logs/protocols.json via
+        # _log_protocol_event above, and visible via GET /stark/integrity —
+        # just not pushed into the chat interface.
         print(f"\n⚠ [PROTOCOL 11 — INTEGRITY] {len(issues)} file(s) changed offline:")
         for f in issues:
             print(f"   ● {f}")

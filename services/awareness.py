@@ -82,7 +82,7 @@ class SituationalAwareness:
             f"Event type: {event_type}\nData: {context_str}"
         )
         try:
-            narration = think(prompt)
+            narration = think(prompt, use_cache=True)
         except Exception as exc:
             log.warning("LLM unavailable for narration: %s", exc)
             narration = self._fallback_narration(event_type, data)

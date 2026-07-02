@@ -125,7 +125,7 @@ class JarvisConsciousness:
             f"Today's interactions:\n{turn_summary}"
         )
         try:
-            reflection = think(prompt)
+            reflection = think(prompt, use_cache=True)
         except Exception as exc:
             log.warning("LLM unavailable for daily_reflection: %s", exc)
             reflection = (
@@ -171,7 +171,7 @@ class JarvisConsciousness:
             f"Operational data:\n{context}"
         )
         try:
-            return think(prompt)
+            return think(prompt, use_cache=True)
         except Exception as exc:
             log.warning("LLM unavailable for self_assessment: %s", exc)
             return (
@@ -191,7 +191,7 @@ class JarvisConsciousness:
             f"Begin with 'My view on this:'\n\nTopic: {topic}"
         )
         try:
-            result = think(prompt)
+            result = think(prompt, use_cache=True)
             if not result.startswith("My view on this:"):
                 result = "My view on this: " + result
             return result
@@ -219,7 +219,7 @@ class JarvisConsciousness:
             f"Recent reflections:\n{recent_text}"
         )
         try:
-            return think(prompt)
+            return think(prompt, use_cache=True)
         except Exception as exc:
             log.warning("LLM unavailable for notice_and_comment: %s", exc)
             return (
@@ -250,7 +250,7 @@ class JarvisConsciousness:
             f"Today's interactions:\n{excerpts}"
         )
         try:
-            return think(prompt)
+            return think(prompt, use_cache=True)
         except Exception as exc:
             log.warning("LLM unavailable for what_i_learned_today: %s", exc)
             return f"I processed {len(turns)} turns today but cannot summarise at this time, sir."
