@@ -2,8 +2,10 @@
   'use strict';
 
   const HOST   = location.hostname;
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsPort     = location.protocol === 'https:' ? '' : ':8000';
   const API    = `http://${HOST}:8000`;
-  const WS_URL = `ws://${HOST}:8000/ws/chat`;
+  const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
   const TOKEN  = localStorage.getItem('jarvis_token') || '';
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -203,7 +205,7 @@
   // ── Voice ──────────────────────────────────────────────────────────────────
   function connectVoiceWs() {
     if (voiceWs && voiceWs.readyState === WebSocket.OPEN) return;
-    voiceWs = new WebSocket(`ws://${HOST}:8000/stark/voice/ws`);
+    voiceWs = new WebSocket(`${wsProtocol}//${HOST}${wsPort}/stark/voice/ws`);
     voiceWs.onmessage = ({data}) => {
       let msg; try { msg = JSON.parse(data); } catch { return; }
       if (msg.type === 'transcript') { addBubble('transcript', `🎙 "${msg.text}"`); addEvent('system', `Heard: ${msg.text}`); }
