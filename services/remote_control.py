@@ -6,7 +6,7 @@ whatever machine the server process itself is running on."""
 import os
 import subprocess
 
-from config.settings import TAILSCALE_IP, IS_RAILWAY
+from config.settings import TAILSCALE_IP, IS_HEADLESS_CLOUD
 
 MAC_USERNAME = os.getenv("MAC_USERNAME", "")
 
@@ -34,7 +34,7 @@ class RemoteMacControl:
         cmd = self.SAFE_COMMANDS[command_name]
 
         # Running on a hosted server with no local Mac access → SSH over Tailscale
-        if IS_RAILWAY and TAILSCALE_IP and MAC_USERNAME:
+        if IS_HEADLESS_CLOUD and TAILSCALE_IP and MAC_USERNAME:
             ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=no",
                       f"{MAC_USERNAME}@{TAILSCALE_IP}", cmd]
             try:
@@ -44,7 +44,7 @@ class RemoteMacControl:
             except Exception as e:
                 return {"error": str(e)}
 
-        if IS_RAILWAY:
+        if IS_HEADLESS_CLOUD:
             return {"error": "Remote control unavailable — TAILSCALE_IP/MAC_USERNAME not configured"}
 
         # Running locally → direct execution
@@ -59,7 +59,7 @@ class RemoteMacControl:
         """Take a screenshot and return it as base64 (local execution only —
         a remote SSH round-trip can't retrieve the file without scp)."""
         result = self.execute("screenshot")
-        if result.get("success") and not IS_RAILWAY:
+        if result.get("success") and not IS_HEADLESS_CLOUD:
             try:
                 import base64
                 with open("/tmp/jarvis_screen.png", "rb") as f:

@@ -297,18 +297,27 @@ RAILWAY_ENVIRONMENT   = os.getenv("RAILWAY_ENVIRONMENT", "")
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
 IS_RAILWAY            = bool(RAILWAY_ENVIRONMENT)
 
-# On Railway (or any headless cloud host): disable local-only hardware features
-# unless explicitly overridden via VOICE_ENABLED env var.
-VOICE_ENABLED      = (not IS_RAILWAY) and os.getenv("VOICE_ENABLED", "true").lower() == "true"
-WAKE_WORD_ENABLED  = not IS_RAILWAY
-SCREENSHOT_ENABLED = not IS_RAILWAY
+# Render sets these automatically. The actual deployment target for this
+# project is Render (jarvis-v5-sl2y.onrender.com) — IS_RAILWAY alone left
+# ENVIRONMENT reporting "local" in production and left VOICE_ENABLED/
+# WAKE_WORD_ENABLED/SCREENSHOT_ENABLED all on despite there being no
+# local hardware on Render either.
+RENDER_SERVICE_ID = os.getenv("RENDER_SERVICE_ID", "")
+IS_RENDER         = bool(os.getenv("RENDER") or RENDER_SERVICE_ID)
+IS_HEADLESS_CLOUD = IS_RAILWAY or IS_RENDER
+
+# On any headless cloud host: disable local-only hardware features unless
+# explicitly overridden via VOICE_ENABLED env var.
+VOICE_ENABLED      = (not IS_HEADLESS_CLOUD) and os.getenv("VOICE_ENABLED", "true").lower() == "true"
+WAKE_WORD_ENABLED  = not IS_HEADLESS_CLOUD
+SCREENSHOT_ENABLED = not IS_HEADLESS_CLOUD
 
 PUBLIC_URL = (
     f"https://{RAILWAY_PUBLIC_DOMAIN}" if RAILWAY_PUBLIC_DOMAIN
     else os.getenv("PUBLIC_URL", "http://localhost:8000")
 )
 
-ENVIRONMENT = "railway" if IS_RAILWAY else os.getenv("ENVIRONMENT", "local")
+ENVIRONMENT = "railway" if IS_RAILWAY else "render" if IS_RENDER else os.getenv("ENVIRONMENT", "local")
 
 # ── Messaging integrations ────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN      = os.getenv("TELEGRAM_BOT_TOKEN", "")

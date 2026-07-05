@@ -326,11 +326,11 @@ function connectWs() {
         } else if (data.type === 'stream_end') {
           if (streamBubble) streamBubble.textContent = data.response ?? streamBubble.textContent;
           streamBubble = null;
-          playLatestVoice();
+          if (data.has_audio !== false) playLatestVoice();
         } else if (data.type === 'response') {
           appendMsg('ai', data.response || '(no response)');
           streamBubble = null;
-          playLatestVoice();
+          if (data.has_audio !== false) playLatestVoice();
         } else if (data.type === 'error') {
           appendMsg('ai', `Error: ${data.message}`);
           streamBubble = null;

@@ -226,7 +226,8 @@ def _cache_key(messages: list) -> str:
     return hashlib.md5(json.dumps(messages, sort_keys=True).encode()).hexdigest()
 
 
-def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query: str) -> dict | None:
+def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query: str,
+                         temperature: float | None = None) -> dict | None:
     """Dispatch a chat() call to one of the Anthropic tiers. Enriches
     system context for opus/fable only (sonnet stays fast/cheap — the rich
     context builder itself costs nothing extra in API calls, but adding it
@@ -254,7 +255,7 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
     budget = get_thinking_budget(tier, query) if query else 0
     result = call_anthropic(user_messages, system, config["id"],
                             max_tokens=min(max_tokens, config["max_tokens"]) if max_tokens else config["max_tokens"],
-                            thinking_budget=budget)
+                            thinking_budget=budget, temperature=temperature)
     if not result:
         return None
 
@@ -322,7 +323,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     _anthropic_start = time.time()
     tier = _resolve_tier(force_model, query)
     if tier in ANTHROPIC_REGISTRY:
-        result = _call_anthropic_tier(tier, messages, max_tokens, query)
+        result = _call_anthropic_tier(tier, messages, max_tokens, query, temperature=temperature)
         if result:
             result["latency_ms"] = round((time.time() - _anthropic_start) * 1000, 2)
             if use_cache:
@@ -399,7 +400,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
 
 def think(user_input: str, context: str = "",
           system: str | None = None, max_tokens: int = 1024, use_cache: bool = False,
-          force_model: str | None = None) -> str:
+          force_model: str | None = None, temperature: float | None = None) -> str:
     """Simple one-shot think call. Returns the response string.
     Pass use_cache=True for background/non-critical calls to avoid piling
     onto the rate limit with repeated near-identical prompts.
@@ -407,15 +408,20 @@ def think(user_input: str, context: str = "",
     "reasoning"/"research"/"coder") or paid Anthropic tiers ("sonnet"/
     "opus"/"fable", each gated on ANTHROPIC_API_KEY + enabled + daily cap,
     falling back down the chain otherwise) — or leave unset for smart
-    auto-classification when USE_SMART_ROUTING is enabled."""
+    auto-classification when USE_SMART_ROUTING is enabled.
+    Pass temperature to override the default (0.6 — decisive without being
+    robotic). Ignored when routed to an Anthropic tier with extended
+    thinking enabled: the API requires temperature=1 whenever a `thinking`
+    block is present, and core/llm/anthropic_client.py already enforces
+    that regardless of what's passed here — silently overriding a caller's
+    explicit choice would be more surprising than just documenting it."""
     sys_prompt = system or JARVIS_PERSONALITY
     messages = [{"role": "system", "content": sys_prompt}]
     if context:
         messages.append({"role": "system", "content": f"Context:\n{context}"})
     messages.append({"role": "user", "content": user_input})
-    # temperature 0.6 = decisive without being robotic
-    return chat(messages, max_tokens=max_tokens, temperature=0.6, use_cache=use_cache,
-               force_model=force_model, query=user_input)["content"]
+    return chat(messages, max_tokens=max_tokens, temperature=temperature if temperature is not None else 0.6,
+               use_cache=use_cache, force_model=force_model, query=user_input)["content"]
 
 
 # Health checks are cached — calling these hits a real API endpoint each time

@@ -125,6 +125,21 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _persist, msg, full_txt)
 
+        # Render has no speakers, but the browser does — generate audio in
+        # the background (never blocks the text response) and tell the
+        # client it's ready to fetch from /stark/voice/audio. Previously
+        # only the non-streaming full pipeline (core/brain_v2.py Executor)
+        # did this; this fast streaming path — the one actually used for
+        # ordinary chat — never generated audio at all.
+        has_audio = False
+        try:
+            from config.settings import VOICE_ENABLED
+            if VOICE_ENABLED:
+                has_audio = True
+                loop.run_in_executor(None, _generate_voice_background, full_txt)
+        except Exception:
+            pass
+
         from config.settings import GROQ_MODEL
         await websocket.send_json({
             "type":     "stream_end",
@@ -132,6 +147,7 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
             "model":    GROQ_MODEL,
             "provider": "groq",
             "latency_ms": latency,
+            "has_audio": has_audio,
             "meta": {
                 "action":        intent.action,
                 "complexity":    intent.complexity,
@@ -154,3 +170,13 @@ def _persist(user_msg: str, response: str):
     save_turn(user_msg, response)
     store_long_term(user_msg, response)
     evolution.log(user_msg, response, "stream", 0)
+
+
+def _generate_voice_background(text: str):
+    """Writes static_voice.mp3 (served at GET /stark/voice/audio) — never
+    called on the event loop directly, always via run_in_executor."""
+    try:
+        from services.elevenlabs_voice import generate_for_network
+        generate_for_network(text)
+    except Exception as e:
+        print(f"[WebSocket] Background voice generation failed: {e}")

@@ -18,4 +18,10 @@ def root():
 
 @router.get("/health")
 def health():
-    return {"healthy": True, "state": state.snapshot()}
+    import time
+    from server.api import BOOT_TIME
+    return {
+        "healthy": True,
+        "uptime_seconds": int(time.time() - BOOT_TIME),
+        "state": state.snapshot(),
+    }

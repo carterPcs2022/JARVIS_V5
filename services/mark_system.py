@@ -77,6 +77,56 @@ _DEFAULT_CAPABILITIES = [
 ]
 
 
+def count_capabilities(app) -> int:
+    """Real endpoint count, not the ~10-item static _DEFAULT_CAPABILITIES
+    list — JARVIS V5 has hundreds of registered /stark/ routes across all
+    the feature batches built this project; the static list badly
+    undercounted actual capability. Pass in the live FastAPI app (from
+    server/api.py) — kept out of MarkSystem itself to avoid a circular
+    import between services.mark_system and server.api.
+
+    Recurses into sub-routers: this FastAPI version wraps every
+    app.include_router() call as an opaque _IncludedRouter with no direct
+    .path, so a flat scan of app.routes only sees the handful of routes
+    declared directly on `app` (e.g. /hud/*) and badly undercounts —
+    verified live: a flat scan found 13, the real total (via
+    app.openapi()) is 364+. Walking .routes recursively finds the actual
+    leaf routes wherever they're nested."""
+    seen_paths = set()
+
+    def _walk(routes):
+        for route in routes:
+            path = getattr(route, "path", None)
+            if path and path.startswith("/stark/"):
+                seen_paths.add(path)
+            # This FastAPI version's _IncludedRouter exposes the actual
+            # APIRouter as .original_router (not .routes directly) —
+            # verified live, since a naive getattr(route, "routes", None)
+            # silently found nothing and undercounted just like the flat
+            # scan this function replaced.
+            nested = getattr(route, "original_router", None) or route
+            sub_routes = getattr(nested, "routes", None)
+            if sub_routes and sub_routes is not routes:
+                _walk(sub_routes)
+
+    try:
+        _walk(app.routes)
+    except Exception:
+        pass
+
+    # Fallback (and cross-check) if the route-tree walk above ever badly
+    # undercounts again on some future FastAPI internals change —
+    # app.openapi() is the public, stable API for "what's actually
+    # registered," just more expensive to call than a route-tree walk.
+    if len(seen_paths) < 20:
+        try:
+            seen_paths = {p for p in app.openapi().get("paths", {}) if p.startswith("/stark/")}
+        except Exception:
+            pass
+
+    return len(seen_paths)
+
+
 def _to_roman(n: int) -> str:
     """Convert integer to Roman numeral string."""
     if n < 1:
@@ -138,17 +188,23 @@ class MarkSystem:
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def current_mark(self) -> dict:
-        """Return a status snapshot of the current Mark."""
+    def current_mark(self, real_capability_count: int | None = None) -> dict:
+        """Return a status snapshot of the current Mark. Pass
+        real_capability_count (from count_capabilities(app), computed by
+        the caller in server/api.py) to report the actual live endpoint
+        count instead of just the length of the illustrative
+        _DEFAULT_CAPABILITIES list."""
         m = self._data["current_mark"]
         history = self._data.get("history", [])
         latest = history[-1] if history else {}
         uptime_hours = round((time.time() - self._start_time) / 3600, 2)
+        capabilities = latest.get("capabilities", _DEFAULT_CAPABILITIES)
         return {
             "mark":               _to_roman(m),
             "version":            m,
             "codename":           _MARK_CODENAMES.get(m, "CLASSIFIED"),
-            "capabilities":       latest.get("capabilities", _DEFAULT_CAPABILITIES),
+            "capabilities":       capabilities,
+            "capability_count":   real_capability_count if real_capability_count is not None else len(capabilities),
             "activated":          latest.get("activated", datetime.now(timezone.utc).isoformat()),
             "total_interactions": self._data.get("total_interactions", 0),
             "modules_loaded":     self._data.get("modules_loaded", len(_SUIT_MODULES)),

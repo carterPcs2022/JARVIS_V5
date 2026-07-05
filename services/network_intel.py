@@ -510,14 +510,31 @@ class NetworkIntelligence:
     # ── Full map ──────────────────────────────────────────────────────────────
 
     def network_map(self) -> dict:
-        """Return a full dict with all devices, internet health, and last scan time."""
-        devices = self.scan_network()
-        health  = self.internet_health()
+        """Return a full dict with all devices, internet health, and last
+        scan time. scan_network()/internet_health()/_local_subnet() are
+        each already internally guarded, but wrap them here too — Render's
+        sandboxed network namespace can behave unexpectedly in ways a
+        single component's try/except might not anticipate, and this
+        endpoint backs the HUD's network map, which should never just
+        500 with no data."""
+        try:
+            devices = self.scan_network()
+        except Exception:
+            devices = []
+        try:
+            health = self.internet_health()
+        except Exception:
+            health = {"online": False, "latency_ms": None, "targets": {}}
+        try:
+            subnet = _local_subnet()
+        except Exception:
+            subnet = "unknown"
+
         return {
             "devices":        devices,
             "device_count":   len(devices),
             "internet":       health,
-            "subnet":         _local_subnet(),
+            "subnet":         subnet,
             "last_scanned":   _now(),
         }
 

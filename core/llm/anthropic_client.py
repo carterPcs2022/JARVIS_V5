@@ -35,10 +35,12 @@ def get_thinking_budget(tier: str, query: str) -> int:
 
 
 def call_anthropic(messages: list, system: str, model: str, max_tokens: int = 1024,
-                   thinking_budget: int = 0) -> dict | None:
+                   thinking_budget: int = 0, temperature: float | None = None) -> dict | None:
     """Call an Anthropic model, optionally with extended thinking.
-    thinking_budget=0 disables it (plain call, any temperature). >0 enables
-    it (forces temperature=1 per the API's requirement)."""
+    thinking_budget=0 disables it, so `temperature` (if given) is honored.
+    thinking_budget>0 enables it, which forces temperature=1 per the API's
+    requirement — any explicit `temperature` is ignored in that case rather
+    than sent and rejected by the API."""
     if not ANTHROPIC_API_KEY:
         return None
 
@@ -57,6 +59,8 @@ def call_anthropic(messages: list, system: str, model: str, max_tokens: int = 10
             budget = min(thinking_budget, max(max_tokens - 512, 1024))
             params["thinking"] = {"type": "enabled", "budget_tokens": budget}
             params["temperature"] = 1
+        elif temperature is not None:
+            params["temperature"] = temperature
 
         response = client.messages.create(**params)
 
@@ -79,5 +83,5 @@ def call_anthropic(messages: list, system: str, model: str, max_tokens: int = 10
         # API issue with the beta param), retry once without it rather than
         # failing the whole request.
         if thinking_budget > 0:
-            return call_anthropic(messages, system, model, max_tokens, thinking_budget=0)
+            return call_anthropic(messages, system, model, max_tokens, thinking_budget=0, temperature=temperature)
         return None

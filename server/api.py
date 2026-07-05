@@ -4,6 +4,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 import os
+import time
+
+# Process-level uptime — distinct from the OS/container uptime that
+# core.tools.system.snapshot()'s "uptime_hours" reports. On Render the
+# container can persist across deploys in ways that make OS uptime
+# misleading; this is uptime of the actual JARVIS process.
+BOOT_TIME = time.time()
 
 from utils.security import add_cors, verify_token
 from server.websocket import router as ws_router
@@ -164,8 +171,8 @@ async def hud_status():
     except Exception:
         recent_alerts = []
     try:
-        from services.mark_system import mark_system
-        mark = mark_system.current_mark()
+        from services.mark_system import mark_system, count_capabilities
+        mark = mark_system.current_mark(real_capability_count=count_capabilities(app))
     except Exception:
         mark = {}
     try:
@@ -188,6 +195,7 @@ async def hud_status():
         # provider (Groq or an Anthropic tier). diag.active_model below is
         # a same-value fallback for older HUD builds that read brain.model.
         "model":    model,
+        "uptime_seconds": int(time.time() - BOOT_TIME),
         "provider": provider,
         "tier":     tier,
         "system": {
@@ -229,7 +237,7 @@ async def startup():
     from services.sentinel import start as sentinel_start
     from core.event_bus import bus
     from core.llm.router import check_groq, check_ollama
-    from config.settings import IS_RAILWAY, ENVIRONMENT
+    from config.settings import ENVIRONMENT
 
     state.set("environment", ENVIRONMENT)
     print(f"[JARVIS] Environment: {ENVIRONMENT}")
@@ -316,13 +324,13 @@ async def startup():
         print("=" * 50 + "\n")
 
         try:
-            from services.mark_system import mark_system
+            from services.mark_system import mark_system, count_capabilities
             import services.sentinel as sentinel_mod
-            mark = mark_system.current_mark()
+            mark = mark_system.current_mark(real_capability_count=count_capabilities(app))
             sentinel_armed = "armed" if sentinel_mod._running else "standing by"
             announcement = (
                 f"Mark {mark.get('mark','V')} online. "
-                f"{len(mark.get('capabilities', []))} capabilities active. "
+                f"{mark.get('capability_count', 0)} capabilities active. "
                 f"{'Groq online.' if groq_ok else 'Groq offline — running on local systems.'} "
                 f"Sentinel {sentinel_armed}. Standing by."
             )
