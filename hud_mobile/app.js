@@ -8,6 +8,24 @@
   const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
   const TOKEN  = localStorage.getItem('jarvis_token') || '';
 
+  // ── Suit assembly boot tones (Web Audio, no audio files needed) ─────────────
+  let _assemblyIndex = 0;
+  function playAssemblyTone(index) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = 220 * Math.pow(1.2, index);
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.5);
+    } catch (e) { /* Web Audio unsupported/blocked — silent no-op */ }
+  }
+
   // ── DOM refs ───────────────────────────────────────────────────────────────
   const chatLog    = document.getElementById('chat-log');
   const input      = document.getElementById('msg-input');
@@ -156,6 +174,21 @@
         case 'alert':
           addEvent('alert', msg.data?.message || JSON.stringify(msg.data));
           break;
+        case 'suit_assembly': {
+          // core.event_bus.publish("suit_assembly", event) wraps every event
+          // from the sequence — including the final "suit_complete" one —
+          // under the same outer type, so the real per-event type lives at
+          // msg.data.type, not msg.type.
+          const d = msg.data || {};
+          if (d.type === 'suit_complete') {
+            addBubble('system', d.message || 'All systems nominal.');
+            addEvent('ok', d.message || 'Suit assembly complete');
+          } else {
+            addEvent('system', `${d.icon || ''} ${d.system || ''}: ${d.status || ''}`);
+            playAssemblyTone(_assemblyIndex++);
+          }
+          break;
+        }
         case 'error':
           endStream(null);
           addBubble('error', msg.message || 'Error');

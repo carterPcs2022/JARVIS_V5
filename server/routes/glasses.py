@@ -77,8 +77,18 @@ async def glasses_listen(audio: UploadFile = File(...)):
             response_text = quick
             latency_note = "quick_response"
         else:
+            # Tone analysis costs one extra "instant"-tier LLM call, so skip
+            # it on the quick-response path above — only run it when we're
+            # already paying for a full brain call.
+            tone = analyze_voice_tone(text)
+            brain_input = text
+            if tone.get("stress_level", 5) > 7:
+                brain_input = f"[User sounds stressed/urgent — be extra supportive and direct] {text}"
+            elif tone.get("energy") == "high":
+                brain_input = f"[User's energy is high — match their energy] {text}"
+
             from core.brain_v2 import brain
-            result = brain.process_dict(text)
+            result = brain.process_dict(brain_input)
             response_text = result["response"]
             latency_note = "brain"
 
@@ -231,3 +241,36 @@ def _check_whisper() -> bool:
     """Whisper is available either way — locally via faster-whisper, or via
     Groq's hosted API as the fallback used in production."""
     return True
+
+
+def analyze_voice_tone(transcript: str) -> dict:
+    """Analyze emotional tone from the spoken transcript (word choice,
+    punctuation, urgency) — one cheap 'instant' tier LLM call.
+    Returns: {emotion, energy, stress_level, confidence}."""
+    from core.llm.router import think
+    import json
+
+    result = think(
+        f"Analyze the emotional tone and energy level in this spoken "
+        f"message:\n\n'{transcript}'\n\n"
+        f"Consider: word choice, punctuation patterns, urgency, sentiment.\n"
+        f'Reply as JSON: {{"emotion": str, "energy": "low/medium/high", '
+        f'"stress_level": 1-10, "confidence": "low/medium/high"}}',
+        force_model="instant",
+    )
+    try:
+        tone = json.loads(result.strip())
+    except Exception:
+        tone = {"emotion": "neutral", "energy": "medium", "stress_level": 5, "confidence": "low"}
+
+    try:
+        from core.memory import store_emotional_memory
+        store_emotional_memory(
+            topic=transcript[:50],
+            emotion=tone.get("emotion", "neutral"),
+            intensity=tone.get("stress_level", 5),
+        )
+    except Exception:
+        pass
+
+    return tone

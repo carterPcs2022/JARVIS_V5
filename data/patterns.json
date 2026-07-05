@@ -5,17 +5,24 @@
     ],
     "17": [
       "say only the word OK"
+    ],
+    "22": [
+      "hi"
     ]
   },
   "daily": {
     "Wednesday": [
       "Afternoon Jarvis",
       "say only the word OK"
+    ],
+    "Saturday": [
+      "hi"
     ]
   },
   "sequences": [
     "Afternoon Jarvis",
-    "say only the word OK"
+    "say only the word OK",
+    "hi"
   ],
   "topics": {
     "jarvis": 1,

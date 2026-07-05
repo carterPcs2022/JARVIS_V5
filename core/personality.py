@@ -142,3 +142,25 @@ def build_system_prompt(base: str) -> str:
         return base
 
     return base + "\n\nUSER ADAPTATIONS:\n" + "\n".join(f"- {a}" for a in additions)
+
+
+def calibrate_expertise(topic: str) -> str:
+    """What's the user's expertise level on this topic, based on past
+    conversations? Returns: beginner / intermediate / expert."""
+    from core.llm.router import think
+    from core.memory import recall_facts
+
+    facts = recall_facts(topic, k=5)
+    conversation_history = (
+        "\n".join(f["fact"] for f in facts) if facts
+        else "No prior conversations on this topic."
+    )
+
+    result = think(
+        f"Based on past conversations, assess the user's expertise level "
+        f"on '{topic}'.\n"
+        f"History: {conversation_history}\n"
+        f"Reply: beginner, intermediate, or expert",
+        force_model="instant",
+    )
+    return result.strip().lower()

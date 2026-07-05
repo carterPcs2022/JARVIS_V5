@@ -81,3 +81,23 @@ def reason_and_verify(question: str, context: str = "") -> dict:
     final = think(synthesis_prompt, force_model="standard")
 
     return {"answer": final, "draft": draft, "challenge": challenge, "verified": True, "used_cot": True}
+
+
+# ── Second-order thinking ───────────────────────────────────────────────────────
+# Opt-in — one extra LLM call on top of whatever produced first_answer.
+
+def second_order_think(query: str, first_answer: str) -> str:
+    """"And then what?" thinking — second and third-order consequences of
+    an initial answer, not just the immediate one."""
+    return think(
+        f"Given this situation and initial answer:\n"
+        f"Question: {query}\n"
+        f"Initial answer: {first_answer}\n\n"
+        f"Now think 2-3 steps ahead:\n"
+        f"- What are the second-order consequences?\n"
+        f"- What problems might this solution create?\n"
+        f"- What opportunities does this open up?\n"
+        f"- What should be prepared for?\n"
+        f"Think like a chess player, not a checkers player.",
+        force_model="reasoning",
+    )

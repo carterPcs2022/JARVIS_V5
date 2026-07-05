@@ -24,6 +24,7 @@ from server.routes.glasses import router as glasses_router
 from server.routes.protocols_18_35 import router as protocols_18_35_router
 from server.routes.brain_enhancement import router as brain_enhancement_router
 from server.routes.final_upgrade import router as final_upgrade_router
+from server.routes.final_completion import router as final_completion_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -47,6 +48,7 @@ app.include_router(glasses_router)
 app.include_router(protocols_18_35_router)
 app.include_router(brain_enhancement_router)
 app.include_router(final_upgrade_router)
+app.include_router(final_completion_router)
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 
@@ -76,6 +78,16 @@ async def hud_desktop():
 @app.get("/hud/mobile")
 async def hud_mobile_view():
     return FileResponse(HUD_DIR / "index.html")
+
+
+@app.get("/hud/holographic")
+async def holographic_hud():
+    return FileResponse(HUD_DIR / "holographic.html")
+
+
+@app.get("/hud/intel")
+async def intel_map():
+    return FileResponse(HUD_DIR / "intelligence_map.html")
 
 
 @app.get("/hud/sw.js")
@@ -239,6 +251,15 @@ async def startup():
 
         groq_ok = state.get("groq_available", False)
         ollama_ok = state.get("ollama_available", False)
+
+        # ── Suit assembly sequence — streams to any connected HUD ─────────────
+        try:
+            from services.suit_assembly import assembly
+            for event in assembly.run_assembly_sequence(groq_ok=groq_ok):
+                bus.publish("suit_assembly", event)
+        except Exception as e:
+            print(f"[JARVIS] Suit assembly sequence skipped: {e}")
+
         print("=" * 50)
         print("JARVIS V5 STARTUP COMPLETE")
         print("=" * 50)

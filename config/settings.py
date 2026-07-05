@@ -214,7 +214,7 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3")
 # ── Server ────────────────────────────────────────────────────────────────────
 HOST           = os.getenv("JARVIS_HOST", "0.0.0.0")
 PORT           = int(os.getenv("JARVIS_PORT", 8000))
-TAILSCALE_IP   = os.getenv("TAILSCALE_IP", "100.YOUR_TAILSCALE_IP")
+TAILSCALE_IP   = os.getenv("TAILSCALE_IP", "")
 
 # ── Security ──────────────────────────────────────────────────────────────────
 SECRET_KEY     = os.getenv("JARVIS_SECRET_KEY", "change-me-in-production")

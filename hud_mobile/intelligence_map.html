@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>J.A.R.V.I.S — Global Intelligence</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    body { margin: 0; background: #040810; }
+    #map { height: 100vh; filter: invert(1) hue-rotate(180deg); }
+    #overlay {
+      position: absolute; top: 20px; left: 20px;
+      z-index: 1000; color: #00b4ff;
+      font-family: monospace; background: rgba(4,8,16,0.8);
+      padding: 16px; border: 1px solid rgba(0,180,255,0.3);
+    }
+    .intel-badge {
+      display: inline-block; padding: 4px 8px; margin: 2px;
+      border: 1px solid #00b4ff; font-size: 11px;
+      letter-spacing: 2px;
+    }
+    #back-link { position: absolute; top: 20px; right: 20px; z-index: 1000;
+                  color: #00b4ff; font-family: monospace; text-decoration: none;
+                  border: 1px solid #00b4ff; padding: 6px 12px; background: rgba(4,8,16,0.8); }
+  </style>
+</head>
+<body>
+  <a id="back-link" href="/hud">&larr; HUD</a>
+  <div id="overlay">
+    <div style="font-size:14px;letter-spacing:4px;margin-bottom:8px">
+      GLOBAL INTELLIGENCE
+    </div>
+    <div id="feed-count" class="intel-badge">FEEDS: –</div>
+    <div id="alert-count" class="intel-badge">ALERTS: –</div>
+    <div id="threat-count" class="intel-badge">THREATS: –</div>
+  </div>
+  <div id="map"></div>
+  <script>
+    const TOKEN = localStorage.getItem('jarvis_token') || '';
+
+    const map = L.map('map', {zoomControl: false}).setView([20, 0], 2);
+
+    L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {attribution: '© OpenStreetMap'}
+    ).addTo(map);
+
+    function addMarker(lat, lng, label, color='#00b4ff') {
+      const icon = L.divIcon({
+        html: `<div style="width:10px;height:10px;
+               border-radius:50%;background:${color};
+               box-shadow:0 0 10px ${color}"></div>`,
+        className: '',
+      });
+      L.marker([lat, lng], {icon})
+       .bindPopup(`<b style="color:#00b4ff">${label}</b>`)
+       .addTo(map);
+    }
+
+    let markers = [];
+    function clearMarkers() {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+    }
+
+    async function loadIntelligence() {
+      try {
+        const headers = TOKEN ? {'Authorization': `Bearer ${TOKEN}`} : {};
+
+        // Keyword watch hits
+        const watchRes = await fetch(`/stark/watches/hits`, {headers});
+        if (watchRes.ok) {
+          const hits = await watchRes.json();
+          const list = Array.isArray(hits) ? hits : (hits.hits || []);
+          document.getElementById('feed-count').textContent = `FEEDS: ${list.length}`;
+          // NOTE: no real geolocation source for hit origins yet — scattered
+          // placement is a placeholder until IP/source geolocation is wired in.
+          list.slice(0, 20).forEach(hit => {
+            addMarker(
+              (Math.random() * 140) - 70,
+              (Math.random() * 360) - 180,
+              hit.keyword || 'Alert',
+              '#00ffcc'
+            );
+          });
+        }
+
+        // Threats
+        const threatRes = await fetch(`/stark/threats/log`, {headers});
+        if (threatRes.ok) {
+          const threats = await threatRes.json();
+          const list = Array.isArray(threats) ? threats : (threats.threats || []);
+          document.getElementById('threat-count').textContent = `THREATS: ${list.length}`;
+          list.slice(0, 10).forEach(t => {
+            addMarker(
+              (Math.random() * 140) - 70,
+              (Math.random() * 360) - 180,
+              t.category || 'Threat',
+              '#ff3333'
+            );
+          });
+        }
+      } catch(e) {
+        console.error('Intelligence load failed:', e);
+      }
+    }
+
+    loadIntelligence();
+    setInterval(loadIntelligence, 60000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>J.A.R.V.I.S — Holographic Display</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    body { background: #040810; margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #overlay { position: absolute; top: 20px; left: 20px;
+                color: #00b4ff; font-family: monospace; }
+    .mode-btn { background: transparent; border: 1px solid #00b4ff;
+                color: #00b4ff; padding: 8px 16px; margin: 4px;
+                cursor: pointer; font-family: monospace; }
+    .mode-btn:active { background: rgba(0,180,255,0.2); }
+    #back-link { position: absolute; top: 20px; right: 20px; z-index: 1000;
+                  color: #00b4ff; font-family: monospace; text-decoration: none;
+                  border: 1px solid #00b4ff; padding: 6px 12px; }
+  </style>
+</head>
+<body>
+  <a id="back-link" href="/hud">&larr; HUD</a>
+  <div id="overlay">
+    <div style="font-size:20px;letter-spacing:4px;margin-bottom:16px">
+      J.A.R.V.I.S — HOLOGRAPHIC DISPLAY
+    </div>
+    <button class="mode-btn" onclick="showMode('knowledge')">KNOWLEDGE GRAPH</button>
+    <button class="mode-btn" onclick="showMode('network')">NETWORK MAP</button>
+    <button class="mode-btn" onclick="showMode('vitals')">ARC REACTOR</button>
+    <button class="mode-btn" onclick="showMode('threat')">THREAT RADAR</button>
+    <div id="info" style="margin-top:16px;font-size:12px"></div>
+  </div>
+  <script>
+    const scene    = new THREE.Scene();
+    const camera   = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+    camera.position.z = 5;
+
+    scene.add(new THREE.AmbientLight(0x00b4ff, 0.3));
+    const pointLight = new THREE.PointLight(0x00b4ff, 1, 100);
+    pointLight.position.set(0, 0, 5);
+    scene.add(pointLight);
+
+    let currentObjects = [];
+    let mode = 'vitals';
+
+    function clearScene() {
+        currentObjects.forEach(obj => scene.remove(obj));
+        currentObjects = [];
+    }
+
+    // ── ARC REACTOR MODE ──────────────────────────────────
+    function buildArcReactor() {
+        clearScene();
+        const core = new THREE.Mesh(
+            new THREE.SphereGeometry(0.3, 32, 32),
+            new THREE.MeshBasicMaterial({color: 0x00b4ff})
+        );
+        scene.add(core); currentObjects.push(core);
+
+        [0.8, 1.2, 1.6].forEach((r) => {
+            const ring = new THREE.Mesh(
+                new THREE.TorusGeometry(r, 0.02, 16, 100),
+                new THREE.MeshBasicMaterial({color: 0x00b4ff, wireframe: true})
+            );
+            ring.rotation.x = Math.PI / 2;
+            scene.add(ring); currentObjects.push(ring);
+        });
+
+        const particles = new THREE.BufferGeometry();
+        const positions = new Float32Array(300);
+        for(let i = 0; i < 300; i++) {
+            positions[i] = (Math.random() - 0.5) * 4;
+        }
+        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const pMaterial = new THREE.PointsMaterial({color: 0x00ffcc, size: 0.02});
+        const particleSystem = new THREE.Points(particles, pMaterial);
+        scene.add(particleSystem);
+        currentObjects.push(particleSystem);
+
+        fetchAndShowInfo('/stark/suit/full', d => d.narrative || '');
+    }
+
+    // ── KNOWLEDGE GRAPH / NETWORK MODE ────────────────────
+    function buildKnowledgeGraph(data) {
+        clearScene();
+        const nodes = data?.nodes || [
+            {id: 'JARVIS', type: 'system'},
+            {id: 'Projects', type: 'project'},
+            {id: 'People', type: 'person'},
+            {id: 'Goals', type: 'goal'},
+        ];
+        const colors = {system: 0x00b4ff, project: 0x00ffcc,
+                        person: 0xffaa00, goal: 0xff6666};
+        nodes.forEach((node, i) => {
+            const angle  = (i / nodes.length) * Math.PI * 2;
+            const radius = 2;
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15, 16, 16),
+                new THREE.MeshBasicMaterial({color: colors[node.type] || 0x00b4ff})
+            );
+            sphere.position.set(
+                Math.cos(angle) * radius,
+                Math.sin(angle) * radius * 0.5,
+                (Math.random() - 0.5) * 2
+            );
+            sphere.userData = node;
+            scene.add(sphere);
+            currentObjects.push(sphere);
+        });
+    }
+
+    // ── THREAT RADAR MODE ─────────────────────────────────
+    function buildThreatRadar() {
+        clearScene();
+        [1, 2, 3].forEach(r => {
+            const circle = new THREE.Mesh(
+                new THREE.TorusGeometry(r, 0.01, 16, 100),
+                new THREE.MeshBasicMaterial({color: 0x003344})
+            );
+            scene.add(circle); currentObjects.push(circle);
+        });
+        const sweep = new THREE.Mesh(
+            new THREE.PlaneGeometry(3, 0.02),
+            new THREE.MeshBasicMaterial({color: 0x00ff44, transparent: true, opacity: 0.7})
+        );
+        sweep.position.x = 1.5;
+        const sweepGroup = new THREE.Group();
+        sweepGroup.add(sweep);
+        scene.add(sweepGroup);
+        currentObjects.push(sweepGroup);
+        sweepGroup._isSweep = true;
+    }
+
+    async function fetchAndShowInfo(path, extract) {
+        try {
+            const token = localStorage.getItem('jarvis_token') || '';
+            const res = await fetch(`${location.protocol}//${location.host}${path}`, {
+                headers: token ? {'Authorization': `Bearer ${token}`} : {}
+            });
+            if (res.ok) {
+                const data = await res.json();
+                document.getElementById('info').textContent = extract(data).slice(0, 300);
+            }
+        } catch (e) { /* holographic display is decorative — fail silently */ }
+    }
+
+    function showMode(m) {
+        mode = m;
+        if (m === 'vitals')    buildArcReactor();
+        if (m === 'knowledge') buildKnowledgeGraph(null);
+        if (m === 'threat')    buildThreatRadar();
+        if (m === 'network')   buildKnowledgeGraph(null);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const t = Date.now() * 0.001;
+        currentObjects.forEach((obj, i) => {
+            if (obj.geometry?.type === 'TorusGeometry') {
+                obj.rotation.z += 0.003 * (i + 1);
+            }
+            if (obj._isSweep) {
+                obj.rotation.z = t * 1.5;
+            }
+        });
+        renderer.render(scene, camera);
+    }
+
+    buildArcReactor();
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
