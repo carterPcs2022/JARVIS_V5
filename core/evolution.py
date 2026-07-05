@@ -73,3 +73,64 @@ def feedback(session_index: int, value: str) -> bool:
         _save(data)
         return True
     return False
+
+
+# ── Fable 5 usage/cost tracking ────────────────────────────────────────────────
+from config.settings import BASE_DIR
+FABLE_STATS_FILE = BASE_DIR / "memory" / "fable_stats.json"
+
+# Anthropic's published per-million-token pricing for their top-end model
+# class (same bracket as Opus) — an estimate, not a billing source of
+# truth. Check the Anthropic Console for actual spend.
+_FABLE_INPUT_COST_PER_M = 15.0
+_FABLE_OUTPUT_COST_PER_M = 75.0
+
+
+def _load_fable_stats() -> dict:
+    if FABLE_STATS_FILE.exists():
+        try:
+            return json.loads(FABLE_STATS_FILE.read_text())
+        except Exception:
+            pass
+    return {"total_calls": 0, "total_think_tokens": 0, "total_out_tokens": 0, "queries": []}
+
+
+def _save_fable_stats(stats: dict):
+    FABLE_STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    FABLE_STATS_FILE.write_text(json.dumps(stats, indent=2))
+
+
+def record_fable_response(query: str, response: str, thinking_tokens: int, response_tokens: int):
+    """Track Fable 5 usage — called from core/llm/router.py after every
+    successful Fable call."""
+    stats = _load_fable_stats()
+    stats["total_calls"] = stats.get("total_calls", 0) + 1
+    stats["total_think_tokens"] = stats.get("total_think_tokens", 0) + thinking_tokens
+    stats["total_out_tokens"] = stats.get("total_out_tokens", 0) + response_tokens
+    stats.setdefault("queries", []).append({
+        "query": (query or "")[:100], "think_t": thinking_tokens, "out_t": response_tokens,
+        "ts": datetime.now().isoformat(),
+    })
+    stats["queries"] = stats["queries"][-200:]
+    _save_fable_stats(stats)
+
+
+def fable_usage_report() -> dict:
+    """How much Fable have we used, and roughly what has it cost?"""
+    stats = _load_fable_stats()
+    calls = stats.get("total_calls", 0)
+    think_tok = stats.get("total_think_tokens", 0)
+    out_tok = stats.get("total_out_tokens", 0)
+
+    input_cost = (think_tok / 1_000_000) * _FABLE_INPUT_COST_PER_M
+    output_cost = (out_tok / 1_000_000) * _FABLE_OUTPUT_COST_PER_M
+    total_cost = round(input_cost + output_cost, 4)
+
+    return {
+        "total_fable_calls": calls,
+        "thinking_tokens_used": think_tok,
+        "output_tokens_used": out_tok,
+        "estimated_cost_usd": total_cost,
+        "avg_think_per_call": think_tok // max(calls, 1),
+        "note": "Estimate based on published per-token pricing, not actual billing — check the Anthropic Console for real spend.",
+    }

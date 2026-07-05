@@ -26,6 +26,7 @@ from server.routes.brain_enhancement import router as brain_enhancement_router
 from server.routes.final_upgrade import router as final_upgrade_router
 from server.routes.final_completion import router as final_completion_router
 from server.routes.stark_infrastructure import router as stark_infra_router, phone_router as stark_phone_router
+from server.routes.mythos import router as mythos_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -52,6 +53,7 @@ app.include_router(final_upgrade_router)
 app.include_router(final_completion_router)
 app.include_router(stark_infra_router)
 app.include_router(stark_phone_router)
+app.include_router(mythos_router)
 
 
 @app.get("/metrics")

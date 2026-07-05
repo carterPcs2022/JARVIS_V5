@@ -165,3 +165,71 @@ def _get_web_context(query: str, deep: bool = False) -> str:
         return quick_answer(query)
     except Exception:
         return ""
+
+
+def build_fable_context(user_input: str) -> str:
+    """Richest possible context for the opus/fable tiers — this is where
+    JARVIS beats a fresh Claude.ai session: he knows more about the user
+    than a stateless chat does. Every piece is independently optional
+    (try/except) since a missing module shouldn't break a Fable call."""
+    from datetime import datetime
+
+    parts = []
+
+    try:
+        from core.memory import get_profile
+        profile = get_profile()
+        if profile:
+            parts.append(
+                f"USER PROFILE:\n"
+                f"Communication style: {profile.get('formality', 'casual')}\n"
+                f"Main interests: {', '.join(profile.get('topics', []))}\n"
+                f"Expertise areas: {', '.join(profile.get('expertise', []))}"
+            )
+    except Exception:
+        pass
+
+    try:
+        from core.life_os import life_os
+        morning = life_os.morning_intention()
+        if morning:
+            parts.append(f"TODAY'S FOCUS:\n{morning}")
+    except Exception:
+        pass
+
+    try:
+        from services.workshop import Workshop
+        brief = Workshop().project_brief()
+        if brief:
+            parts.append(f"ACTIVE PROJECTS:\n{brief}")
+    except Exception:
+        pass
+
+    try:
+        from core.memory import universal_recall
+        memory = universal_recall(user_input)
+        if memory:
+            parts.append(f"RELEVANT MEMORY:\n{memory}")
+    except Exception:
+        pass
+
+    try:
+        from core.domain_expert import domain_expert
+        domain = domain_expert.detect_domain(user_input)
+        if domain:
+            parts.append(f"DOMAIN CONTEXT ({domain}):\n{domain_expert.get_domain_context(domain)}")
+    except Exception:
+        pass
+
+    try:
+        from core.neuro_mirror import neuro
+        style = neuro.get_style_prompt()
+        if style:
+            parts.append(f"USER COGNITIVE STYLE:\n{style}")
+    except Exception:
+        pass
+
+    now = datetime.now()
+    parts.append(f"CURRENT TIME: {now.strftime('%I:%M %p, %A %B %d %Y')}")
+
+    return "\n\n".join(parts)

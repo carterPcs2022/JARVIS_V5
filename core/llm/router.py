@@ -1,13 +1,24 @@
 """
 core/llm/router.py — JARVIS LLM router with smart model routing.
-Tries Groq first, falls back to Ollama automatically.
-Tracks which provider is available and updates state.
+Tries Groq first, falls back to Ollama automatically. Above the free Groq
+tiers sit three paid Anthropic tiers (sonnet/opus/fable) for genuinely hard
+problems — reserved by trigger keywords and hard daily call caps, not used
+for everything (that would defeat the point of having a free fast tier at
+all). Tracks which provider is available and updates state.
 """
 import time
 import hashlib
 import json
 from collections import deque
-from config.settings import JARVIS_PERSONALITY, GROQ_API_KEY, OLLAMA_BASE_URL, USE_SMART_ROUTING
+from pathlib import Path
+from datetime import date
+from config.settings import (
+    JARVIS_PERSONALITY, GROQ_API_KEY, OLLAMA_BASE_URL, USE_SMART_ROUTING,
+    ANTHROPIC_API_KEY, ANTHROPIC_MODEL_SONNET, ANTHROPIC_MODEL_OPUS, ANTHROPIC_MODEL_FABLE,
+    ENABLE_SONNET, ENABLE_OPUS, ENABLE_FABLE,
+    SONNET_DAILY_CALL_LIMIT, OPUS_DAILY_CALL_LIMIT, FABLE_DAILY_CALL_LIMIT,
+    BASE_DIR,
+)
 
 # ── Model registry ─────────────────────────────────────────────────────────────
 # Verified live against Groq's /models endpoint — earlier drafts of this
@@ -41,11 +52,49 @@ MODEL_REGISTRY = {
 }
 _DEFAULT_TIER = "standard"
 
+# ── Anthropic tiers (paid — reserved for genuinely hard problems) ─────────────
+ANTHROPIC_REGISTRY = {
+    "sonnet": {"id": ANTHROPIC_MODEL_SONNET, "max_tokens": 4096, "enabled": ENABLE_SONNET,
+              "daily_limit": SONNET_DAILY_CALL_LIMIT},
+    "opus":   {"id": ANTHROPIC_MODEL_OPUS, "max_tokens": 4096, "enabled": ENABLE_OPUS,
+              "daily_limit": OPUS_DAILY_CALL_LIMIT},
+    "fable":  {"id": ANTHROPIC_MODEL_FABLE, "max_tokens": 8192, "enabled": ENABLE_FABLE,
+              "daily_limit": FABLE_DAILY_CALL_LIMIT},
+}
+
+# Fable is reserved for the trigger explicitly asking for it — not classified
+# into automatically from ordinary "hard" phrasing, since Opus already
+# covers that at a third of the cost.
+_FABLE_TRIGGERS = (
+    "use fable", "fable 5", "maximum intelligence", "need your absolute best",
+    "pull out all the stops", "bring out the big guns", "everything you have",
+    "need your best", "best you got",
+)
+_OPUS_TRIGGERS = (
+    "critical decision", "life changing", "most important decision",
+    "comprehensive analysis", "expert opinion", "think carefully about",
+    "hardest problem", "breakthrough", "cutting edge",
+)
+_SONNET_TRIGGERS = (
+    "write a", "creative", "write me a story", "write an essay",
+    "draft a", "compose a", "long form",
+)
+
 
 def classify_query(query: str) -> str:
-    """Pattern-match a query to the best model tier. Fast — no API call."""
+    """Pattern-match a query to the best model tier. Fast — no API call.
+    Checks paid Anthropic tiers first (only actually routes there if the
+    tier is enabled, configured, and under its daily cap — see
+    _resolve_model), then the free Groq tiers."""
     q = (query or "").lower().strip()
     word_count = len(query.split())
+
+    if ANTHROPIC_API_KEY and any(p in q for p in _FABLE_TRIGGERS):
+        return "fable"
+    if ANTHROPIC_API_KEY and any(p in q for p in _OPUS_TRIGGERS):
+        return "opus"
+    if ANTHROPIC_API_KEY and any(p in q for p in _SONNET_TRIGGERS):
+        return "sonnet"
 
     if word_count < 5 or any(p in q for p in (
         "what time", "what's the time", "good morning", "good night",
@@ -76,6 +125,42 @@ def classify_query(query: str) -> str:
     return _DEFAULT_TIER
 
 
+# ── Daily usage tracking for paid tiers ───────────────────────────────────────
+USAGE_FILE = BASE_DIR / "memory" / "model_usage.json"
+
+
+def _get_usage() -> dict:
+    today = date.today().isoformat()
+    if USAGE_FILE.exists():
+        try:
+            data = json.loads(USAGE_FILE.read_text())
+            if data.get("date") == today:
+                return data
+        except Exception:
+            pass
+    return {"date": today, "fable": 0, "opus": 0, "sonnet": 0}
+
+
+def _record_usage(tier: str):
+    usage = _get_usage()
+    usage[tier] = usage.get(tier, 0) + 1
+    USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USAGE_FILE.write_text(json.dumps(usage, indent=2))
+
+
+def _under_daily_limit(tier: str) -> bool:
+    config = ANTHROPIC_REGISTRY.get(tier)
+    if not config:
+        return True
+    return _get_usage().get(tier, 0) < config["daily_limit"]
+
+
+# Escalation path used when a tier is disabled/unconfigured/over its daily
+# cap — always falls toward a free tier eventually, never silently drops
+# the request.
+_ANTHROPIC_FALLBACK = {"fable": "opus", "opus": "sonnet", "sonnet": "reasoning"}
+
+
 def _strip_think_tags(text: str) -> str:
     """Remove <think>...</think> chain-of-thought blocks some reasoning
     models (Qwen3, DeepSeek-distill) prepend to their actual answer."""
@@ -84,14 +169,34 @@ def _strip_think_tags(text: str) -> str:
     return cleaned.strip() or text  # fall back to original if stripping left nothing
 
 
-def _resolve_model(force_model: str | None, query: str) -> tuple[str, dict]:
-    """Returns (model_id, model_config) for a query."""
-    if force_model and force_model in MODEL_REGISTRY:
+def _resolve_tier(force_model: str | None, query: str) -> str:
+    """Returns the tier key to use — may be a Groq tier or an Anthropic
+    tier ("sonnet"/"opus"/"fable"). Anthropic tiers fall back down the
+    escalation chain if disabled, unconfigured, or over their daily cap."""
+    if force_model and (force_model in MODEL_REGISTRY or force_model in ANTHROPIC_REGISTRY):
         key = force_model
     elif USE_SMART_ROUTING and query:
         key = classify_query(query)
     else:
         key = _DEFAULT_TIER
+
+    while key in ANTHROPIC_REGISTRY:
+        config = ANTHROPIC_REGISTRY[key]
+        if config["enabled"] and ANTHROPIC_API_KEY and _under_daily_limit(key):
+            return key
+        print(f"[LLM Router] {key} unavailable/over daily cap — falling back to {_ANTHROPIC_FALLBACK[key]}")
+        key = _ANTHROPIC_FALLBACK[key]
+
+    return key
+
+
+def _resolve_model(force_model: str | None, query: str) -> tuple[str, dict]:
+    """Returns (model_id, model_config) for a Groq-tier query. Anthropic
+    tiers are handled separately in chat() since they need a different
+    call path (see _resolve_tier)."""
+    key = _resolve_tier(force_model, query)
+    if key in ANTHROPIC_REGISTRY:
+        key = "standard"  # should not happen — chat() intercepts Anthropic tiers first
     config = MODEL_REGISTRY[key]
     return config["id"], config
 
@@ -121,6 +226,73 @@ def _cache_key(messages: list) -> str:
     return hashlib.md5(json.dumps(messages, sort_keys=True).encode()).hexdigest()
 
 
+def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query: str) -> dict | None:
+    """Dispatch a chat() call to one of the Anthropic tiers. Enriches
+    system context for opus/fable only (sonnet stays fast/cheap — the rich
+    context builder itself costs nothing extra in API calls, but adding it
+    to every sonnet call would bloat input tokens for a tier meant for
+    quick creative asks)."""
+    from core.llm.anthropic_client import call_anthropic, get_thinking_budget
+
+    config = ANTHROPIC_REGISTRY[tier]
+    system = ""
+    for msg in messages:
+        if msg["role"] == "system":
+            system = msg["content"]
+            break
+    user_messages = [m for m in messages if m["role"] != "system"]
+
+    if tier in ("opus", "fable") and query:
+        try:
+            from core.context import build_fable_context
+            rich_context = build_fable_context(query)
+            if rich_context:
+                system = f"{system}\n\n{rich_context}"
+        except Exception as e:
+            print(f"[LLM Router] build_fable_context failed (non-fatal): {e}")
+
+    budget = get_thinking_budget(tier, query) if query else 0
+    result = call_anthropic(user_messages, system, config["id"],
+                            max_tokens=min(max_tokens, config["max_tokens"]) if max_tokens else config["max_tokens"],
+                            thinking_budget=budget)
+    if not result:
+        return None
+
+    _record_usage(tier)
+
+    try:
+        from core.state import state
+        state.update({"active_model": result["model"], "active_tier": tier})
+    except Exception:
+        pass
+
+    if tier == "fable":
+        try:
+            from core.event_bus import bus
+            bus.system("Routing to Fable 5. Maximum intelligence engaged.")
+            print("[JARVIS] Fable 5 activated")
+        except Exception:
+            pass
+
+    if result.get("thinking"):
+        try:
+            from core.memory import store_thinking
+            store_thinking(query, result["content"], result["thinking"], result["model"])
+        except Exception:
+            pass
+
+    try:
+        from core.evolution import record_fable_response
+        if tier == "fable":
+            record_fable_response(query, result["content"],
+                                  result["usage"]["input"], result["usage"]["output"])
+    except Exception:
+        pass
+
+    return {"content": result["content"], "model": result["model"], "provider": "anthropic",
+            "tier": tier, "thinking_used": result.get("thinking_used", False)}
+
+
 def chat(messages: list[dict], max_tokens: int = 1024,
          temperature: float = 0.7, prefer: str = "groq", use_cache: bool = False,
          force_model: str | None = None, query: str = "") -> dict:
@@ -146,6 +318,23 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         cached = _cache.get(key)
         if cached and (time.time() - cached[0]) < _CACHE_TTL:
             return {**cached[1], "cached": True}
+
+    _anthropic_start = time.time()
+    tier = _resolve_tier(force_model, query)
+    if tier in ANTHROPIC_REGISTRY:
+        result = _call_anthropic_tier(tier, messages, max_tokens, query)
+        if result:
+            result["latency_ms"] = round((time.time() - _anthropic_start) * 1000, 2)
+            if use_cache:
+                _cache[_cache_key(messages)] = (time.time(), result)
+            return result
+        # Anthropic call itself failed (not just over-limit, which
+        # _resolve_tier already handles) — fall through to Groq/Ollama.
+        print(f"[LLM Router] {tier} call failed — falling back to Groq/Ollama")
+
+    # Clear any stale tier from a previous call — state persists across
+    # requests, and this call is now definitely going through Groq/Ollama.
+    state.set("active_tier", None)
 
     model_id, model_config = _resolve_model(force_model, query)
     if "system_suffix" in model_config:
@@ -211,9 +400,11 @@ def think(user_input: str, context: str = "",
     """Simple one-shot think call. Returns the response string.
     Pass use_cache=True for background/non-critical calls to avoid piling
     onto the rate limit with repeated near-identical prompts.
-    Pass force_model to pin a tier ("instant"/"standard"/"reasoning"/
-    "research"/"coder") — otherwise smart routing auto-classifies based on
-    user_input when USE_SMART_ROUTING is enabled."""
+    Pass force_model to pin a tier — free Groq tiers ("instant"/"standard"/
+    "reasoning"/"research"/"coder") or paid Anthropic tiers ("sonnet"/
+    "opus"/"fable", each gated on ANTHROPIC_API_KEY + enabled + daily cap,
+    falling back down the chain otherwise) — or leave unset for smart
+    auto-classification when USE_SMART_ROUTING is enabled."""
     sys_prompt = system or JARVIS_PERSONALITY
     messages = [{"role": "system", "content": sys_prompt}]
     if context:

@@ -506,3 +506,34 @@ def universal_recall(query: str, k: int = 3) -> str:
         parts.append(ltm)
 
     return "\n\n".join(parts)
+
+
+# ── Thinking traces (Anthropic extended thinking) ─────────────────────────────
+THINKING_LOG_FILE = Path("memory/thinking_log.json")
+
+
+def store_thinking(query: str, response: str, thinking: str, model: str):
+    """Store an extended-thinking trace so "why did you say that?" can be
+    answered later — only called when a tier actually used thinking
+    (sonnet/opus/fable with a nonzero budget)."""
+    log = _load(THINKING_LOG_FILE)
+    if not isinstance(log, list):
+        log = []
+    log.append({
+        "query": (query or "")[:200], "response": (response or "")[:500],
+        "thinking": (thinking or "")[:2000], "model": model,
+        "ts": datetime.now().isoformat(),
+    })
+    _save(THINKING_LOG_FILE, log[-50:])
+
+
+def get_last_thinking() -> dict | None:
+    log = _load(THINKING_LOG_FILE)
+    return log[-1] if isinstance(log, list) and log else None
+
+
+def get_thinking_log(n: int = 10) -> list[dict]:
+    log = _load(THINKING_LOG_FILE)
+    return log[-n:] if isinstance(log, list) else []
+
+    return "\n\n".join(parts)

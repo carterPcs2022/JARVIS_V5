@@ -584,6 +584,17 @@ class Brain:
     def process_dict(self, user_input: str) -> dict:
         """Convenience wrapper that returns a plain dict (for API routes)."""
         r = self.process(user_input)
+
+        # active_tier is set by core.llm.router only when an Anthropic tier
+        # (sonnet/opus/fable) actually served the response — absent for
+        # ordinary Groq-tier turns, which is the common case.
+        tier = None
+        try:
+            from core.state import state
+            tier = state.get("active_tier")
+        except Exception:
+            pass
+
         return {
             "response":      r.response,
             "model":         r.model,
@@ -595,6 +606,7 @@ class Brain:
                 "mode":          r.raw_plan.mode if r.raw_plan else "unknown",
                 "was_rewritten": r.was_rewritten,
                 "issues":        r.issues,
+                "tier":          tier,
             },
         }
 

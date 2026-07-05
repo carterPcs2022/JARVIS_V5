@@ -211,6 +211,26 @@ GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3")
 
+# ── LLM: Anthropic (top-tier reasoning, paid) ──────────────────────────────────
+# Real, current model IDs — Fable 5: 'claude-fable-5', Opus 4.8:
+# 'claude-opus-4-8', Sonnet 5: 'claude-sonnet-5'. Do not substitute
+# hallucinated/dated ID strings like "claude-fable-5-20260609" or
+# "claude-opus-4-6" — they don't exist and every call would 404.
+ANTHROPIC_API_KEY      = os.getenv("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL_SONNET = "claude-sonnet-5"
+ANTHROPIC_MODEL_OPUS   = "claude-opus-4-8"
+ANTHROPIC_MODEL_FABLE  = "claude-fable-5"
+
+ENABLE_SONNET = os.getenv("ENABLE_SONNET", "true").lower() == "true"
+ENABLE_OPUS   = os.getenv("ENABLE_OPUS", "true").lower() == "true"
+ENABLE_FABLE  = os.getenv("ENABLE_FABLE", "true").lower() == "true"
+
+# Fable/Opus are real spend, not just rate-limited — hard daily call caps,
+# not just a rate-limit backoff like the free Groq tiers.
+SONNET_DAILY_CALL_LIMIT = int(os.getenv("SONNET_DAILY_CALLS", "100"))
+OPUS_DAILY_CALL_LIMIT   = int(os.getenv("OPUS_DAILY_CALLS", "50"))
+FABLE_DAILY_CALL_LIMIT  = int(os.getenv("FABLE_DAILY_CALLS", "20"))
+
 # ── Server ────────────────────────────────────────────────────────────────────
 HOST           = os.getenv("JARVIS_HOST", "0.0.0.0")
 PORT           = int(os.getenv("JARVIS_PORT", 8000))
