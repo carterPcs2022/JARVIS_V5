@@ -468,6 +468,17 @@ class Brain:
         except Exception:
             pass
 
+        # ── Spotify quick commands — instant, no LLM needed ──────────────────
+        try:
+            from services.spotify import handle_spotify_command
+            spotify_response = handle_spotify_command(user_input)
+            if spotify_response:
+                from core.memory import save_turn
+                save_turn(user_input, spotify_response)
+                return Result(response=spotify_response, ok=True, provider="spotify")
+        except Exception:
+            pass
+
         # ── Protocol 14: Friday fallback if all LLMs offline ─────────────────
         from core.llm.router import check_groq, check_ollama
         from core.state import state as _state

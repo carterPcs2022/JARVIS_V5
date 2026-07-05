@@ -27,6 +27,7 @@ from server.routes.final_upgrade import router as final_upgrade_router
 from server.routes.final_completion import router as final_completion_router
 from server.routes.stark_infrastructure import router as stark_infra_router, phone_router as stark_phone_router
 from server.routes.mythos import router as mythos_router
+from server.routes.spotify import router as spotify_router, auth_router as spotify_auth_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -54,6 +55,8 @@ app.include_router(final_completion_router)
 app.include_router(stark_infra_router)
 app.include_router(stark_phone_router)
 app.include_router(mythos_router)
+app.include_router(spotify_router)
+app.include_router(spotify_auth_router)
 
 
 @app.get("/metrics")
