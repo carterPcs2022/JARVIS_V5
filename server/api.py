@@ -174,7 +174,22 @@ async def hud_status():
     except Exception:
         friday_online = False
 
+    try:
+        from core.state import state
+        model = state.get("active_model", "") or ""
+        provider = state.get("active_provider", "") or ""
+        tier = state.get("active_tier", "") or ""
+    except Exception:
+        model = provider = tier = ""
+
     return {
+        # Top-level, read directly from live state — see core/llm/router.py,
+        # which sets these after every real chat call regardless of
+        # provider (Groq or an Anthropic tier). diag.active_model below is
+        # a same-value fallback for older HUD builds that read brain.model.
+        "model":    model,
+        "provider": provider,
+        "tier":     tier,
         "system": {
             "cpu":          sys_snap.get("cpu_percent", 0),
             "ram":          sys_snap.get("ram_used_pct", 0),
@@ -183,7 +198,9 @@ async def hud_status():
         },
         "brain": {
             "status":   diag.get("brain", "UNKNOWN"),
-            "model":    diag.get("active_model", "—"),
+            "model":    model or diag.get("active_model", "—"),
+            "provider": provider,
+            "tier":     tier,
             "groq":     diag.get("groq_available", False),
             "ollama":   diag.get("ollama_available", False),
             "warnings": diag.get("warnings", []),

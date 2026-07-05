@@ -429,7 +429,12 @@ async function pollAll() {
     setBar('disk-bar', 'disk-val', d.system.disk);
     document.getElementById('uptime-val').textContent = formatUptime(d.system.uptime_hours);
 
-    document.getElementById('brain-line').textContent = `MODEL: ${(d.brain.model || '—').toUpperCase()}`;
+    // Prefer the top-level model/provider/tier (read live from core.state
+    // by /hud/status) — d.brain.model is kept as a fallback for safety.
+    const activeModel = d.model || d.brain.model || '—';
+    const activeTier = d.tier || d.brain.tier || '';
+    const modelLabel = activeTier ? `${activeModel} (${activeTier})` : activeModel;
+    document.getElementById('brain-line').textContent = `MODEL: ${modelLabel.toUpperCase()}`;
 
     const mem = d.memory || {};
     const threatEl = document.getElementById('threat-count');

@@ -14,6 +14,8 @@ class JarvisState:
         self._data: dict[str, Any] = {
             "status":           "initializing",   # initializing / online / degraded / offline
             "active_model":     None,
+            "active_provider":  None,
+            "active_tier":      None,
             "groq_available":   False,
             "ollama_available": False,
             "voice_active":     False,

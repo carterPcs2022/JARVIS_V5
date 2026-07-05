@@ -262,7 +262,7 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
 
     try:
         from core.state import state
-        state.update({"active_model": result["model"], "active_tier": tier})
+        state.update({"active_model": result["model"], "active_provider": "anthropic", "active_tier": tier})
     except Exception:
         pass
 
@@ -332,9 +332,11 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         # _resolve_tier already handles) — fall through to Groq/Ollama.
         print(f"[LLM Router] {tier} call failed — falling back to Groq/Ollama")
 
-    # Clear any stale tier from a previous call — state persists across
-    # requests, and this call is now definitely going through Groq/Ollama.
-    state.set("active_tier", None)
+    # Track the actual Groq tier (instant/standard/reasoning/research/coder)
+    # instead of just clearing it — state persists across requests, and
+    # this call is now definitely going through Groq/Ollama.
+    groq_tier = _resolve_tier(force_model, query)
+    state.set("active_tier", groq_tier)
 
     model_id, model_config = _resolve_model(force_model, query)
     if "system_suffix" in model_config:
@@ -368,7 +370,8 @@ def chat(messages: list[dict], max_tokens: int = 1024,
 
             latency = round((time.time() - start) * 1000, 2)
             state.update({
-                "active_model":   result.get("model"),
+                "active_model":    result.get("model"),
+                "active_provider": provider,
                 "groq_available": provider == "groq",
                 "ollama_available": True if provider == "ollama" else state.get("ollama_available"),
             })

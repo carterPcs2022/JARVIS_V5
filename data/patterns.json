@@ -11,6 +11,9 @@
     ],
     "1": [
       "play spotify"
+    ],
+    "19": [
+      "what time is it"
     ]
   },
   "daily": {
@@ -22,14 +25,16 @@
       "hi"
     ],
     "Sunday": [
-      "play spotify"
+      "play spotify",
+      "what time is it"
     ]
   },
   "sequences": [
     "Afternoon Jarvis",
     "say only the word OK",
     "hi",
-    "play spotify"
+    "play spotify",
+    "what time is it"
   ],
   "topics": {
     "jarvis": 1,
