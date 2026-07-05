@@ -4,7 +4,7 @@
   const HOST   = location.hostname;
   const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsPort     = location.protocol === 'https:' ? '' : ':8000';
-  const API    = `http://${HOST}:8000`;
+  const API    = `${location.protocol}//${HOST}${wsPort}`;
   const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
   const TOKEN  = localStorage.getItem('jarvis_token') || '';
 

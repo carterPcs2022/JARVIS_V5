@@ -245,7 +245,10 @@
 const HOST   = location.hostname;
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPort     = location.protocol === 'https:' ? '' : ':8000';
-const API    = `${location.protocol}//${HOST}:8000`;
+// Same port logic as WS_URL below — forcing :8000 on an https:// page (Render
+// doesn't expose that port) silently breaks every fetch call, which is why
+// stats polling was showing empty data in production.
+const API    = `${location.protocol}//${HOST}${wsPort}`;
 const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
 
 // Dev mode: skip the token prompt entirely on localhost — matches

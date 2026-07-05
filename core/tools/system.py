@@ -49,23 +49,53 @@ def _safe_mem():
         return _Mem()
 
 
+def _safe_disk():
+    try:
+        return psutil.disk_usage("/")
+    except Exception:
+        class _Disk:
+            total = 0
+            percent = 0.0
+        return _Disk()
+
+
+def _safe_cpu_cores() -> int:
+    try:
+        return psutil.cpu_count(logical=True) or 0
+    except Exception:
+        return 0
+
+
+def _safe_uptime_hours() -> float:
+    try:
+        return round(
+            (datetime.datetime.now() -
+             datetime.datetime.fromtimestamp(psutil.boot_time())).total_seconds() / 3600, 2)
+    except Exception:
+        return 0.0
+
+
 def snapshot() -> dict:
+    """Every field is independently guarded — Render's sandboxed
+    filesystem/cgroups can make individual psutil calls fail (e.g.
+    disk_usage on a restricted mount), and previously an unguarded call
+    here would blow up the whole snapshot(), leaving /hud/status and
+    /stark/telemetry with empty data instead of the other fields that
+    would have worked fine."""
     mem  = _safe_mem()
-    disk = psutil.disk_usage("/")
+    disk = _safe_disk()
     cpu  = _safe_cpu()
     return {
         "timestamp":      datetime.datetime.now().isoformat(),
         "os":             platform.system(),
         "hostname":       socket.gethostname(),
         "cpu_percent":    cpu,
-        "cpu_cores":      psutil.cpu_count(logical=True),
+        "cpu_cores":      _safe_cpu_cores(),
         "ram_total_gb":   round(mem.total / 1e9, 2),
         "ram_used_pct":   mem.percent,
         "disk_total_gb":  round(disk.total / 1e9, 2),
         "disk_used_pct":  disk.percent,
-        "uptime_hours":   round(
-            (datetime.datetime.now() -
-             datetime.datetime.fromtimestamp(psutil.boot_time())).total_seconds() / 3600, 2),
+        "uptime_hours":   _safe_uptime_hours(),
     }
 
 
@@ -85,7 +115,7 @@ def run_shell(command: str, timeout: int = 10) -> dict:
 
 
 def disk_warning(threshold: float = 85.0) -> str | None:
-    pct = psutil.disk_usage("/").percent
+    pct = _safe_disk().percent
     return f"⚠️ Disk at {pct}%" if pct >= threshold else None
 
 

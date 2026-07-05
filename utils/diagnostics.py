@@ -16,12 +16,21 @@ def full_diagnostic() -> dict:
     if not groq_ok:   warnings.append("⚠️ Groq unavailable")
     if not ollama_ok: warnings.append("⚠️ Ollama unavailable")
 
-    active_model = GROQ_MODEL if groq_ok else OLLAMA_MODEL if ollama_ok else "none"
+    # active_model is set live by core/llm/router.py after every real chat
+    # call (it reflects whichever tier/model actually served the last
+    # response — Groq or an Anthropic tier). Previously this function
+    # overwrote it with a static guess based only on which provider is
+    # reachable, clobbering the real value on every ~30s HUD poll — the
+    # HUD's model display would flicker back to a guess a few seconds
+    # after showing the real model. Only fall back to a guess if nothing
+    # real has been recorded yet.
+    active_model = state.get("active_model") or (
+        GROQ_MODEL if groq_ok else OLLAMA_MODEL if ollama_ok else "none"
+    )
     brain_status = ("GROQ ONLINE" if groq_ok else
                     "OLLAMA FALLBACK" if ollama_ok else "ALL ENGINES OFFLINE")
 
     state.update({"groq_available": groq_ok, "ollama_available": ollama_ok,
-                  "active_model": active_model,
                   "status": "online" if (groq_ok or ollama_ok) else "degraded"})
 
     # Protocol status
