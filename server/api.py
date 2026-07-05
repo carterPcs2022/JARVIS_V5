@@ -28,6 +28,8 @@ from server.routes.final_completion import router as final_completion_router
 from server.routes.stark_infrastructure import router as stark_infra_router, phone_router as stark_phone_router
 from server.routes.mythos import router as mythos_router
 from server.routes.spotify import router as spotify_router, auth_router as spotify_auth_router
+from server.routes.ultimate_brain import router as ultimate_brain_router
+from server.routes.absolute_final import router as absolute_final_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -57,6 +59,8 @@ app.include_router(stark_phone_router)
 app.include_router(mythos_router)
 app.include_router(spotify_router)
 app.include_router(spotify_auth_router)
+app.include_router(ultimate_brain_router)
+app.include_router(absolute_final_router)
 
 
 @app.get("/metrics")
@@ -103,6 +107,13 @@ async def hud_mobile_view():
 @app.get("/hud/holographic")
 async def holographic_hud():
     return FileResponse(HUD_DIR / "holographic.html")
+
+
+@app.get("/hud/ambient.js")
+async def hud_ambient_js():
+    from services.ambient import AMBIENT_HUD_SCRIPT
+    from fastapi.responses import Response as _Response
+    return _Response(AMBIENT_HUD_SCRIPT, media_type="application/javascript")
 
 
 @app.get("/hud/intel")

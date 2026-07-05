@@ -164,6 +164,38 @@ def _weekly_neuro_reanalysis():
         log.debug("Weekly neuro reanalysis failed: %s", e)
 
 
+def _morning_routine():
+    try:
+        from services.morning_routine import morning
+        morning.run()
+    except Exception as e:
+        log.debug("Morning routine failed: %s", e)
+
+
+def _evening_routine():
+    try:
+        from services.evening_routine import evening
+        evening.run()
+    except Exception as e:
+        log.debug("Evening routine failed: %s", e)
+
+
+def _price_check():
+    try:
+        from services.price_tracker import price_tracker
+        price_tracker.check_all()
+    except Exception as e:
+        log.debug("Price check failed: %s", e)
+
+
+def _package_check():
+    try:
+        from services.packages import packages
+        packages.check_all()
+    except Exception as e:
+        log.debug("Package check failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -208,9 +240,16 @@ def start():
         _scheduler.add_job(_weekly_active_learning_cycle, "cron", day_of_week="sun", hour=5, id="weekly_learning")
         _scheduler.add_job(_weekly_neuro_reanalysis, "cron", day_of_week="sun", hour=6, id="weekly_neuro")
 
+        # Absolute final batch: morning/evening routines, price/package tracking
+        _scheduler.add_job(_morning_routine, "cron", hour=7, minute=30, id="morning_routine", replace_existing=True)
+        _scheduler.add_job(_evening_routine, "cron", hour=22, minute=0, id="evening_routine", replace_existing=True)
+        _scheduler.add_job(_price_check, "interval", minutes=30, id="price_check")
+        _scheduler.add_job(_package_check, "interval", hours=1, id="package_check")
+
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
-                 "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro")
+                 "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
+                 "morning/evening routines, price/package tracking")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

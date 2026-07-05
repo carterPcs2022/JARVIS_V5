@@ -127,6 +127,7 @@
       <div class="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">CONNECTING</span></div>
       <div id="brain-line">MODEL: —</div>
       <div id="clock">--:--:--</div>
+      <button id="ambient-btn" class="scene-btn" style="padding:4px 10px;font-size:9px" onclick="toggleAmbient('workshop')">🔇 AMBIENT</button>
     </div>
   </header>
 
@@ -575,5 +576,6 @@ setInterval(() => { fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetch
 
 console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
 </script>
+<script src="/hud/ambient.js"></script>
 </body>
 </html>

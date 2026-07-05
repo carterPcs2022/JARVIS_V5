@@ -33,5 +33,27 @@ class AnalogicalReasoning:
             force_model="reasoning",
         )
 
+    def transfer_from_domain(self, problem: str, source_domain: str = "") -> dict:
+        """Solve a problem using a solution transplanted from a completely
+        different domain — one "fable"-tier call, real cost, meant for
+        genuinely hard/creative problems, not routine questions."""
+        from core.llm.router import think
+        preferred = f"Preferred source: {source_domain}\n" if source_domain else ""
+        return {
+            "problem": problem,
+            "transfer": think(
+                f"Problem: {problem}\n\n"
+                f"Find a solved problem from a COMPLETELY DIFFERENT domain with the "
+                f"SAME underlying structure.\n{preferred}\n"
+                f"1. The analogous problem from another domain\n"
+                f"2. How the structures map onto each other\n"
+                f"3. How that solution applies here\n"
+                f"4. What breaks down in the analogy\n"
+                f"5. The transferred solution\n\n"
+                f"Be creative. The most useful analogies are surprising.",
+                force_model="fable",
+            ),
+        }
+
 
 analogical = AnalogicalReasoning()

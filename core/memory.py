@@ -536,4 +536,39 @@ def get_thinking_log(n: int = 10) -> list[dict]:
     log = _load(THINKING_LOG_FILE)
     return log[-n:] if isinstance(log, list) else []
 
+
+def semantic_compress(memories: list, target_size: int = 10) -> list:
+    """Compress many memories into fewer, richer ones — gist rather than
+    verbatim, the way human memory works. One "standard"-tier LLM call.
+    Not auto-wired; core/memory.py's existing compress_if_needed() already
+    handles short-term compaction on its own schedule — this is available
+    for callers who want to compress an arbitrary memory list on demand."""
+    if len(memories) <= target_size:
+        return memories
+
+    from core.llm.router import think
+    import re
+
+    all_text = "\n\n".join(
+        f"[{m.get('ts','')[:10]}] User: {m.get('user','')} JARVIS: {m.get('ai','')[:80]}"
+        for m in memories
+    )
+    result = think(
+        f"Compress these {len(memories)} memories into {target_size} essential entries.\n\n"
+        f"Memories:\n{all_text[:3000]}\n\n"
+        f"Each entry captures the gist of a cluster.\n"
+        f"Reply as JSON array: [{{summary, key_facts, timeframe, importance}}]",
+        force_model="standard",
+    )
+    try:
+        clean = re.sub(r"```json|```", "", result).strip()
+        compressed = json.loads(clean)
+        return [
+            {"user": m.get("summary", ""), "ai": "", "ts": m.get("timeframe", ""),
+             "compressed": True, "key_facts": m.get("key_facts", ""), "importance": m.get("importance", 5)}
+            for m in compressed[:target_size]
+        ]
+    except Exception:
+        return memories[-target_size:]
+
     return "\n\n".join(parts)
