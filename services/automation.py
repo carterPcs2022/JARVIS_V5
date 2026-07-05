@@ -58,6 +58,14 @@ def morning_briefing() -> str:
             parts.append(f"Recent activity:\n{ctx}")
     except Exception:
         pass
+    try:
+        if os.getenv("GITHUB_TOKEN"):
+            from services.github_intel import github
+            dev_brief = github.daily_dev_brief()
+            if dev_brief and "no repository activity" not in dev_brief.lower():
+                parts.append(f"GitHub: {dev_brief}")
+    except Exception:
+        pass
 
     prompt = (f"{JARVIS_PERSONALITY}\n\nGenerate a concise morning briefing.\n\n"
               + "\n".join(parts))

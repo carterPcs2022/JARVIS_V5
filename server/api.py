@@ -25,6 +25,7 @@ from server.routes.protocols_18_35 import router as protocols_18_35_router
 from server.routes.brain_enhancement import router as brain_enhancement_router
 from server.routes.final_upgrade import router as final_upgrade_router
 from server.routes.final_completion import router as final_completion_router
+from server.routes.stark_infrastructure import router as stark_infra_router, phone_router as stark_phone_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -49,6 +50,20 @@ app.include_router(protocols_18_35_router)
 app.include_router(brain_enhancement_router)
 app.include_router(final_upgrade_router)
 app.include_router(final_completion_router)
+app.include_router(stark_infra_router)
+app.include_router(stark_phone_router)
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus scrape target — intentionally unauthenticated, matching
+    the standard Prometheus pattern (the metrics endpoint is usually only
+    reachable from an internal scraper, not the public internet)."""
+    from services.metrics import generate_latest, CONTENT_TYPE_LATEST, update_system_metrics
+    update_system_metrics()
+    from fastapi.responses import Response as _Response
+    return _Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 

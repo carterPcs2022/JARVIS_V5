@@ -40,6 +40,10 @@ google-auth-httplib2>=0.2.0
 google-auth-oauthlib>=1.2.0
 caldav>=1.3.0
 
+# Stark Infrastructure (optional — phone number + Prometheus metrics)
+twilio>=9.0.0
+prometheus-client>=0.20.0
+
 # Finance
 plaid-python>=20.0.0
 yfinance>=0.2.37

@@ -118,6 +118,22 @@ class EventBus:
             except Exception:
                 pass
 
+        # Critical alerts also place an actual phone call, if Twilio is
+        # configured — a Telegram push or HUD toast is easy to miss;
+        # "JARVIS is calling you" is not.
+        if severity == "critical":
+            try:
+                import threading
+                import os
+                from services.phone import phone, _twilio_configured
+                to_number = os.getenv("MY_PHONE_NUMBER", "")
+                if _twilio_configured() and to_number:
+                    threading.Thread(
+                        target=phone.send_alert_call, args=(message, to_number), daemon=True
+                    ).start()
+            except Exception:
+                pass
+
     def system(self, message: str):
         self.publish("system", {"message": message})
 

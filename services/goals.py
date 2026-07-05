@@ -74,6 +74,16 @@ def _mission_status(hours: float) -> str:
     return f"SCHEDULED — {int(hours / 24)} DAYS"
 
 
+def get_goals(status: str = "active") -> list[dict]:
+    """status: 'active' (not done), 'done', or 'all'."""
+    goals = _load()
+    if status == "active":
+        return [g for g in goals if not g.get("done")]
+    if status == "done":
+        return [g for g in goals if g.get("done")]
+    return goals
+
+
 def list_missions() -> list[dict]:
     """All goals with mission_mode/deadline set, with live hours_left/status."""
     missions = []
