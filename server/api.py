@@ -39,6 +39,7 @@ from server.routes.ultimate_brain import router as ultimate_brain_router
 from server.routes.absolute_final import router as absolute_final_router
 from server.routes.security_max import router as security_max_router
 from server.routes.security_gov import router as security_gov_router
+from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -72,6 +73,8 @@ app.include_router(ultimate_brain_router)
 app.include_router(absolute_final_router)
 app.include_router(security_max_router)
 app.include_router(security_gov_router)
+app.include_router(security_firewalls_router)
+app.include_router(suit_security_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────

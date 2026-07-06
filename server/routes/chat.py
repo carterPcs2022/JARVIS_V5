@@ -1,6 +1,6 @@
 """server/routes/chat.py — Chat route using Brain V2 pipeline."""
 import concurrent.futures
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from utils.security import verify_token, rate_limit
 from core.brain_v2 import brain
 
@@ -17,10 +17,20 @@ TASK_TIMEOUT_SECONDS = 15
 
 
 @router.post("/chat", dependencies=[Depends(verify_token), Depends(rate_limit)])
-def chat(body: dict):
+def chat(body: dict, request: Request):
     msg = body.get("message", "").strip()
     if not msg:
         return {"error": "No message provided"}
+
+    ip = request.client.host if request.client else ""
+    try:
+        from services.ai_firewall import ai_firewall
+        screen = ai_firewall.screen(msg, ip)
+        if not screen["allowed"]:
+            return {"error": "Request blocked by security system",
+                    "threat_type": screen["threat_type"]}
+    except Exception:
+        pass  # firewall unavailable — fail open rather than block all chat
 
     future = _executor.submit(brain.process_dict, msg)
     try:

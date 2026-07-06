@@ -725,6 +725,37 @@ class Brain:
         except Exception:
             pass
 
+        # ── Egress filtering — redact any secret/PII that made it into the
+        # response before the user ever sees it. Also runs a secondary
+        # provider-key-pattern scan (services/dpi) as defense in depth.
+        try:
+            from services.egress_filter import egress
+            filtered = egress.filter(result.response)
+            result.response = filtered["response"]
+            if not filtered["clean"]:
+                from services.audit_log import audit_log
+                audit_log.record("egress_redaction", "jarvis", {}, "redacted")
+        except Exception:
+            pass
+        try:
+            from services.dpi import dpi
+            dpi.monitor_response(result.response)
+        except Exception:
+            pass
+
+        # ── Audit trail + suit-security interaction fingerprint ───────────────
+        try:
+            from services.audit_log import audit_log
+            audit_log.record("chat_response", "jarvis",
+                             {"query": user_input[:100], "model": result.model}, "success")
+        except Exception:
+            pass
+        try:
+            from services.suit_security import suit_security
+            suit_security.record_interaction_pattern(user_input, result.latency_ms)
+        except Exception:
+            pass
+
         bus.chat("assistant", result.response)
         return result
 

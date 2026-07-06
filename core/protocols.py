@@ -83,6 +83,17 @@ def _log_protocol_event(protocol: str, detail: str, severity: str = "info"):
         bus.publish("protocol", {"protocol": protocol, "detail": detail}, severity)
     except Exception:
         pass
+    # Hash-chain the significant events into the tamper-evident audit log —
+    # not every event (this log runs at very high volume including routine
+    # info-level pings; hash-chaining all of it would bloat the chain for
+    # little benefit). warning/critical is where "did anyone tamper with
+    # this history" actually matters.
+    if severity in ("warning", "critical"):
+        try:
+            from services.audit_log import audit_log
+            audit_log.record(protocol, "jarvis", {"detail": detail}, severity)
+        except Exception:
+            pass
 
 
 # ── Pending confirmations (Protocol 15 — Avengers) ───────────────────────────

@@ -362,11 +362,19 @@ def chat(messages: list[dict], max_tokens: int = 1024,
             if provider == "groq":
                 if not GROQ_API_KEY:
                     continue
+                from services.circuit_breaker import cb, CircuitOpenError
+                if not cb.is_available("groq"):
+                    print("[LLM Router] Groq circuit open — skipping straight to next provider")
+                    continue
                 if not _rate_check():
                     print("[LLM Router] Approaching Groq rate limit — brief backoff before calling")
                     time.sleep(2)
                 _call_times.append(time.time())
-                result = groq_chat(messages, max_tokens, temperature, model=model_id)
+                try:
+                    result = cb.call("groq", groq_chat, messages, max_tokens, temperature, model=model_id)
+                except CircuitOpenError as e:
+                    print(f"[LLM Router] {e}")
+                    continue
                 # Reasoning models (Qwen3, DeepSeek-style) emit raw
                 # <think>...</think> chain-of-thought before the real
                 # answer — strip it so it never leaks into a response.
