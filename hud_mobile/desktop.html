@@ -504,12 +504,18 @@ async function fetchConsciousness() {
   } catch (e) {}
 }
 
+function parseMarkdown(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>');
+}
+
 async function fetchGoals() {
   try {
     const d = await jarvisGet('/stark/tasks/today');
     const list = document.getElementById('goals-list');
     if (!d.priorities) { list.innerHTML = '<div class="empty">No active goals.</div>'; return; }
-    list.innerHTML = `<div class="goal-item"><div class="goal-title">${d.priorities}</div></div>`;
+    list.innerHTML = `<div class="goal-item"><div class="goal-title">${parseMarkdown(d.priorities)}</div></div>`;
   } catch (e) {}
 }
 
