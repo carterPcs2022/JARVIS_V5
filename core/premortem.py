@@ -1,0 +1,33 @@
+"""core/premortem.py — pre-mortem + inversion analysis (NASA/military technique)."""
+from core.llm.router import think
+
+
+class PreMortem:
+
+    def analyze(self, plan: str, timeframe: str = "6 months") -> dict:
+        failures = think(
+            f"It is {timeframe} from now. '{plan}' failed spectacularly.\n"
+            f"Post-mortem: what went wrong? Be specific and brutal.",
+            force_model="reasoning",
+        )
+        inversion = think(
+            f"Plan: {plan}\n\nWhat would GUARANTEE failure? "
+            f"List the top 10 ways to make this definitely fail.",
+            force_model="standard",
+        )
+        mitigations = think(
+            f"Plan: {plan}\nFailure modes: {failures[:300]}\n\n"
+            f"For each major failure mode, what action NOW prevents it?",
+            force_model="opus",
+        )
+        return {"plan": plan, "failure_modes": failures,
+                "inversion": inversion, "mitigations": mitigations}
+
+    def should_use(self, query: str) -> bool:
+        return any(t in query.lower() for t in [
+            "plan", "strategy", "launch", "should i do this",
+            "thinking about starting", "pre-mortem",
+        ])
+
+
+premortem = PreMortem()

@@ -178,17 +178,18 @@ async def glasses_status():
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def _transcribe(audio_path: str) -> str:
-    """Transcribe audio. Prefers local faster-whisper (fine on a Mac with the
-    full requirements.txt installed); falls back to Groq's hosted Whisper API,
-    which is what actually runs in production since faster-whisper is too
-    heavy for a free-tier host like Render."""
+    """Transcribe audio. Prefers local faster-whisper (fine on a Mac with
+    requirements-local.txt installed); falls back to Groq's hosted Whisper
+    API, which is what actually runs in production since faster-whisper is
+    too heavy for a free-tier host like Render."""
+    from config.settings import IS_RENDER, FASTER_WHISPER_AVAILABLE
+    if IS_RENDER or not FASTER_WHISPER_AVAILABLE:
+        return _transcribe_groq(audio_path)
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel("base", device="cpu", compute_type="int8")
         segments, _ = model.transcribe(audio_path, beam_size=5)
         return " ".join(s.text.strip() for s in segments).strip()
-    except ImportError:
-        return _transcribe_groq(audio_path)
     except Exception as e:
         print(f"[Glasses] Local transcription error: {e}")
         return _transcribe_groq(audio_path)

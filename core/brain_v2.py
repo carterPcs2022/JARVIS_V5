@@ -236,7 +236,43 @@ class Validator:
 class Planner:
     """Creates an execution plan from a validated intent."""
 
+    # Checked in priority order — first should_use() match wins. Kept in the
+    # narrowest-trigger-first order so a query matching several loosely
+    # (e.g. containing both "plan" and "estimate") lands on the more specific
+    # technique rather than the first one registered.
+    _REASONING_ENGINES = (
+        "six_hats", "premortem", "fermi", "first_principles",
+        "constraint_solver", "game_theory", "info_value", "mental_models",
+    )
+
+    def _select_reasoning_engine(self, raw: str) -> str | None:
+        from core.six_hats import six_hats
+        from core.premortem import premortem
+        from core.fermi import fermi
+        from core.first_principles import first_principles
+        from core.constraint_satisfaction import constraint_solver
+        from core.game_theory import game_theory
+        from core.information_value import info_value
+        from core.mental_models import mental_models
+        engines = {
+            "six_hats": six_hats, "premortem": premortem, "fermi": fermi,
+            "first_principles": first_principles, "constraint_solver": constraint_solver,
+            "game_theory": game_theory, "info_value": info_value, "mental_models": mental_models,
+        }
+        for name in self._REASONING_ENGINES:
+            if engines[name].should_use(raw):
+                return name
+        return None
+
     def create(self, intent: Intent) -> Plan:
+        from config.settings import ENABLE_REASONING_ENGINES
+        if (ENABLE_REASONING_ENGINES and intent.action == "chat"
+                and intent.complexity != "simple"):
+            engine = self._select_reasoning_engine(intent.raw)
+            if engine:
+                return Plan(intent=intent, mode="reasoning_engine",
+                            steps=[{"tool": "reasoning_engine", "args": {"engine": engine}}])
+
         if intent.complexity == "complex" and intent.needs_agents:
             mode  = "multi_agent"
             steps = self._decompose(intent)
@@ -325,6 +361,8 @@ class Executor:
                 response, model, provider = self._vision(plan)
             elif plan.mode == "voice":
                 response, model, provider = self._voice(intent)
+            elif plan.mode == "reasoning_engine":
+                response, model, provider = self._reasoning_engine(plan)
             else:
                 response, model, provider = self._direct(intent)
         except Exception as e:
@@ -446,6 +484,40 @@ class Executor:
         from core.mac_dispatcher import dispatch
         result = dispatch(plan.intent.raw)
         return result, "", "mac"
+
+    def _reasoning_engine(self, plan: Plan) -> tuple[str, str, str]:
+        """Dispatch to whichever core/*.py reasoning technique Planner
+        selected (see Planner._select_reasoning_engine). Each engine returns
+        a dict of intermediate reasoning steps — pull out the final answer."""
+        engine  = plan.steps[0]["args"]["engine"]
+        intent  = plan.intent
+        if engine == "six_hats":
+            from core.six_hats import six_hats
+            return six_hats.think(intent.raw)["synthesis"], "", "six_hats"
+        if engine == "premortem":
+            from core.premortem import premortem
+            return premortem.analyze(intent.raw)["mitigations"], "", "premortem"
+        if engine == "fermi":
+            from core.fermi import fermi
+            r = fermi.estimate(intent.raw)
+            return f"{r['decomposition']}\n\n{r['sanity_check']}", "", "fermi"
+        if engine == "first_principles":
+            from core.first_principles import first_principles
+            return first_principles.reason(intent.raw)["solution"], "", "first_principles"
+        if engine == "constraint_solver":
+            from core.constraint_satisfaction import constraint_solver
+            return constraint_solver.solve(intent.raw, [])["solution"], "", "constraint_solver"
+        if engine == "game_theory":
+            from core.game_theory import game_theory
+            return game_theory.analyze(intent.raw)["analysis"], "", "game_theory"
+        if engine == "info_value":
+            from core.information_value import info_value
+            return info_value.most_valuable(intent.raw, intent.context)["analysis"], "", "info_value"
+        if engine == "mental_models":
+            from core.mental_models import mental_models
+            r = mental_models.apply(intent.raw, intent.context)
+            return r["response"], "", f"mental_model_{r.get('used_model', '')}"
+        return self._direct(intent)
 
     def _local_file_command(self, intent: Intent) -> str:
         """Best-effort shell command the user can run locally for a

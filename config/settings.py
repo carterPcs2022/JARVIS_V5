@@ -327,6 +327,32 @@ PUBLIC_URL = (
 )
 
 ENVIRONMENT = "railway" if IS_RAILWAY else "render" if IS_RENDER else os.getenv("ENVIRONMENT", "local")
+IS_LOCAL    = not IS_HEADLESS_CLOUD
+
+# The core/*.py reasoning-technique library (mental models, pre-mortem, six
+# hats, fermi, game theory, etc.) is wired into Planner.create() but gated
+# off by default — several of their should_use() triggers are broad enough
+# ("plan", "i think", "should i") to fire on routine chat and multiply every
+# matching turn into 2-5 extra LLM calls. Opt in once you've reviewed the
+# trigger lists in core/brain_v2.py's _select_reasoning_engine.
+ENABLE_REASONING_ENGINES = os.getenv("ENABLE_REASONING_ENGINES", "false").lower() == "true"
+
+# pyttsx3/faster-whisper live in requirements-local.txt only (they need real
+# audio hardware and would fail a Render build) — probe for them so callers
+# can check availability without a bare try/except at each call site.
+PYTTSX3_AVAILABLE = False
+FASTER_WHISPER_AVAILABLE = False
+if IS_LOCAL:
+    try:
+        import pyttsx3  # noqa: F401
+        PYTTSX3_AVAILABLE = True
+    except ImportError:
+        pass
+    try:
+        import faster_whisper  # noqa: F401
+        FASTER_WHISPER_AVAILABLE = True
+    except ImportError:
+        pass
 
 # ── Messaging integrations ────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN      = os.getenv("TELEGRAM_BOT_TOKEN", "")

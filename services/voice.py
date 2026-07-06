@@ -8,6 +8,7 @@ TTS cascade:
 import os, re, asyncio, tempfile, wave
 from config.settings import (
     JARVIS_VOICE, JARVIS_EDGE_VOICE, WHISPER_MODEL, VOICE_ENABLED, IS_RAILWAY,
+    PYTTSX3_AVAILABLE,
 )
 
 
@@ -68,7 +69,9 @@ def _speak_edge(text: str, play: bool) -> str:
 
 
 def _speak_pyttsx3(text: str, play: bool) -> str:
-    """pyttsx3 offline fallback — always works, no internet needed."""
+    """pyttsx3 offline fallback — local Mac only, needs requirements-local.txt."""
+    if not PYTTSX3_AVAILABLE:
+        return ""
     clean = re.sub(r"[*_`#\[\]()]", "", text).strip()
     clean = re.sub(r"\n+", ". ", clean)
     try:
@@ -102,11 +105,7 @@ def voice_engine_status() -> dict:
         edge_ok = True
     except ImportError:
         edge_ok = False
-    try:
-        import pyttsx3  # noqa: F401
-        py_ok = True
-    except ImportError:
-        py_ok = False
+    py_ok = PYTTSX3_AVAILABLE
 
     active = ("elevenlabs" if el_ok else "edge-tts" if edge_ok else "pyttsx3" if py_ok else "none")
 
