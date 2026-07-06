@@ -77,6 +77,22 @@ class Reasoner:
     _WEB_KW    = {"today","now","current","latest","news","weather","price",
                   "score","live","this week","breaking"}
 
+    # Local filesystem operations — flagged separately so the executor can
+    # refuse them on a headless cloud host instead of hallucinating success.
+    _DELETE_FILE_KW = ["delete file","delete the file","remove file",
+                       "remove the file","delete this file","trash the file"]
+    _COMPRESS_FILE_KW = ["compress file","compress the file","zip file",
+                        "zip the file","zip this file","compress this file",
+                        "archive the file","archive this file"]
+
+    def _is_delete_file(self, low: str) -> bool:
+        return any(kw in low for kw in self._DELETE_FILE_KW) or (
+            ("delete" in low or "remove" in low) and "file" in low)
+
+    def _is_compress_file(self, low: str) -> bool:
+        return any(kw in low for kw in self._COMPRESS_FILE_KW) or (
+            ("compress" in low or "zip" in low) and "file" in low)
+
     # Mac / system control keywords
     _MAC_KW    = {
         "open","launch","start","close","quit","hide","show","focus",
@@ -111,8 +127,13 @@ class Reasoner:
         low  = user_input.lower()
         toks = set(low.split())
 
-        # Action classification — mac_control takes priority over generic actions
-        if self._is_mac_control(low, toks):
+        # Action classification — delete/compress file checks come first so
+        # they can never be misclassified as a generic mac_control command.
+        if self._is_delete_file(low):
+            action = "delete_file"
+        elif self._is_compress_file(low):
+            action = "compress_file"
+        elif self._is_mac_control(low, toks):
             action = "mac_control"
         elif toks & self._VOICE_KW:
             action = "voice"
@@ -266,6 +287,21 @@ class Executor:
         start  = time.time()
         intent = plan.intent
 
+        # ── Hallucination guard: never claim to touch the local filesystem
+        # from a headless cloud host — JARVIS has no access to the user's Mac
+        # from Render/Railway, so tell them the command to run locally instead.
+        if intent.action in ("delete_file", "compress_file"):
+            from config.settings import ENVIRONMENT
+            if ENVIRONMENT == "render":
+                command  = self._local_file_command(intent)
+                response = (
+                    "I can't access your local files from Render, sir. "
+                    f"Run this command on your Mac instead: {command}"
+                )
+                return Result(response=response, model="", provider="hallucination_guard",
+                              latency_ms=round((time.time() - start) * 1000, 2),
+                              raw_plan=plan)
+
         try:
             if plan.mode == "mac_control":
                 response, model, provider = self._mac_control(plan)
@@ -276,7 +312,13 @@ class Executor:
             elif plan.mode == "multi_agent":
                 response, model, provider = self._multi_agent(intent)
             elif plan.mode == "autonomous":
-                response, model, provider = self._autonomous(intent)
+                try:
+                    response, model, provider = self._autonomous(intent)
+                    if "[JARVIS OFFLINE]" in response or "All LLM providers failed" in response:
+                        raise RuntimeError("All LLM providers failed during autonomous execution")
+                except Exception as e:
+                    print(f"[Executor] Autonomous task execution failed: {e}")
+                    response, model, provider = self._direct(intent)
             elif plan.mode == "code":
                 response, model, provider = self._code(plan)
             elif plan.mode == "vision":
@@ -286,7 +328,8 @@ class Executor:
             else:
                 response, model, provider = self._direct(intent)
         except Exception as e:
-            response = f"I encountered an error: {e}"
+            print(f"[Executor] Execution failed: {e}")
+            response = "I ran into a problem with that. Can you break it into smaller steps?"
             model = provider = "error"
 
         # Reflection pass
@@ -403,6 +446,18 @@ class Executor:
         from core.mac_dispatcher import dispatch
         result = dispatch(plan.intent.raw)
         return result, "", "mac"
+
+    def _local_file_command(self, intent: Intent) -> str:
+        """Best-effort shell command the user can run locally for a
+        delete/compress request we can't perform from a cloud host."""
+        import re
+        m    = re.search(r"['\"]?(~?/?[\w\-./ ]+\.\w+)['\"]?", intent.raw)
+        path = m.group(1).strip() if m else "<file path>"
+        if intent.action == "delete_file":
+            return f"rm '{path}'"
+        if intent.action == "compress_file":
+            return f"zip -r '{path}.zip' '{path}'"
+        return ""
 
     def check_for_pushback(self, intent: Intent) -> str | None:
         """Should JARVIS push back on this request? One LLM call — available

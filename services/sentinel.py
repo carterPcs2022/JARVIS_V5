@@ -7,7 +7,8 @@ import psutil
 from config.settings import SENTINEL_SCAN_INTERVAL, THREAT_LOG, ALERT_CPU, ALERT_RAM, ALERT_DISK
 
 WATCHED = ["core/brain.py","core/llm/router.py","server/api.py","config/settings.py","app.py"]
-EXPECTED_PORTS = {8000, 11434, 22, 80, 443}
+# 10000 is Render's default web service port — expected there, not a threat.
+EXPECTED_PORTS = {8000, 11434, 22, 80, 443, 10000}
 _running = False
 _baseline: dict = {}
 _failed_logins: dict = defaultdict(list)
