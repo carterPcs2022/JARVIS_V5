@@ -17,8 +17,27 @@ from config.settings import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL_SONNET, ANTHROPIC_MODEL_OPUS, ANTHROPIC_MODEL_FABLE,
     ENABLE_SONNET, ENABLE_OPUS, ENABLE_FABLE,
     SONNET_DAILY_CALL_LIMIT, OPUS_DAILY_CALL_LIMIT, FABLE_DAILY_CALL_LIMIT,
-    BASE_DIR,
+    BASE_DIR, USER_TIMEZONE,
 )
+
+
+def _instant_response(query: str) -> str | None:
+    """Answer a handful of queries directly, with no LLM call — currently
+    just the time. JARVIS runs on Render/Railway, whose server clock is
+    UTC; the LLM has no way to know that isn't the user's local time, so
+    routing "what time is it" through a model risks a wrong or server-UTC
+    answer. Returns None for anything else so the caller falls through to
+    the normal LLM pipeline."""
+    q = query.lower().strip()
+    if any(t in q for t in ("what time", "what's the time", "time is it", "current time")):
+        from datetime import datetime
+        try:
+            import zoneinfo
+            now = datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+        except Exception:
+            now = datetime.now()
+        return f"It's {now.strftime('%I:%M %p').lstrip('0')}, sir."
+    return None
 
 # ── Model registry ─────────────────────────────────────────────────────────────
 # Verified live against Groq's /models endpoint — earlier drafts of this

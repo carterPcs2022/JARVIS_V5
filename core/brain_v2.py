@@ -607,6 +607,19 @@ class Brain:
         except Exception:
             pass
 
+        # ── Instant responses (e.g. "what time is it") — no LLM needed, and
+        # answered from the user's configured timezone rather than letting
+        # a model guess based on the server's UTC clock ────────────────────
+        try:
+            from core.llm.router import _instant_response
+            instant = _instant_response(user_input)
+            if instant:
+                from core.memory import save_turn
+                save_turn(user_input, instant)
+                return Result(response=instant, ok=True, provider="instant")
+        except Exception:
+            pass
+
         # ── Protocol 14: Friday fallback if all LLMs offline ─────────────────
         from core.llm.router import check_groq, check_ollama
         from core.state import state as _state

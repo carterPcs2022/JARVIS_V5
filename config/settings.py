@@ -6,6 +6,11 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).parent.parent
 
+# JARVIS runs on a server (Render/Railway) whose local clock is UTC, not
+# the user's — set this to the user's IANA timezone name (e.g.
+# "America/New_York") so time-of-day responses aren't server UTC.
+USER_TIMEZONE = os.getenv("USER_TIMEZONE", "America/New_York")
+
 # ── Identity ──────────────────────────────────────────────────────────────────
 JARVIS_NAME        = "JARVIS"
 JARVIS_VERSION     = "5.0"
