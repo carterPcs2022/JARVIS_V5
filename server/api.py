@@ -232,7 +232,17 @@ async def hud_status():
     except Exception:
         threat_sum = {}
     try:
-        recent_alerts = bus.get_pending()
+        # get_pending() drains every event type (chat, protocol, system...),
+        # not just alerts — and each event nests its text under data.message,
+        # not a top-level message/text field the way hud_mobile's pushAlert()
+        # expects. Passing the raw events through rendered as a literal "[]"
+        # for every non-alert event (undefined ts, undefined message).
+        recent_alerts = [
+            {"ts": e.get("timestamp", ""),
+             "message": e.get("data", {}).get("message", "") if isinstance(e.get("data"), dict) else "",
+             "severity": e.get("severity", "info")}
+            for e in bus.get_pending() if e.get("type") == "alert"
+        ]
     except Exception:
         recent_alerts = []
     try:

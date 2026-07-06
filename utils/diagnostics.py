@@ -13,8 +13,14 @@ def full_diagnostic() -> dict:
     if sys["cpu_percent"] > 90:   warnings.append("⚠️ CPU critical")
     if sys["ram_used_pct"] > 90:  warnings.append("⚠️ RAM critical")
     if sys["disk_used_pct"] > 85: warnings.append("⚠️ Disk critical")
-    if not groq_ok:   warnings.append("⚠️ Groq unavailable")
-    if not ollama_ok: warnings.append("⚠️ Ollama unavailable")
+    # Ollama is just a fallback — its absence isn't a problem on its own as
+    # long as Groq is up. Only call it out when it's the one thing standing
+    # between us and having no LLM provider at all.
+    if not groq_ok and not ollama_ok:
+        warnings.append("⚠️ Groq unavailable")
+        warnings.append("⚠️ Ollama unavailable")
+    elif not groq_ok:
+        warnings.append("⚠️ Groq unavailable (Ollama fallback active)")
 
     # active_model is set live by core/llm/router.py after every real chat
     # call (it reflects whichever tier/model actually served the last
@@ -34,15 +40,26 @@ def full_diagnostic() -> dict:
                   "status": "online" if (groq_ok or ollama_ok) else "degraded"})
 
     # Protocol status
+    lockdown_active = friday_active = False
     try:
         from core.protocols import protocol_status, is_lockdown, is_friday
         proto = protocol_status()
-        if is_lockdown(): warnings.append("⚠️ LOCKDOWN ACTIVE")
-        if is_friday():   warnings.append("⚠️ Friday Protocol — LLMs offline")
+        lockdown_active = is_lockdown()
+        friday_active   = is_friday()
+        if lockdown_active: warnings.append("⚠️ LOCKDOWN ACTIVE")
+        if friday_active:   warnings.append("⚠️ Friday Protocol — LLMs offline")
     except Exception:
         proto = {}
 
-    return {"status": "NOMINAL" if not warnings else "DEGRADED",
+    # "DEGRADED" only means every LLM provider is down, or lockdown/Friday
+    # protocol is active — a slow/rate-limited Groq call, a CPU spike, or
+    # Ollama simply not being configured (the common case when Groq alone
+    # is fine) shouldn't flip the whole HUD to DEGRADED. Those still show
+    # up in `warnings` for detail, they just don't drive the headline status.
+    all_llms_down = not groq_ok and not ollama_ok
+    status = "DEGRADED" if (all_llms_down or lockdown_active or friday_active) else "NOMINAL"
+
+    return {"status": status,
             "brain": brain_status, "active_model": active_model,
             "groq_available": groq_ok, "ollama_available": ollama_ok,
             "system": sys, "warnings": warnings,

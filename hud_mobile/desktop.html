@@ -449,13 +449,19 @@ async function pollAll() {
     document.getElementById('jarvis-dot').className = 'dot';
     document.getElementById('friday-dot').className = 'dot' + (d.friday_online ? '' : ' warn');
 
-    if (d.alerts && d.alerts.length) {
-      document.getElementById('alert-list').innerHTML = '';
+    const alertListEl = document.getElementById('alert-list');
+    if (!d.alerts || d.alerts.length === 0) {
+      alertListEl.innerHTML = '<div class="empty">No alerts.</div>';
+    } else {
+      alertListEl.innerHTML = '';
       d.alerts.forEach(pushAlert);
     }
 
-    const hasWarnings = (d.brain.warnings || []).length > 0;
-    setStatus(hasWarnings ? 'degraded' : 'online');
+    // DEGRADED only when every LLM provider is down — a lone warning (CPU
+    // spike, Groq briefly rate-limited while Ollama/Anthropic still work)
+    // shouldn't flip the whole HUD to degraded.
+    const allProvidersDown = !d.brain.groq && !d.brain.ollama;
+    setStatus(allProvidersDown ? 'degraded' : 'online');
   } catch (e) {
     setStatus('offline');
   }
