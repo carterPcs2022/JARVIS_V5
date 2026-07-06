@@ -1,0 +1,7 @@
+# Full local install (Mac) — everything in requirements.txt plus the
+# hardware-dependent voice packages that would break a Render build.
+# Install with: pip install -r requirements-local.txt
+-r requirements.txt
+
+pyttsx3>=2.90
+faster-whisper>=1.0.0

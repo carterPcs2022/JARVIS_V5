@@ -32,14 +32,14 @@ APScheduler>=3.10.0
 pypdf>=4.0.0
 python-docx>=1.1.0
 
-# Audio
+# Audio (Render-safe: ElevenLabs generates the file, browser plays it —
+# no local speakers/mic needed. pyttsx3/faster-whisper need real audio
+# hardware and live in requirements-local.txt instead; services/voice.py
+# and server/routes/glasses.py already import both lazily inside try/except
+# so their absence here degrades gracefully rather than crashing.)
 numpy>=1.26.0
 edge-tts>=6.1.0
 elevenlabs>=1.5.0
-pyttsx3>=2.90
-
-# Voice / STT
-faster-whisper>=1.0.0
 
 # Environment
 python-dotenv>=1.0.0
