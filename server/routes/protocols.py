@@ -1,4 +1,5 @@
 """server/routes/protocols.py — Stark Protocol endpoints."""
+import hmac
 import os
 from fastapi import APIRouter, Depends, HTTPException
 from utils.security import verify_token, bearer
@@ -8,15 +9,18 @@ router = APIRouter(prefix="/stark", tags=["protocols"])
 
 
 # ── Helper: Pepper / Rhodey token auth ───────────────────────────────────────
+# All token comparisons here use hmac.compare_digest instead of == —
+# constant-time, prevents inferring a token's leading characters from
+# response timing.
 
 def _is_pepper(creds) -> bool:
     token = os.getenv("PEPPER_TOKEN", "")
-    return bool(token and creds and creds.credentials == token)
+    return bool(token and creds and hmac.compare_digest(creds.credentials, token))
 
 
 def _is_rhodey(creds) -> bool:
     token = os.getenv("RHODEY_TOKEN", "")
-    return bool(token and creds and creds.credentials == token)
+    return bool(token and creds and hmac.compare_digest(creds.credentials, token))
 
 
 def verify_any_read_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
@@ -25,7 +29,7 @@ def verify_any_read_token(creds: HTTPAuthorizationCredentials = Depends(bearer))
     if not API_TOKEN:
         return "master"
     if creds:
-        if creds.credentials == API_TOKEN:      return "master"
+        if hmac.compare_digest(creds.credentials, API_TOKEN): return "master"
         if _is_pepper(creds):                   return "pepper"
         if _is_rhodey(creds):                   return "rhodey"
     raise HTTPException(401, "Unauthorized")
@@ -36,7 +40,7 @@ def verify_master_only(creds: HTTPAuthorizationCredentials = Depends(bearer)):
     from config.settings import API_TOKEN
     if not API_TOKEN:
         return True
-    if creds and creds.credentials == API_TOKEN:
+    if creds and hmac.compare_digest(creds.credentials, API_TOKEN):
         return True
     raise HTTPException(401, "Master token required")
 

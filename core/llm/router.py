@@ -74,6 +74,12 @@ _OPUS_TRIGGERS = (
     "critical decision", "life changing", "most important decision",
     "comprehensive analysis", "expert opinion", "think carefully about",
     "hardest problem", "breakthrough", "cutting edge",
+    # Security questions route to opus (not fable — that's reserved for
+    # explicit "use fable" asks, and would burn through fable's scarce
+    # 20/day cap on routine questions like "is this password strong
+    # enough"). Opus's 50/day cap and reasoning quality are a solid fit.
+    "vulnerability", "exploit", "security breach", "authentication bypass",
+    "penetration test", "zero day", "how would an attacker",
 )
 _SONNET_TRIGGERS = (
     "write a", "creative", "write me a story", "write an essay",

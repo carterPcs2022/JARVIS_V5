@@ -37,6 +37,8 @@ from server.routes.mythos import router as mythos_router
 from server.routes.spotify import router as spotify_router, auth_router as spotify_auth_router
 from server.routes.ultimate_brain import router as ultimate_brain_router
 from server.routes.absolute_final import router as absolute_final_router
+from server.routes.security_max import router as security_max_router
+from server.routes.security_gov import router as security_gov_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -68,6 +70,69 @@ app.include_router(spotify_router)
 app.include_router(spotify_auth_router)
 app.include_router(ultimate_brain_router)
 app.include_router(absolute_final_router)
+app.include_router(security_max_router)
+app.include_router(security_gov_router)
+
+
+# ── Blocklist + canary check ──────────────────────────────────────────────────
+# Deliberately minimal middleware — a dict lookup and a substring check,
+# both effectively free and both zero-false-positive by construction: the
+# blocklist can only ever be populated by literally hitting a fake
+# honeypot path (see below), and a canary value is a random UUID that
+# would never legitimately appear in a request body. This is NOT the
+# behavioral/adaptive-rate-limit auto-blocking the source docs described —
+# that's deliberately left unwired (see services/behavioral_security.py
+# and services/adaptive_ratelimit.py docstrings) because false positives
+# there are a real risk of locking the owner out of his own assistant.
+@app.middleware("http")
+async def security_gate_middleware(request: Request, call_next):
+    from services.honeypot import honeypot
+
+    ip = request.client.host if request.client else "unknown"
+    if honeypot.is_blocked(ip):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Access denied"}, status_code=403)
+
+    if request.method in ("POST", "PUT", "PATCH"):
+        try:
+            from services.canary import canary
+            body = (await request.body()).decode(errors="ignore")
+            if body and canary.scan_requests(body):
+                from fastapi.responses import JSONResponse
+                honeypot._block(ip)
+                return JSONResponse({"error": "Access denied"}, status_code=403)
+        except Exception:
+            pass
+
+    return await call_next(request)
+
+
+# ── Honeypot fake endpoints ────────────────────────────────────────────────────
+# Zero legitimate traffic ever reaches these — anyone who does is
+# definitionally scanning/attacking. Registered directly on `app` (not
+# behind verify_token) since the entire point is that they look real to
+# someone who doesn't have a token.
+from services.honeypot import honeypot as _honeypot, HONEYPOT_ENDPOINTS as _HONEYPOT_ENDPOINTS
+
+
+def _make_honeypot_handler():
+    async def _handler(request: Request):
+        import asyncio
+        ip = request.client.host if request.client else "unknown"
+        path = str(request.url.path)
+        try:
+            body = (await request.body()).decode(errors="ignore")[:200]
+        except Exception:
+            body = ""
+        _honeypot.trigger(ip, path, body)
+        await asyncio.sleep(2)  # slow down a scanner
+        return {"error": "Not found"}
+    return _handler
+
+
+for _endpoint in _HONEYPOT_ENDPOINTS:
+    app.add_api_route(_endpoint, _make_honeypot_handler(), methods=["GET", "POST", "PUT", "DELETE"],
+                      include_in_schema=False)
 
 
 @app.get("/metrics")
@@ -262,6 +327,13 @@ async def startup():
 
     # ── Protocol 9: Yinsen — idle check-in thread ────────────────────────────
     start_yinsen_watch(hours=24)
+
+    # ── Canary tokens — plant fresh values in watched memory files ───────────
+    try:
+        from services.canary import canary
+        canary.plant_in_memory_files()
+    except Exception as e:
+        print(f"[JARVIS] Canary planting skipped: {e}")
 
     # ── LLM probe ──────────────────────────────────────────────────────────────
     async def _probe():

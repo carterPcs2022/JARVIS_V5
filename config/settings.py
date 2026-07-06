@@ -241,6 +241,15 @@ SECRET_KEY     = os.getenv("JARVIS_SECRET_KEY", "change-me-in-production")
 API_TOKEN      = os.getenv("JARVIS_API_TOKEN", "")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
+# Two-Man Rule (services/two_man_rule.py) — a second, genuinely distinct
+# secret from API_TOKEN. AVENGERS_PASSPHRASE already exists for Protocol
+# 6/3's double-confirmation flow (core/protocols.py) and doubles as the
+# "secondary" party here. PEPPER_TOKEN is for an actual second person, if
+# you ever want one — empty by default, which just means that party slot
+# never counts as valid until you set it.
+AVENGERS_PASSPHRASE = os.getenv("AVENGERS_PASSPHRASE", "")
+PEPPER_TOKEN        = os.getenv("PEPPER_TOKEN", "")
+
 # ── Memory ────────────────────────────────────────────────────────────────────
 MEMORY_DIR         = BASE_DIR / "memory"
 SHORT_TERM_FILE    = MEMORY_DIR / "short_term.json"

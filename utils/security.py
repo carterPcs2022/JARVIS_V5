@@ -1,4 +1,5 @@
 """utils/security.py — Auth, rate limiting, CORS."""
+import hmac
 import os
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -16,6 +17,10 @@ def verify_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
       local development. Never set DEV_MODE=true anywhere reachable from the
       internet (Railway, Docker exposed to a network, etc).
     - Otherwise -> require a valid Bearer token.
+    Uses hmac.compare_digest rather than == — constant-time, so a token
+    guesser can't use response timing to infer how many leading characters
+    they got right. Free to do (same cost as == for strings this short);
+    no reason not to.
     """
     if not API_TOKEN:
         return True
@@ -23,7 +28,7 @@ def verify_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
 
-    if not creds or creds.credentials != API_TOKEN:
+    if not creds or not hmac.compare_digest(creds.credentials, API_TOKEN):
         raise HTTPException(401, "Unauthorized — invalid token")
     return True
 

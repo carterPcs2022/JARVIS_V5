@@ -196,6 +196,40 @@ def _package_check():
         log.debug("Package check failed: %s", e)
 
 
+def _daily_secret_scan():
+    """Cheap (regex-only, no LLM calls) — safe to run automatically,
+    unlike services.self_audit.full_audit() (LLM-based, ~9 paid calls),
+    which stays manual-only."""
+    try:
+        from services.self_audit import audit
+        findings = audit.scan_for_secrets()
+        if findings:
+            from core.event_bus import bus
+            bus.alert(f"Daily secret scan found {len(findings)} potential exposed secret(s) in code.",
+                     severity="critical", category="SECRET_SCAN")
+    except Exception as e:
+        log.debug("Daily secret scan failed: %s", e)
+
+
+def _dead_mans_switch_monitor():
+    """No-op unless services.dead_mans_switch.dms was explicitly
+    configured (config["enabled"] defaults False) — safe to schedule
+    unconditionally."""
+    try:
+        from services.dead_mans_switch import dms
+        dms.monitor()
+    except Exception as e:
+        log.debug("Dead man's switch monitor failed: %s", e)
+
+
+def _daily_canary_replant():
+    try:
+        from services.canary import canary
+        canary.plant_in_memory_files()
+    except Exception as e:
+        log.debug("Daily canary replant failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -246,10 +280,20 @@ def start():
         _scheduler.add_job(_price_check, "interval", minutes=30, id="price_check")
         _scheduler.add_job(_package_check, "interval", hours=1, id="package_check")
 
+        # Security batch — only the cheap/self-gated jobs are auto-scheduled.
+        # services.self_audit.full_audit() (~9 paid LLM calls) and
+        # services.red_team.run_exercise() (2x fable + 1x opus) stay
+        # manual-only (POST /stark/security/audit, /stark/security/redteam)
+        # rather than running unattended every night/week.
+        _scheduler.add_job(_daily_secret_scan, "cron", hour=2, id="daily_secret_scan")
+        _scheduler.add_job(_dead_mans_switch_monitor, "interval", hours=1, id="dead_mans_switch_monitor")
+        _scheduler.add_job(_daily_canary_replant, "cron", hour=0, minute=0, id="daily_canary_replant")
+
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
-                 "morning/evening routines, price/package tracking")
+                 "morning/evening routines, price/package tracking, "
+                 "secret scan/dead man's switch/canary replant")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")
