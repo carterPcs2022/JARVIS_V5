@@ -239,14 +239,13 @@ def honest_mode_score(response: str, query: str) -> int:
     return max(0, min(100, score))
 
 
-def honest_mode_wrap(response: str, query: str) -> str:
-    """Prepend confidence badge to a response."""
-    score = honest_mode_score(response, query)
-    if score < 70:
-        badge = f"[Confidence: {score}% ⚠ — treat as estimate, not fact]\n"
-    else:
-        badge = f"[Confidence: {score}%]\n"
-    return badge + response
+
+# honest_mode_score() above is the source of truth for the confidence
+# number — it used to also get prepended to the response as a
+# "[Confidence: X%]" badge via honest_mode_wrap(), but that leaked into
+# the user-facing chat text. The score now stays metadata-only (see
+# Result.confidence / Brain.process in core/brain_v2.py) and is never
+# rendered into the response string.
 
 
 # ── Protocol 11 — Integrity Check ────────────────────────────────────────────

@@ -59,6 +59,7 @@ class Result:
     was_rewritten: bool = False
     issues:       list = field(default_factory=list)
     raw_plan:     Plan | None = None
+    confidence:   int = 0   # metadata only — never rendered into the response text
 
 
 # ── Reasoner ─────────────────────────────────────────────────────────────────
@@ -703,9 +704,17 @@ class Brain:
         except Exception:
             pass
 
-        # ── Protocol 8: Honest Mode — wrap confidence score ───────────────────
-        from core.protocols import honest_mode_wrap
-        result.response = proto_prefix + honest_mode_wrap(result.response, user_input)
+        # ── Protocol 8: Honest Mode — confidence score, metadata only ─────────
+        # Previously prepended a "[Confidence: X%]" badge to the response text
+        # (honest_mode_wrap) — that leaked into the user-facing chat. The
+        # score is still computed and attached to the Result, just never
+        # rendered into the response string itself.
+        try:
+            from core.protocols import honest_mode_score
+            result.confidence = honest_mode_score(result.response, user_input)
+        except Exception:
+            pass
+        result.response = proto_prefix + result.response
 
         # ── Proactive suggestion (non-intrusive append) ───────────────────────
         try:
@@ -745,6 +754,7 @@ class Brain:
                 "was_rewritten": r.was_rewritten,
                 "issues":        r.issues,
                 "tier":          tier,
+                "confidence":    r.confidence,
             },
         }
 

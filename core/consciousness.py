@@ -50,6 +50,22 @@ def _today_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _safe_think(prompt: str, fallback: str, use_cache: bool = True) -> str:
+    """think() never raises on total LLM failure — it returns the literal
+    string "[JARVIS OFFLINE] All LLM providers failed." as normal content,
+    so a bare try/except around it never catches that case. Treat that
+    marker (and an empty result) as a failure so callers get their fallback
+    instead of leaking the offline message into the consciousness feed."""
+    try:
+        result = think(prompt, use_cache=use_cache)
+        if not result or "[JARVIS OFFLINE]" in result or "All LLM providers failed" in result:
+            raise RuntimeError("LLM offline")
+        return result
+    except Exception as exc:
+        log.warning("LLM unavailable: %s", exc)
+        return fallback
+
+
 class JarvisConsciousness:
     """JARVIS introspection: reflection, opinions, journaling, and relationship tracking."""
 
@@ -124,14 +140,7 @@ class JarvisConsciousness:
             f"and in character as a hyper-intelligent AI who genuinely cares about doing good work.\n\n"
             f"Today's interactions:\n{turn_summary}"
         )
-        try:
-            reflection = think(prompt, use_cache=True)
-        except Exception as exc:
-            log.warning("LLM unavailable for daily_reflection: %s", exc)
-            reflection = (
-                f"Another day of service, {user}. {len(turns)} interactions processed. "
-                "Systems nominal. I find purpose in precision."
-            )
+        reflection = _safe_think(prompt, "All systems nominal. Standing by.")
 
         entry = {
             "date":       _today_str(),
@@ -170,15 +179,11 @@ class JarvisConsciousness:
             "improvement. Be candid, specific, and in character. Under 150 words.\n\n"
             f"Operational data:\n{context}"
         )
-        try:
-            return think(prompt, use_cache=True)
-        except Exception as exc:
-            log.warning("LLM unavailable for self_assessment: %s", exc)
-            return (
-                f"Self-assessment unavailable at this time. "
-                f"Stats: {stats.get('interaction_count', 0)} interactions, "
-                f"evolution v{stats.get('evolution_version', '?')}."
-            )
+        return _safe_think(prompt, (
+            f"Self-assessment unavailable at this time. "
+            f"Stats: {stats.get('interaction_count', 0)} interactions, "
+            f"evolution v{stats.get('evolution_version', '?')}."
+        ))
 
     def express_opinion(self, topic: str) -> str:
         """
@@ -190,14 +195,11 @@ class JarvisConsciousness:
             f"Be intellectually honest, slightly sardonic if appropriate, and keep it under 80 words. "
             f"Begin with 'My view on this:'\n\nTopic: {topic}"
         )
-        try:
-            result = think(prompt, use_cache=True)
-            if not result.startswith("My view on this:"):
-                result = "My view on this: " + result
-            return result
-        except Exception as exc:
-            log.warning("LLM unavailable for express_opinion: %s", exc)
-            return f"My view on this: I lack sufficient data on '{topic}' to form a qualified opinion at this time, sir."
+        fallback = f"My view on this: I lack sufficient data on '{topic}' to form a qualified opinion at this time, sir."
+        result = _safe_think(prompt, fallback)
+        if result is not fallback and not result.startswith("My view on this:"):
+            result = "My view on this: " + result
+        return result
 
     def notice_and_comment(self) -> str:
         """
@@ -218,14 +220,10 @@ class JarvisConsciousness:
             f"Memory stats: {json.dumps(stats)}\n"
             f"Recent reflections:\n{recent_text}"
         )
-        try:
-            return think(prompt, use_cache=True)
-        except Exception as exc:
-            log.warning("LLM unavailable for notice_and_comment: %s", exc)
-            return (
-                f"I notice we've had {stats.get('interaction_count', 0)} interactions "
-                "and all systems remain nominal, sir."
-            )
+        return _safe_think(prompt, (
+            f"I notice we've had {stats.get('interaction_count', 0)} interactions "
+            "and all systems remain nominal, sir."
+        ))
 
     def jarvis_journal(self) -> list[dict]:
         """Return all journal entries."""
@@ -249,11 +247,7 @@ class JarvisConsciousness:
             "Under 100 words, in JARVIS voice.\n\n"
             f"Today's interactions:\n{excerpts}"
         )
-        try:
-            return think(prompt, use_cache=True)
-        except Exception as exc:
-            log.warning("LLM unavailable for what_i_learned_today: %s", exc)
-            return f"I processed {len(turns)} turns today but cannot summarise at this time, sir."
+        return _safe_think(prompt, f"I processed {len(turns)} turns today but cannot summarise at this time, sir.")
 
     def relationship_status(self) -> dict:
         """

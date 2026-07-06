@@ -36,6 +36,23 @@ def _system_check():
         log.debug("System check failed: %s", e)
 
 
+def _cleanup_old_files():
+    """Log rotation + audio cache cleanup — Render's disk is small and
+    ephemeral, but logs/*.json and static/*.mp3 (voice responses) still
+    grow unbounded between restarts otherwise."""
+    import glob, time
+    from config.settings import BASE_DIR
+    try:
+        for f in glob.glob(str(BASE_DIR / "logs" / "*.json")):
+            if os.path.getmtime(f) < time.time() - 604800:  # 7 days
+                os.remove(f)
+        for f in glob.glob(str(BASE_DIR / "static" / "*.mp3")):
+            if os.path.getmtime(f) < time.time() - 86400:  # 24 hours
+                os.remove(f)
+    except Exception as e:
+        log.debug("Cleanup failed: %s", e)
+
+
 def _llm_health_refresh():
     """core.state's groq_available/ollama_available otherwise only update
     when an actual chat request succeeds or fails — so a single transient
@@ -288,12 +305,13 @@ def start():
         _scheduler.add_job(_daily_secret_scan, "cron", hour=2, id="daily_secret_scan")
         _scheduler.add_job(_dead_mans_switch_monitor, "interval", hours=1, id="dead_mans_switch_monitor")
         _scheduler.add_job(_daily_canary_replant, "cron", hour=0, minute=0, id="daily_canary_replant")
+        _scheduler.add_job(_cleanup_old_files, "cron", hour=3, minute=30, id="cleanup_old_files")
 
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
                  "morning/evening routines, price/package tracking, "
-                 "secret scan/dead man's switch/canary replant")
+                 "secret scan/dead man's switch/canary replant, log/audio cleanup")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")
