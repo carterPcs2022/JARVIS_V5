@@ -126,3 +126,48 @@ def follow_up_reminders() -> list[str]:
                 datetime.fromisoformat(last) < cutoff:
             remind.append(f"You haven't mentioned {p['name']} in over a week.")
     return remind[:3]
+
+
+def record_interaction(name: str, notes: str = "") -> dict | None:
+    """Record that you actually talked to someone (not just mentioned them in
+    passing) — resets their follow-up clock. Distinct from save_person()/
+    ingest_from_text(), which fire on every mention regardless of whether
+    real contact happened."""
+    people = _load()
+    for p in people:
+        if p["name"].lower() == name.lower():
+            p["last_contact"] = datetime.now().isoformat()
+            p.setdefault("interactions", []).append({
+                "ts": datetime.now().isoformat(), "notes": notes,
+            })
+            _save(people)
+            return p
+    return None
+
+
+def should_follow_up() -> list[dict]:
+    """Who should you reach out to today? Based on explicit last_contact
+    (record_interaction) where available, falling back to last_mentioned
+    for people who've never had a logged interaction. Each person can set
+    their own contact_threshold_days (default 30)."""
+    people = _load()
+    follow_ups = []
+    for p in people:
+        last = p.get("last_contact") or p.get("last_mentioned")
+        if not last:
+            continue
+        try:
+            days_ago = (datetime.now() - datetime.fromisoformat(last)).days
+        except ValueError:
+            continue
+
+        threshold = p.get("contact_threshold_days", 30)
+        if days_ago >= threshold:
+            follow_ups.append({
+                "name":     p["name"],
+                "days_ago": days_ago,
+                "reason":   p.get("context", ""),
+                "priority": "high" if days_ago > threshold * 2 else "medium",
+            })
+
+    return sorted(follow_ups, key=lambda x: x["days_ago"], reverse=True)[:5]

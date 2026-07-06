@@ -40,6 +40,7 @@ from server.routes.absolute_final import router as absolute_final_router
 from server.routes.security_max import router as security_max_router
 from server.routes.security_gov import router as security_gov_router
 from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
+from server.routes.new_features import router as new_features_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -75,6 +76,7 @@ app.include_router(security_max_router)
 app.include_router(security_gov_router)
 app.include_router(security_firewalls_router)
 app.include_router(suit_security_router)
+app.include_router(new_features_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
@@ -334,6 +336,18 @@ async def startup():
 
     base_dir = str(Path(__file__).parent.parent)
     sentinel_start(base_dir)  # loads a saved baseline from disk if one exists, else builds fresh
+
+    # ── Wake word — local Mac only, no-op on Render/Railway (no mic) ─────────
+    if ENVIRONMENT == "local":
+        try:
+            from services.wakeword import wakeword
+
+            def _on_wakeword():
+                bus.system(f"Wake word detected — listening.")
+
+            wakeword.start(_on_wakeword)
+        except Exception as e:
+            print(f"[JARVIS] Wake word detector skipped: {e}")
 
     # ── Protocol 16: Endgame — hourly snapshot thread ─────────────────────────
     start_endgame_loop()

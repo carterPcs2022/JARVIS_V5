@@ -5,3 +5,9 @@
 
 pyttsx3>=2.90
 faster-whisper>=1.0.0
+
+# Wake word (services/wakeword.py) — mic capture for "Hey JARVIS" detection
+sounddevice>=0.4.6
+
+# Mac menu bar app (desktop_app/jarvis_menubar.py)
+rumps>=0.4.0

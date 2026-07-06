@@ -377,6 +377,15 @@ class FinanceIntelligence:
         return {"symbol": symbol, "price": None, "change": None, "change_pct": None,
                 "error": "No market data source available (install yfinance or requests)."}
 
+    def portfolio_check(self, symbols: list | None = None) -> dict:
+        """Quick multi-symbol portfolio check — defaults to PORTFOLIO_SYMBOLS
+        from .env, reusing get_stock_price() per symbol."""
+        if not symbols:
+            symbols = [s.strip() for s in os.getenv("PORTFOLIO_SYMBOLS", "AAPL,MSFT,NVDA").split(",") if s.strip()]
+
+        portfolio = {symbol: self.get_stock_price(symbol) for symbol in symbols[:10]}
+        return {"portfolio": portfolio, "ts": datetime.now().isoformat()}
+
     def crypto_prices(self, coins: list) -> dict:
         """
         Fetch crypto prices from CoinGecko free API.

@@ -57,6 +57,15 @@ class MorningRoutine:
         except Exception:
             pass
 
+        try:
+            from services.people import should_follow_up
+            follow_ups = should_follow_up()
+            if follow_ups:
+                names = ", ".join(f["name"] for f in follow_ups[:3])
+                parts.append(f"You haven't spoken to {names} recently.")
+        except Exception:
+            pass
+
         full_brief = " ".join(parts)
 
         try:

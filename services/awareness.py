@@ -329,6 +329,52 @@ class SituationalAwareness:
 
         return alerts
 
+    # ── Proactive research ────────────────────────────────────────────────────
+
+    def proactive_research(self) -> list[dict]:
+        """Monitor active workshop projects and proactively surface relevant
+        news without being asked. Scheduled every 2 hours (see
+        services/scheduler.py) — cheap by construction: an instant-tier
+        relevance check gates the (rarer) narration call."""
+        from services.workshop import workshop
+        from core.tools.web import search
+
+        findings = []
+        for project in workshop.list_projects(status="active")[:3]:
+            name = project.get("name", "")
+            if not name:
+                continue
+            try:
+                results = search(f"{name} news developments", 3)
+            except Exception as exc:
+                log.debug("Proactive research search failed for %s: %s", name, exc)
+                continue
+            if not results:
+                continue
+
+            top = results[0]
+            try:
+                relevance = think(
+                    f"Is this news relevant to the project '{name}'?\n"
+                    f"News: {top.get('snippet', '')}\n"
+                    f"Reply YES or NO only.",
+                    force_model="instant",
+                )
+            except Exception as exc:
+                log.debug("Relevance check failed for %s: %s", name, exc)
+                continue
+
+            if "YES" in relevance.upper():
+                finding = {
+                    "project": name,
+                    "finding": top.get("title", ""),
+                    "snippet": top.get("snippet", "")[:200],
+                }
+                findings.append(finding)
+                bus.system(f"Relevant to {name}: {finding['finding']}")
+
+        return findings
+
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def set_awareness_level(self, level: str) -> None:

@@ -607,6 +607,17 @@ class Brain:
         except Exception:
             pass
 
+        # ── Smart home scene commands — instant, no LLM needed ───────────────
+        try:
+            from services.home_automation import handle_scene_command
+            scene_response = handle_scene_command(user_input)
+            if scene_response:
+                from core.memory import save_turn
+                save_turn(user_input, scene_response)
+                return Result(response=scene_response, ok=True, provider="home_automation")
+        except Exception:
+            pass
+
         # ── Instant responses (e.g. "what time is it") — no LLM needed, and
         # answered from the user's configured timezone rather than letting
         # a model guess based on the server's UTC clock ────────────────────

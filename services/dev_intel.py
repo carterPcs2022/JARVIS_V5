@@ -102,6 +102,41 @@ class DeveloperIntelligence:
         except Exception:
             return f"{path}: {len(content)} chars, unable to summarize (LLM unavailable)."
 
+    def review_file(self, file_path: str) -> dict:
+        """Deep code review — bugs, security issues, performance, missing
+        error handling. Uses fable (deepest scrutiny tier) since a review
+        is exactly the kind of task that benefits from it."""
+        p = Path(file_path)
+        if not p.exists():
+            return {"error": f"File not found: {file_path}"}
+        try:
+            code = p.read_text(errors="ignore")[:4000]
+        except Exception as e:
+            return {"error": str(e)}
+
+        from core.llm.router import think
+        review = think(
+            f"Code review for {file_path}:\n\n{code}\n\n"
+            f"Check for:\n"
+            f"1. Bugs or logic errors\n"
+            f"2. Security issues\n"
+            f"3. Performance improvements\n"
+            f"4. Code quality\n"
+            f"5. Missing error handling\n"
+            f"Be specific with line references.",
+            force_model="fable",
+        )
+        return {"file": file_path, "review": review}
+
+    def suggest_improvements(self, code: str) -> str:
+        """Suggest the most impactful improvements for a code snippet."""
+        from core.llm.router import think
+        return think(
+            f"Suggest specific improvements for this code:\n\n{code[:2000]}\n\n"
+            f"Focus on the most impactful changes.",
+            force_model="opus",
+        )
+
     def find_todos(self, path: str = ".") -> list[dict]:
         pattern = re.compile(r"(TODO|FIXME|HACK)[:\s]+(.*)", re.I)
         todos = []
