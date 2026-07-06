@@ -8,6 +8,16 @@ Mac control, and basic canned responses. JARVIS never goes fully dark.
 import re
 from datetime import datetime
 
+from config.settings import USER_TIMEZONE
+
+
+def _now_local() -> datetime:
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    except Exception:
+        return datetime.now()
+
 
 # ── Canned responses ──────────────────────────────────────────────────────────
 
@@ -64,7 +74,7 @@ def _dynamic_status() -> str:
             f"  Uptime: {s['uptime_hours']:.1f}h  |  "
             f"Threats (24h): {threat.get('last_24h', 0)}\n"
             f"  LLM engines: OFFLINE\n"
-            f"  Time: {datetime.now().strftime('%H:%M:%S')}"
+            f"  Time: {_now_local().strftime('%H:%M:%S')}"
         )
     except Exception as e:
         return f"[FRIDAY PROTOCOL] Status check failed: {e}"

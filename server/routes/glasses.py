@@ -13,14 +13,25 @@ GET  /stark/glasses/status   <- pipeline health check
 import os
 import tempfile
 import time
+from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Depends
 from fastapi.responses import FileResponse
 from utils.security import verify_token
-from config.settings import BASE_DIR
+from config.settings import BASE_DIR, USER_TIMEZONE
 
 router = APIRouter(prefix="/stark/glasses", tags=["glasses"])
 
 _RESPONSE_AUDIO_PATH = str(BASE_DIR / "glasses_response.mp3")
+
+
+def _now_local() -> datetime:
+    """JARVIS runs on Render/Railway (server clock is UTC) — use the
+    user's configured timezone so the spoken time/date is correct."""
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    except Exception:
+        return datetime.now()
 
 
 # ── Quick-response cache — skip the LLM entirely for trivial queries ────────────
@@ -29,9 +40,9 @@ _RESPONSE_AUDIO_PATH = str(BASE_DIR / "glasses_response.mp3")
 # to answer directly instead of paying for a Groq call every time.
 
 _QUICK_RESPONSES = {
-    "what time is it":  lambda: f"It's {__import__('datetime').datetime.now().strftime('%I:%M %p')}.",
-    "whats the time":   lambda: f"It's {__import__('datetime').datetime.now().strftime('%I:%M %p')}.",
-    "what day is it":   lambda: __import__('datetime').datetime.now().strftime('%A, %B %d.'),
+    "what time is it":  lambda: f"It's {_now_local().strftime('%I:%M %p')}.",
+    "whats the time":   lambda: f"It's {_now_local().strftime('%I:%M %p')}.",
+    "what day is it":   lambda: _now_local().strftime('%A, %B %d.'),
     "jarvis status":    lambda: "All systems nominal.",
     "are you there":    lambda: "Always, sir.",
     "you there":        lambda: "Right here.",

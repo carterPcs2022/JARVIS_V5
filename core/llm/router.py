@@ -21,22 +21,33 @@ from config.settings import (
 )
 
 
+_TIME_TRIGGERS = ("what time", "what's the time", "time is it", "current time", "the time")
+_DATE_TRIGGERS = ("what day", "what's the date", "today's date", "what date")
+
+
+def _now_local():
+    from datetime import datetime
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    except Exception:
+        return datetime.now()
+
+
 def _instant_response(query: str) -> str | None:
     """Answer a handful of queries directly, with no LLM call — currently
-    just the time. JARVIS runs on Render/Railway, whose server clock is
-    UTC; the LLM has no way to know that isn't the user's local time, so
+    time/date. JARVIS runs on Render/Railway, whose server clock is UTC;
+    the LLM has no way to know that isn't the user's local time, so
     routing "what time is it" through a model risks a wrong or server-UTC
     answer. Returns None for anything else so the caller falls through to
     the normal LLM pipeline."""
     q = query.lower().strip()
-    if any(t in q for t in ("what time", "what's the time", "time is it", "current time")):
-        from datetime import datetime
-        try:
-            import zoneinfo
-            now = datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
-        except Exception:
-            now = datetime.now()
+    if any(t in q for t in _TIME_TRIGGERS):
+        now = _now_local()
         return f"It's {now.strftime('%I:%M %p').lstrip('0')}, sir."
+    if any(t in q for t in _DATE_TRIGGERS):
+        now = _now_local()
+        return now.strftime("%A, %B %d.")
     return None
 
 # ── Model registry ─────────────────────────────────────────────────────────────
@@ -335,6 +346,12 @@ def chat(messages: list[dict], max_tokens: int = 1024,
 
     Returns: {content, model, provider, latency_ms, error}
     """
+    if query:
+        instant = _instant_response(query)
+        if instant is not None:
+            return {"content": instant, "model": "instant", "provider": "local",
+                   "latency_ms": 0.0}
+
     from core.llm.openai import chat as groq_chat
     from core.llm.ollama import chat as ollama_chat
     from core.state import state

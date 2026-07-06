@@ -6,11 +6,23 @@ degrades gracefully instead of breaking the whole routine."""
 import os
 from datetime import datetime
 
+from config.settings import USER_TIMEZONE
+
+
+def _now_local() -> datetime:
+    """JARVIS runs on Render/Railway (server clock is UTC) — use the
+    user's configured timezone so the spoken time is actually correct."""
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    except Exception:
+        return datetime.now()
+
 
 class MorningRoutine:
 
     def run(self) -> dict:
-        parts = [f"Good morning. It's {datetime.now().strftime('%I:%M %p')}."]
+        parts = [f"Good morning. It's {_now_local().strftime('%I:%M %p')}."]
 
         try:
             from core.tools.web import get_weather
