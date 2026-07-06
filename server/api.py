@@ -455,12 +455,19 @@ async def startup():
             print(f"[JARVIS] Domain auto-registration skipped: {e}")
 
         # ── Neuro profile analysis — one LLM call, only if enough history ─────
+        # Staggered another 30s past _probe()'s check_groq() call above —
+        # that one's cached (30s TTL) so scheduler_start()/messaging don't
+        # add real Groq traffic, but this is a genuine uncached generative
+        # call, and firing it right on top of _probe() was the one place
+        # in this startup sequence actually capable of a same-instant
+        # double-request.
         try:
-            from core.neuro_mirror import neuro
             from core.memory import _load
             from config.settings import CONVERSATIONS_FILE
             convs = _load(CONVERSATIONS_FILE) or []
             if len(convs) >= 20:
+                await asyncio.sleep(30)
+                from core.neuro_mirror import neuro
                 neuro.analyze_thinking_style(convs)
                 print("[JARVIS] Neuro profile refreshed.")
         except Exception as e:
