@@ -73,8 +73,10 @@
   .msg.user::before { content: "YOU  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
   .msg.ai { color: var(--core); }
   .msg.ai::before { content: "JARVIS  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
+  .msg.system { color: var(--dim); font-style: italic; }
   .msg .body { white-space: pre-wrap; }
   .typing { color: var(--dim); font-size: 12px; font-style: italic; }
+  .chat-panel.drag-over #chat-log { outline: 1px dashed var(--core); outline-offset: -4px; }
 
   .chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
   #msg-input { flex: 1; background: var(--core-dim); border: 1px solid var(--line); border-radius: 4px;
@@ -306,6 +308,36 @@ function appendMsg(role, text) {
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   return body;
+}
+
+// ── Drag-and-drop document analysis ─────────────────────────────────────────
+const chatPanel = document.querySelector('.chat-panel');
+if (chatPanel) {
+  chatPanel.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    chatPanel.classList.add('drag-over');
+  });
+  chatPanel.addEventListener('dragleave', () => chatPanel.classList.remove('drag-over'));
+  chatPanel.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    chatPanel.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append('file', file);
+    appendMsg('system', `Analyzing ${file.name}...`);
+    try {
+      const r = await fetch(`${API}/stark/documents/analyze`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}` },
+        body: form,
+      });
+      const data = await r.json();
+      appendMsg('ai', data.analysis || data.error || 'Could not analyze file.');
+    } catch (err) {
+      appendMsg('system', `Upload failed: ${err}`);
+    }
+  });
 }
 
 function connectWs() {

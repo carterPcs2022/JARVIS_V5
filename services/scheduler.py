@@ -247,6 +247,25 @@ def _daily_canary_replant():
         log.debug("Daily canary replant failed: %s", e)
 
 
+def _proactive_screen_check():
+    """Local Mac only — services.screen_monitor already no-ops everywhere
+    else, but skipping the job registration entirely on Render/Railway
+    avoids a pointless 5-minute LLM-call timer with nothing to capture."""
+    try:
+        from services.screen_monitor import screen_monitor
+        screen_monitor.proactive_monitor()
+    except Exception as e:
+        log.debug("Proactive screen check failed: %s", e)
+
+
+def _proactive_research():
+    try:
+        from services.awareness import awareness
+        awareness.proactive_research()
+    except Exception as e:
+        log.debug("Proactive research failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -307,11 +326,19 @@ def start():
         _scheduler.add_job(_daily_canary_replant, "cron", hour=0, minute=0, id="daily_canary_replant")
         _scheduler.add_job(_cleanup_old_files, "cron", hour=3, minute=30, id="cleanup_old_files")
 
+        # Final batch: proactive screen monitoring (local Mac only — screen
+        # capture is a no-op everywhere else) + proactive project research
+        from config.settings import ENVIRONMENT
+        if ENVIRONMENT == "local":
+            _scheduler.add_job(_proactive_screen_check, "interval", minutes=5, id="proactive_screen_check")
+        _scheduler.add_job(_proactive_research, "interval", hours=2, id="proactive_research")
+
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
                  "morning/evening routines, price/package tracking, "
-                 "secret scan/dead man's switch/canary replant, log/audio cleanup")
+                 "secret scan/dead man's switch/canary replant, log/audio cleanup, "
+                 "proactive screen check (local), proactive research/2h")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")
