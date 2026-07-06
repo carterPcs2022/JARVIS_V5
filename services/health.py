@@ -9,9 +9,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from config.settings import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
-HEALTH_DATA_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/health_data.json")
+HEALTH_DATA_FILE = BASE_DIR / "memory" / "health_data.json"
 
 
 class HealthMonitor:

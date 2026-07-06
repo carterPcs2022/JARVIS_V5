@@ -11,15 +11,17 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Optional
 
+from config.settings import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
-FOCUS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/focus.json")
-TASKS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/tasks.json")
-NOTES_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/notes.json")
-HABITS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/habits.json")
-CALENDAR_CACHE_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/calendar_cache.json")
-PRIORITIES_CACHE_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/priorities_cache.json")
-SHORT_TERM_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/short_term.json")
+FOCUS_FILE = BASE_DIR / "memory" / "focus.json"
+TASKS_FILE = BASE_DIR / "memory" / "tasks.json"
+NOTES_FILE = BASE_DIR / "memory" / "notes.json"
+HABITS_FILE = BASE_DIR / "memory" / "habits.json"
+CALENDAR_CACHE_FILE = BASE_DIR / "memory" / "calendar_cache.json"
+PRIORITIES_CACHE_FILE = BASE_DIR / "memory" / "priorities_cache.json"
+SHORT_TERM_FILE = BASE_DIR / "memory" / "short_term.json"
 
 
 def _load_json(path: Path, default: Any) -> Any:

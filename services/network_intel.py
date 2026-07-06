@@ -11,9 +11,7 @@ import ipaddress
 import json
 import logging
 import os
-import re
 import socket
-import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -470,7 +468,12 @@ class NetworkIntelligence:
 
     def internet_health(self) -> dict:
         """
-        Ping 8.8.8.8 and 1.1.1.1 to check connectivity and measure latency.
+        Open a raw TCP connection to 8.8.8.8 and 1.1.1.1 (port 53, DNS) to
+        check connectivity and measure round-trip latency. Not an actual
+        `ping` (ICMP) — that binary isn't installed on Render's containers,
+        so subprocess.run(["ping", ...]) reliably 500'd there. A TCP connect
+        needs no external binary and gives an equally valid reachability +
+        latency signal.
         Returns {"online": bool, "latency_ms": float, "targets": {...}}.
         """
         targets = {"8.8.8.8": None, "1.1.1.1": None}
@@ -478,23 +481,14 @@ class NetworkIntelligence:
 
         for host in targets:
             try:
-                result = subprocess.run(
-                    ["ping", "-c", "3", "-W", "2000", host],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                output = result.stdout
-                # Extract average latency from ping output
-                match = re.search(r"(\d+\.?\d*)/(\d+\.?\d*)/(\d+\.?\d*)", output)
-                if match:
-                    avg_ms = float(match.group(2))
-                    targets[host] = {"reachable": True, "latency_ms": avg_ms}
-                    latencies.append(avg_ms)
-                else:
-                    targets[host] = {"reachable": result.returncode == 0, "latency_ms": None}
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-                log.warning("Ping to %s failed: %s", host, exc)
+                start = time.time()
+                with socket.create_connection((host, 53), timeout=2):
+                    pass
+                latency_ms = round((time.time() - start) * 1000, 2)
+                targets[host] = {"reachable": True, "latency_ms": latency_ms}
+                latencies.append(latency_ms)
+            except OSError as exc:
+                log.warning("Connectivity check to %s failed: %s", host, exc)
                 targets[host] = {"reachable": False, "latency_ms": None, "error": str(exc)}
 
         online = any(v and v.get("reachable") for v in targets.values())

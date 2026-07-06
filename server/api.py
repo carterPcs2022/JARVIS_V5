@@ -311,7 +311,7 @@ async def startup():
     from core.state import state
     from services.sentinel import start as sentinel_start
     from core.event_bus import bus
-    from core.llm.router import check_groq, check_ollama
+    from core.llm.router import check_groq, check_ollama, check_anthropic
     from config.settings import ENVIRONMENT
 
     state.set("environment", ENVIRONMENT)
@@ -348,8 +348,11 @@ async def startup():
     # ── LLM probe ──────────────────────────────────────────────────────────────
     async def _probe():
         loop = asyncio.get_event_loop()
-        groq_ok   = await loop.run_in_executor(None, check_groq)
-        ollama_ok = await loop.run_in_executor(None, check_ollama)
+        # check_groq() treats a 429 as "up" (rate-limited, not down) — a
+        # transient throttle shouldn't engage Friday Protocol.
+        groq_ok      = await loop.run_in_executor(None, check_groq)
+        ollama_ok    = await loop.run_in_executor(None, check_ollama)
+        anthropic_ok = check_anthropic()
         state.update({
             "groq_available":   groq_ok,
             "ollama_available": ollama_ok,
@@ -361,7 +364,7 @@ async def startup():
         if ollama_ok:
             bus.system("Ollama: online")
             print("[JARVIS] Ollama: ✓")
-        if not groq_ok and not ollama_ok:
+        if not groq_ok and not anthropic_ok and not ollama_ok:
             state.set("status", "degraded")
             bus.alert("No LLM providers — Friday Protocol active.", "critical")
             print("[JARVIS] ⚠ Friday Protocol engaged")

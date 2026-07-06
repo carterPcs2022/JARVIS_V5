@@ -7,13 +7,14 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 
 from core.llm.router import think
+from config.settings import BASE_DIR
 
 try:
     import caldav
 except ImportError:
     caldav = None
 
-_CALENDAR_CACHE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/calendar_cache.json")
+_CALENDAR_CACHE = BASE_DIR / "memory" / "calendar_cache.json"
 
 
 def _load_cache() -> list:

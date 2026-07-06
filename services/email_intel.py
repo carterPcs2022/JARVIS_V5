@@ -10,9 +10,10 @@ from email.header import decode_header
 from pathlib import Path
 
 from core.llm.router import think
+from config.settings import BASE_DIR
 
-_PEOPLE_FILE  = Path("/Users/kisha/Downloads/JARVIS_V5/memory/people.json")
-_WATCHES_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/email_watches.json")
+_PEOPLE_FILE  = BASE_DIR / "memory" / "people.json"
+_WATCHES_FILE = BASE_DIR / "memory" / "email_watches.json"
 
 _URGENT_KEYWORDS = {"urgent", "deadline", "asap", "immediately", "critical"}
 

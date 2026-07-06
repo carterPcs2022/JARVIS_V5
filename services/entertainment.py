@@ -10,9 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from config.settings import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
-READING_LIST_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/reading_list.json")
+READING_LIST_FILE = BASE_DIR / "memory" / "reading_list.json"
 
 # Optional imports
 try:

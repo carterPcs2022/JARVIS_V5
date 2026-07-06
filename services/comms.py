@@ -8,9 +8,10 @@ from pathlib import Path
 
 from core.llm.router import think
 from core.event_bus import bus
+from config.settings import BASE_DIR
 
-_PEOPLE_FILE    = Path("/Users/kisha/Downloads/JARVIS_V5/memory/people.json")
-_FOLLOWUPS_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/followups.json")
+_PEOPLE_FILE    = BASE_DIR / "memory" / "people.json"
+_FOLLOWUPS_FILE = BASE_DIR / "memory" / "followups.json"
 
 
 def _load_json(path: Path, default):

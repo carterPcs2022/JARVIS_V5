@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from config.settings import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
 # Optional imports
@@ -87,7 +89,7 @@ class FinanceIntelligence:
 
     def _get_access_token(self) -> Optional[str]:
         """Read stored Plaid access token from memory."""
-        token_file = Path("/Users/kisha/Downloads/JARVIS_V5/memory/plaid_token.json")
+        token_file = BASE_DIR / "memory" / "plaid_token.json"
         if not token_file.exists():
             return None
         try:

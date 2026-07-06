@@ -439,16 +439,29 @@ _HEALTH_TTL = 30  # seconds
 
 
 def check_groq(force: bool = False) -> bool:
+    """True if Groq is usable right now. A 429 counts as usable — it means
+    Groq is up and just rate-limiting us, which is transient and already
+    handled by the retry-after-10s in core/llm/openai.chat(); it is not the
+    same condition as Groq being down, and shouldn't be treated as one for
+    DEGRADED-status purposes."""
     if not GROQ_API_KEY:
         return False
     ts, cached = _HEALTH_CACHE["groq"]
     if not force and (time.time() - ts) < _HEALTH_TTL:
         return cached
+    import httpx
     try:
         from core.llm.openai import chat as groq_chat
         groq_chat([{"role": "user", "content": "ping"}], max_tokens=5)
         _HEALTH_CACHE["groq"] = (time.time(), True)
         return True
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            print("[LLM Router] Groq health check hit 429 (rate limited, not down)")
+            _HEALTH_CACHE["groq"] = (time.time(), True)
+            return True
+        _HEALTH_CACHE["groq"] = (time.time(), False)
+        return False
     except Exception:
         _HEALTH_CACHE["groq"] = (time.time(), False)
         return False
@@ -468,3 +481,12 @@ def check_ollama(force: bool = False) -> bool:
     except Exception:
         _HEALTH_CACHE["ollama"] = (time.time(), False)
         return False
+
+
+def check_anthropic() -> bool:
+    """True if an Anthropic tier is configured as a usable fallback. This is
+    a config check, not a live API call — unlike Groq's free tier, hitting
+    Anthropic on every ~30s HUD poll would burn real money for a status
+    check alone. Anthropic's API is reliable enough that "configured and
+    enabled" is a reasonable proxy for "available" here."""
+    return bool(ANTHROPIC_API_KEY) and (ENABLE_SONNET or ENABLE_OPUS or ENABLE_FABLE)

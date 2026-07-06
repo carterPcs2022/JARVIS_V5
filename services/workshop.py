@@ -10,9 +10,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+from config.settings import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
-WORKSHOP_FILE = Path("/Users/kisha/Downloads/JARVIS_V5/memory/workshop.json")
+WORKSHOP_FILE = BASE_DIR / "memory" / "workshop.json"
 
 # Optional gitpython
 try:
