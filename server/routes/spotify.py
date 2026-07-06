@@ -2,8 +2,8 @@
 Auth endpoints (/auth, /callback) are unauthenticated by necessity — they're
 the OAuth redirect target Spotify itself calls, which can't send our
 bearer token. Everything else requires it."""
-from fastapi import APIRouter, Depends
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from utils.security import verify_token
 
@@ -21,11 +21,36 @@ def spotify_auth():
 
 
 @auth_router.get("/callback")
-def spotify_callback(code: str):
+async def spotify_callback(request: Request):
+    """Spotify OAuth callback — reads code from query params."""
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+
+    if error:
+        return {"error": f"Spotify auth denied: {error}"}
+
+    if not code:
+        # Show all query params for debugging
+        params = dict(request.query_params)
+        return {
+            "error": "No code received",
+            "received_params": params,
+            "fix": "Check redirect URI matches exactly in Spotify dashboard",
+        }
+
     from services.spotify import spotify
-    if spotify.exchange_code(code):
-        return {"status": "Spotify connected successfully"}
-    return {"error": "Authentication failed"}
+    success = spotify.exchange_code(code)
+
+    if success:
+        return HTMLResponse("""
+            <html><body style="background:#040810;color:#00b4ff;
+            font-family:monospace;text-align:center;padding:50px">
+            <h1>⚡ JARVIS</h1>
+            <h2>Spotify Connected Successfully</h2>
+            <p>You can close this window.</p>
+            </body></html>
+        """)
+    return {"error": "Failed to exchange code"}
 
 
 @router.get("/now")
