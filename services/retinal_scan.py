@@ -127,9 +127,12 @@ class RetinalScanner:
         return {"success": True, "enrolled": True, "message": "Retinal baseline established."}
 
     def _verify(self, iris_hash: str) -> dict:
-        """Verify iris against baseline. This is an explicit, user-initiated
-        check (via POST /stark/auth/retinal/verify) — speaking either
-        outcome is appropriate here, unlike run_silently()'s background use."""
+        """Verify iris against baseline. Never announces a successful match —
+        only a failure, since that's the case someone actually needs to
+        hear about (a stranger holding the device up to the camera).
+        run_silently() delegates here too, so this is the single source of
+        truth for that rule rather than something each caller has to
+        remember to respect."""
         stored = self.baseline.get("iris_hash", "")
         match_score = self._hash_similarity(iris_hash, stored)
 
@@ -139,13 +142,12 @@ class RetinalScanner:
         self._save_baseline()
 
         THRESHOLD = 0.75
-        from services.voice import speak
 
         if match_score >= THRESHOLD:
-            speak(f"Retinal scan confirmed. Match score {match_score:.0%}. Identity verified, sir.")
             return {"success": True, "verified": True, "match_score": match_score,
                     "message": "Identity confirmed."}
 
+        from services.voice import speak
         speak("Retinal scan failed. Identity could not be verified.")
         from core.event_bus import bus
         bus.alert(
