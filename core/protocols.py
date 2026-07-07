@@ -18,6 +18,18 @@ from config.settings import (
 )
 
 
+def _announce_async(message: str):
+    """Fire-and-forget voice announcement — protocols are system actions and
+    must complete even if voice/Groq is unavailable or rate-limited."""
+    def _speak():
+        try:
+            from services.voice import speak
+            speak(message)
+        except Exception:
+            pass
+    threading.Thread(target=_speak, daemon=True).start()
+
+
 # ── Protocol result ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -793,15 +805,9 @@ class SokoviaProtocol:
         return "low"
 
     def _explain(self, action: str, details: dict, risk: str) -> str:
-        try:
-            from core.llm.router import think
-            return think(
-                f"In one sentence, explain what this action does and why it "
-                f"might be risky:\nAction: {action}\nDetails: {details}",
-                max_tokens=80,
-            )
-        except Exception:
-            return f"'{action}' is a {risk}-risk action. Confirm before proceeding."
+        # Direct, no LLM — risk gating must work even when Groq is rate
+        # limited, since it sits in front of every high-stakes action.
+        return f"'{action}' is a {risk}-risk action. Confirm before proceeding."
 
 
 sokovia = SokoviaProtocol()
@@ -1016,11 +1022,7 @@ class RescueProtocol:
     def activate(self, context: str = "") -> dict:
         _log_protocol_event("PROTOCOL_22_RESCUE", f"Activated: {context[:200]}", "critical")
 
-        try:
-            from services.voice import speak
-            speak("Initiating rescue protocol.")
-        except Exception:
-            pass
+        _announce_async("Initiating rescue protocol.")
 
         status_report = self._build_status_report(context)
         notify_result = self.send_emergency_notification(status_report)

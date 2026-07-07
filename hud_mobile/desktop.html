@@ -896,12 +896,13 @@ async function pollRetinal() {
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 connectWs();
-pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus(); pollRetinal();
+pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
+pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
 
 // Vitals — 30s minimum to keep polling load off Groq's rate limit.
 setInterval(pollStatus, 30000);
 // Slower-changing panels.
-setInterval(() => { pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus(); pollRetinal(); }, 60000);
+setInterval(() => { pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus(); }, 60000);
 
 document.addEventListener('keydown', e => {
   if (e.ctrlKey && e.key === '/') { inputEl.focus(); e.preventDefault(); }

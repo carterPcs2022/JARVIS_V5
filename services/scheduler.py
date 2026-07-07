@@ -1,6 +1,7 @@
 """Background scheduler — APScheduler jobs for JARVIS automation."""
 from __future__ import annotations
 import logging, os
+from datetime import datetime, timedelta
 log = logging.getLogger(__name__)
 
 _scheduler = None
@@ -288,10 +289,20 @@ def start():
         from apscheduler.schedulers.background import BackgroundScheduler
         from config.settings import LOKI_SURPRISE_HOUR, BENCHMARK_DAY
 
+        # "interval" jobs fire immediately once the scheduler starts (their
+        # next_run_time defaults to now), so every Groq-calling job here
+        # would otherwise hit the API in the same instant scheduler_start()
+        # runs — piling straight onto whatever warm_cache()/the LLM probe
+        # just did. Stagger those specific jobs' first run 60s apart;
+        # non-LLM jobs (email/system checks, cleanup, etc.) still fire
+        # immediately since they don't touch Groq.
+        now = datetime.now()
+
         _scheduler = BackgroundScheduler(daemon=True)
         _scheduler.add_job(_email_check,  "interval", minutes=15, id="email_check")
         _scheduler.add_job(_system_check, "interval", minutes=5,  id="system_check")
-        _scheduler.add_job(_llm_health_refresh, "interval", minutes=2, id="llm_health_refresh")
+        _scheduler.add_job(_llm_health_refresh, "interval", minutes=2, id="llm_health_refresh",
+                            next_run_time=now + timedelta(seconds=60))
 
         # Protocol 19 — Initiative
         _scheduler.add_job(_p19_morning_initiative, "cron", hour=8, id="p19_morning_initiative")
@@ -347,12 +358,15 @@ def start():
         from config.settings import ENVIRONMENT
         if ENVIRONMENT == "local":
             _scheduler.add_job(_proactive_screen_check, "interval", minutes=5, id="proactive_screen_check")
-        _scheduler.add_job(_proactive_research, "interval", hours=2, id="proactive_research")
+        _scheduler.add_job(_proactive_research, "interval", hours=2, id="proactive_research",
+                            next_run_time=now + timedelta(seconds=120))
 
         # Stark Intelligence — background proactive thinking + anticipatory
         # pre-caching of the user's likely next question
-        _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking")
-        _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs")
+        _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
+                            next_run_time=now + timedelta(seconds=180))
+        _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
+                            next_run_time=now + timedelta(seconds=240))
 
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
