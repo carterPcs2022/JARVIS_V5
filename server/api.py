@@ -155,6 +155,15 @@ def metrics():
 
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 
+# None of these HUD pages register hud_mobile/sw.js (only the mobile PWA
+# entry point does), so its network-first fetch handler never applies to
+# them — without an explicit no-cache header, FileResponse's default
+# Last-Modified/ETag headers still leave heuristic browser caching free to
+# serve a stale copy of the page itself (as opposed to the static assets
+# under /hud/static/, which are fine to cache). Every HUD HTML route gets
+# this explicitly rather than relying on the service worker to cover it.
+_NO_CACHE_HEADERS = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"}
+
 
 @app.get("/hud")
 async def hud_router(request: Request):
@@ -163,29 +172,29 @@ async def hud_router(request: Request):
     view = request.query_params.get("view", "auto")
 
     if view == "desktop":
-        return FileResponse(HUD_DIR / "desktop.html")
+        return FileResponse(HUD_DIR / "desktop.html", headers=_NO_CACHE_HEADERS)
     if view == "mobile":
-        return FileResponse(HUD_DIR / "index.html")
+        return FileResponse(HUD_DIR / "index.html", headers=_NO_CACHE_HEADERS)
 
     ua = request.headers.get("user-agent", "").lower()
     is_mobile = any(kw in ua for kw in ["iphone", "android", "mobile", "tablet", "ipad"])
 
-    return FileResponse(HUD_DIR / ("index.html" if is_mobile else "desktop.html"))
+    return FileResponse(HUD_DIR / ("index.html" if is_mobile else "desktop.html"), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/hud/desktop")
 async def hud_desktop():
-    return FileResponse(HUD_DIR / "desktop.html")
+    return FileResponse(HUD_DIR / "desktop.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/hud/mobile")
 async def hud_mobile_view():
-    return FileResponse(HUD_DIR / "index.html")
+    return FileResponse(HUD_DIR / "index.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/hud/holographic")
 async def holographic_hud():
-    return FileResponse(HUD_DIR / "holographic.html")
+    return FileResponse(HUD_DIR / "holographic.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/hud/ambient.js")
@@ -197,7 +206,7 @@ async def hud_ambient_js():
 
 @app.get("/hud/intel")
 async def intel_map():
-    return FileResponse(HUD_DIR / "intelligence_map.html")
+    return FileResponse(HUD_DIR / "intelligence_map.html", headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/hud/sw.js")
