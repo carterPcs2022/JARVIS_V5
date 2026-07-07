@@ -772,15 +772,6 @@ class Brain:
             pass
         result.response = proto_prefix + result.response
 
-        # ── Proactive suggestion (non-intrusive append) ───────────────────────
-        try:
-            from services.predictor import get_proactive_suggestions
-            suggestions = get_proactive_suggestions()
-            if suggestions:
-                result.response += f"\n\n_FYI: {suggestions[0]}_"
-        except Exception:
-            pass
-
         # ── Egress filtering — redact any secret/PII that made it into the
         # response before the user ever sees it. Also runs a secondary
         # provider-key-pattern scan (services/dpi) as defense in depth.
