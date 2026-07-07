@@ -266,6 +266,22 @@ def _proactive_research():
         log.debug("Proactive research failed: %s", e)
 
 
+def _stark_proactive_thinking():
+    try:
+        from core.stark_intelligence import stark_intel
+        stark_intel.proactive_think()
+    except Exception as e:
+        log.debug("Stark proactive thinking failed: %s", e)
+
+
+def _stark_anticipate_needs():
+    try:
+        from core.stark_intelligence import stark_intel
+        stark_intel.anticipate_needs()
+    except Exception as e:
+        log.debug("Stark anticipate needs failed: %s", e)
+
+
 def start():
     global _scheduler
     try:
@@ -333,12 +349,18 @@ def start():
             _scheduler.add_job(_proactive_screen_check, "interval", minutes=5, id="proactive_screen_check")
         _scheduler.add_job(_proactive_research, "interval", hours=2, id="proactive_research")
 
+        # Stark Intelligence — background proactive thinking + anticipatory
+        # pre-caching of the user's likely next question
+        _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking")
+        _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs")
+
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
                  "morning/evening routines, price/package tracking, "
                  "secret scan/dead man's switch/canary replant, log/audio cleanup, "
-                 "proactive screen check (local), proactive research/2h")
+                 "proactive screen check (local), proactive research/2h, "
+                 "stark proactive thinking/30m, stark anticipate needs/5m")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

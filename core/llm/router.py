@@ -288,6 +288,14 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
         except Exception as e:
             print(f"[LLM Router] build_fable_context failed (non-fatal): {e}")
 
+        # Enhanced personality depth for opus/fable only — Groq calls keep
+        # the base JARVIS_PERSONALITY for token efficiency.
+        try:
+            from config.settings import STARK_INTELLIGENCE_PROTOCOLS
+            system = f"{system}\n\n{STARK_INTELLIGENCE_PROTOCOLS}"
+        except Exception:
+            pass
+
     budget = get_thinking_budget(tier, query) if query else 0
     result = call_anthropic(user_messages, system, config["id"],
                             max_tokens=min(max_tokens, config["max_tokens"]) if max_tokens else config["max_tokens"],
@@ -472,6 +480,36 @@ def think(user_input: str, context: str = "",
     messages.append({"role": "user", "content": user_input})
     return chat(messages, max_tokens=max_tokens, temperature=temperature if temperature is not None else 0.6,
                use_cache=use_cache, force_model=force_model, query=user_input)["content"]
+
+
+# ── Response cache warming ─────────────────────────────────────────────────────
+COMMON_QUERIES = [
+    "what time is it",
+    "what's the date",
+    "how are you",
+    "are you online",
+    "status",
+    "good morning",
+]
+
+
+def warm_cache():
+    """Pre-compute common query responses so the first real request for one
+    of these doesn't pay full LLM latency. Calls think(use_cache=True)
+    directly rather than writing into _cache by hand — that guarantees the
+    cache key matches exactly what a live request will look up (same
+    default system prompt, no context). "what time is it"/"what's the
+    date" are answered instantly by _instant_response() and never even
+    reach the cache; the rest go through a real (cached) Groq call.
+    Called from server/api.py's 30s-post-boot delayed background start,
+    not directly at startup, to stay behind the existing Groq-rate-limit
+    stagger rather than adding another cold-boot spike."""
+    for query in COMMON_QUERIES:
+        try:
+            think(query, use_cache=True)
+        except Exception as e:
+            print(f"[Router] warm_cache failed for '{query}': {e}")
+    print("[Router] Response cache warmed")
 
 
 # Health checks are cached — calling these hits a real API endpoint each time

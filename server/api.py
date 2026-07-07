@@ -41,6 +41,7 @@ from server.routes.security_max import router as security_max_router
 from server.routes.security_gov import router as security_gov_router
 from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
 from server.routes.new_features import router as new_features_router
+from server.routes.intel import router as intel_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -77,6 +78,7 @@ app.include_router(security_gov_router)
 app.include_router(security_firewalls_router)
 app.include_router(suit_security_router)
 app.include_router(new_features_router)
+app.include_router(intel_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
@@ -409,6 +411,15 @@ async def startup():
 
         groq_ok = state.get("groq_available", False)
         ollama_ok = state.get("ollama_available", False)
+
+        # ── Warm the response cache — a handful of real LLM calls for
+        # common queries, kept behind this same 30s stagger rather than
+        # firing at raw process startup ─────────────────────────────────────
+        try:
+            from core.llm.router import warm_cache
+            warm_cache()
+        except Exception as e:
+            print(f"[JARVIS] Cache warming skipped: {e}")
 
         # ── Suit assembly sequence — streams to any connected HUD ─────────────
         try:

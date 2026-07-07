@@ -11,6 +11,20 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+# Explicit "give me your best" phrasing — routes straight to
+# core/stark_intelligence.py's full reasoning stack instead of the normal
+# intent/plan/executor pipeline. Checked in Brain.process().
+MAXIMUM_INTELLIGENCE_TRIGGERS = [
+    "maximum intelligence",
+    "use fable",
+    "need your best",
+    "pull out all the stops",
+    "best you got",
+    "think hard",
+    "really think about",
+    "most important",
+]
+
 
 # ── Data models ───────────────────────────────────────────────────────────────
 
@@ -617,6 +631,24 @@ class Brain:
                 return Result(response=scene_response, ok=True, provider="home_automation")
         except Exception:
             pass
+
+        # ── Maximum intelligence — explicit "give me your best" requests
+        # bypass the normal intent/plan/executor pipeline entirely and run
+        # every reasoning technique JARVIS has (see core/stark_intelligence.py) ─
+        if any(t in user_input.lower() for t in MAXIMUM_INTELLIGENCE_TRIGGERS):
+            try:
+                from core.stark_intelligence import stark_intel
+                result = stark_intel.maximum_intelligence(user_input)
+
+                bus.system("Maximum intelligence engaged. Fable 5 with extended thinking active.")
+
+                from core.memory import save_turn, store_long_term
+                save_turn(user_input, result["response"])
+                store_long_term(user_input, result["response"])
+                return Result(response=result["response"], ok=True,
+                              model=result["model"], provider="stark_intelligence")
+            except Exception as e:
+                print(f"[Brain] Maximum intelligence failed, falling back to normal pipeline: {e}")
 
         # ── Instant responses (e.g. "what time is it") — no LLM needed, and
         # answered from the user's configured timezone rather than letting

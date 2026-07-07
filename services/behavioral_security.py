@@ -131,6 +131,12 @@ class BehavioralSecurity:
     def _ip_key(self, ip: str) -> str:
         return hashlib.md5(ip.encode()).hexdigest()[:8]
 
+    def get_anomaly_log(self, limit: int = 50) -> list[dict]:
+        """Recent anomaly entries — {ip, anomalies, ts, severity} each.
+        In-memory only (not persisted to disk), same as the rest of this
+        module's state."""
+        return self._anomaly_log[-limit:]
+
     def threat_summary(self) -> dict:
         high_risk_ips = [ip for ip, profile in self._ip_profiles.items()
                         if profile.get("anomaly_score", 0) >= 5]
