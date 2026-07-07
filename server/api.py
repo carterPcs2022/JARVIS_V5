@@ -239,6 +239,17 @@ async def hud_status():
     except Exception:
         threat_sum = {}
     try:
+        from services.honeypot import honeypot
+        honeypot_sum = honeypot.log_summary()
+        blocked_ips = len(honeypot.get_blocklist())
+    except Exception:
+        honeypot_sum, blocked_ips = {}, 0
+    try:
+        from services.behavioral_security import behavioral
+        anomaly_count = behavioral.threat_summary().get("total_anomalies", 0)
+    except Exception:
+        anomaly_count = 0
+    try:
         # get_pending() drains every event type (chat, protocol, system...),
         # not just alerts — and each event nests its text under data.message,
         # not a top-level message/text field the way hud_mobile's pushAlert()
@@ -297,9 +308,12 @@ async def hud_status():
         },
         "memory": mem,
         "security": {
-            "threats_24h":  threat_sum.get("last_24h", 0),
-            "by_severity":  threat_sum.get("by_severity", {}),
-            "baseline_set": threat_sum.get("baseline_set", False),
+            "threats_24h":   threat_sum.get("last_24h", 0),
+            "by_severity":   threat_sum.get("by_severity", {}),
+            "baseline_set":  threat_sum.get("baseline_set", False),
+            "honeypot_hits": honeypot_sum.get("triggers", 0),
+            "blocked_ips":   blocked_ips,
+            "anomaly_count": anomaly_count,
         },
         "mark":          mark,
         "friday_online": friday_online,

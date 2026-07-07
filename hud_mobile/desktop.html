@@ -5,270 +5,450 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="theme-color" content="#020c14" />
 <link rel="manifest" href="/hud/static/manifest.json" />
-<title>J.A.R.V.I.S V5 — Desktop HUD</title>
+<title>J.A.R.V.I.S V5</title>
 <style>
-  :root {
-    --bg: #020c14; --panel: #061620; --line: rgba(0,212,255,.16);
-    --core: #00d4ff; --core-dim: #04384a; --text: #d6f3ff; --dim: #517686;
-    --warn: #ffb454; --danger: #ff5470; --ok: #4caf50; --amber: #ff9800;
-    --mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; height: 100vh; overflow: hidden; background: var(--bg);
-    color: var(--text); font-family: var(--mono);
-    background-image:
-      repeating-linear-gradient(0deg, rgba(0,212,255,.03) 0, rgba(0,212,255,.03) 1px, transparent 1px, transparent 3px);
-  }
-  .grid {
-    display: grid; grid-template-columns: 280px 1fr 300px; grid-template-rows: 70px 1fr 60px;
-    height: 100vh; gap: 10px; padding: 10px;
-  }
-  header.top { grid-column: 1/4; display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid var(--line); padding-bottom: 10px; }
-  .arc-reactor { width: 44px; height: 44px; border-radius: 50%; position: relative;
-    background: radial-gradient(circle, var(--core) 0%, var(--core-dim) 70%);
-    box-shadow: 0 0 20px var(--core); animation: pulse-reactor 2.4s ease-in-out infinite; }
-  @keyframes pulse-reactor { 0%,100%{box-shadow:0 0 14px var(--core);} 50%{box-shadow:0 0 28px var(--core);} }
-  .wordmark { display: flex; align-items: center; gap: 14px; }
-  .wordmark .title { font-size: 22px; font-weight: 700; letter-spacing: .3em; color: var(--core); }
-  .wordmark .mark { font-size: 11px; color: var(--dim); letter-spacing: .12em; }
-  .top-right { display: flex; align-items: center; gap: 22px; font-size: 12px; color: var(--dim); }
-  .status-pill { display: flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: .1em; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
-  .dot.warn { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
-  .dot.danger { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: blink .7s infinite; }
-  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-  .col { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; min-height: 0; }
-  .col::-webkit-scrollbar { width: 4px; }
-  .col::-webkit-scrollbar-thumb { background: var(--core-dim); }
+/* ════════════════════════════════════════
+   DESIGN TOKENS
+════════════════════════════════════════ */
+:root {
+  --bg:        #020c14;
+  --bg2:       #030f18;
+  --panel:     rgba(0,168,255,0.03);
+  --border:    rgba(0,168,255,0.12);
+  --border2:   rgba(0,168,255,0.06);
+  --accent:    #00a8ff;
+  --accent2:   #00ffcc;
+  --accent3:   #0066cc;
+  --gold:      #ffd700;
+  --warn:      #ff9500;
+  --danger:    #ff3b30;
+  --green:     #34c759;
+  --text:      #d4eeff;
+  --text2:     #7aadcc;
+  --muted:     #2a4a66;
+}
 
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
-  .panel h2 { margin: 0 0 12px; font-size: 10px; letter-spacing: .16em; color: var(--dim);
-    text-transform: uppercase; font-weight: 600; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 
-  .diag-row { margin-bottom: 12px; }
-  .diag-label { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); margin-bottom: 4px; }
-  .diag-label b { color: var(--text); }
-  .bar-track { height: 6px; background: var(--core-dim); border-radius: 3px; overflow: hidden; }
-  .bar-fill { height: 100%; background: var(--core); transition: width .4s; }
-  .bar-fill.warn { background: var(--warn); }
-  .bar-fill.danger { background: var(--danger); }
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Courier New', monospace;
+  overflow: hidden;
+}
 
-  .threat-count { font-size: 26px; font-weight: 700; color: var(--core); }
-  .threat-count.warn { color: var(--warn); }
-  .threat-count.danger { color: var(--danger); }
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0,168,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,168,255,0.025) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
 
-  /* Center — chat */
-  .chat-panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .chat-toolbar { display: flex; gap: 10px; margin-bottom: 10px; font-size: 10px; }
-  .toggle { padding: 4px 10px; border: 1px solid var(--line); border-radius: 3px; color: var(--dim);
-    cursor: pointer; letter-spacing: .08em; user-select: none; }
-  .toggle.active { color: var(--core); border-color: var(--core); box-shadow: 0 0 6px rgba(0,212,255,.3); }
+.panel {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.panel::before, .panel::after {
+  content: ''; position: absolute; width: 8px; height: 8px;
+}
+.panel::before { top: -1px; left: -1px; border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+.panel::after  { bottom: -1px; right: -1px; border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
 
-  #chat-log { flex: 1; overflow-y: auto; padding-right: 4px; }
-  .msg { margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
-  .msg.user { color: var(--text); }
-  .msg.user::before { content: "YOU  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
-  .msg.ai { color: var(--core); }
-  .msg.ai::before { content: "JARVIS  "; color: var(--dim); font-size: 10px; letter-spacing: .1em; }
-  .msg.system { color: var(--dim); font-style: italic; }
-  .msg .body { white-space: pre-wrap; }
-  .typing { color: var(--dim); font-size: 12px; font-style: italic; }
-  .chat-panel.drag-over #chat-log { outline: 1px dashed var(--core); outline-offset: -4px; }
+.panel-glow::before {
+  content: ''; position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.6;
+}
 
-  .chat-input-row { display: flex; gap: 8px; margin-top: 10px; }
-  #msg-input { flex: 1; background: var(--core-dim); border: 1px solid var(--line); border-radius: 4px;
-    color: var(--text); padding: 10px 12px; font-family: var(--mono); font-size: 13px; }
-  #msg-input:focus { outline: none; border-color: var(--core); }
-  .icon-btn { background: var(--core-dim); border: 1px solid var(--line); border-radius: 4px;
-    color: var(--core); padding: 0 14px; cursor: pointer; font-family: var(--mono); font-size: 13px; }
-  .icon-btn:hover { border-color: var(--core); }
-  .icon-btn.rec { color: var(--danger); border-color: var(--danger); }
+.panel-title {
+  font-size: 9px; letter-spacing: 4px; color: var(--muted); text-transform: uppercase;
+  padding: 10px 14px 6px; border-bottom: 1px solid var(--border2);
+  display: flex; align-items: center; justify-content: space-between;
+}
 
-  /* Right — alerts + goals */
-  .alert-item { font-size: 11px; padding: 8px 0; border-top: 1px solid var(--line); color: var(--dim); }
-  .alert-item:first-child { border-top: none; }
-  .alert-item.warning { color: var(--warn); }
-  .alert-item.critical { color: var(--danger); }
-  .empty { color: var(--dim); font-size: 11px; padding: 12px 0; text-align: center; }
+/* ── Layout ── */
+.hud-layout {
+  display: grid;
+  grid-template-rows: 56px 1fr 44px;
+  grid-template-columns: 270px 1fr 300px;
+  height: 100vh;
+  position: relative;
+  z-index: 1;
+}
 
-  .goal-item { padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px; }
-  .goal-item:first-child { border-top: none; }
-  .goal-title { color: var(--text); margin-bottom: 4px; }
+/* ── Header ── */
+.hud-header {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; padding: 0 20px; gap: 20px;
+  background: rgba(2,12,20,0.98); border-bottom: 1px solid var(--border);
+  position: relative; z-index: 100;
+}
+.hud-header::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--accent) 20%, var(--accent2) 50%, var(--accent) 80%, transparent 100%);
+  opacity: 0.4;
+}
+.logo-mark {
+  width: 38px; height: 38px; border-radius: 50%; border: 2px solid var(--accent);
+  display: flex; align-items: center; justify-content: center; position: relative;
+  box-shadow: 0 0 16px rgba(0,168,255,0.3), inset 0 0 16px rgba(0,168,255,0.1);
+  flex-shrink: 0;
+}
+.logo-mark-inner {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(0,168,255,0.6) 0%, rgba(0,80,160,0.3) 60%, transparent 100%);
+  animation: arc-pulse 3s ease-in-out infinite;
+}
+@keyframes arc-pulse { 0%,100% { opacity:.6; transform:scale(.9);} 50% { opacity:1; transform:scale(1.1);} }
+.logo-text { display: flex; flex-direction: column; }
+.logo-main { font-size: 20px; font-weight: 900; letter-spacing: 7px; color: var(--accent); text-shadow: 0 0 20px rgba(0,168,255,0.4); line-height: 1; }
+.logo-sub { font-size: 9px; letter-spacing: 2px; color: var(--muted); margin-top: 2px; white-space: nowrap; }
 
-  /* Bottom bar */
-  footer.bottom { grid-column: 1/4; display: flex; align-items: center; justify-content: space-between;
-    border-top: 1px solid var(--line); padding-top: 8px; font-size: 11px; color: var(--dim); }
-  .scenes { display: flex; gap: 8px; }
-  .scene-btn { padding: 4px 12px; border: 1px solid var(--line); border-radius: 3px; cursor: pointer;
-    color: var(--dim); letter-spacing: .05em; }
-  .scene-btn:hover { color: var(--core); border-color: var(--core); }
-  .footer-status { display: flex; gap: 18px; align-items: center; }
-  .sys-tag { display: flex; align-items: center; gap: 6px; }
+.header-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: 24px; }
+.header-stat { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.header-stat-value { font-size: 13px; color: var(--text); letter-spacing: 1px; }
+.header-stat-label { font-size: 8px; letter-spacing: 2px; color: var(--muted); }
+.header-divider { width: 1px; height: 28px; background: var(--border); }
 
-  @media (max-width: 1100px) {
-    .grid { grid-template-columns: 1fr; grid-template-rows: 70px auto auto auto 60px; }
-    .chat-panel { min-height: 400px; }
-  }
+.header-right { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.status-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border: 1px solid var(--border); border-radius: 2px; font-size: 10px; letter-spacing: 2px; }
+.status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: status-pulse 2.5s ease-in-out infinite; }
+.status-dot.warn   { background: var(--warn);   box-shadow: 0 0 8px var(--warn); }
+.status-dot.danger { background: var(--danger);  box-shadow: 0 0 8px var(--danger); }
+@keyframes status-pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+
+.model-badge { font-size: 10px; letter-spacing: 2px; color: var(--accent2); padding: 3px 10px; border: 1px solid rgba(0,255,204,0.2); border-radius: 2px; }
+.model-badge.fable { color: var(--gold); border-color: rgba(255,215,0,0.3); text-shadow: 0 0 8px rgba(255,215,0,0.4); }
+.time-display { font-size: 13px; letter-spacing: 2px; color: var(--text2); }
+.ambient-btn { padding: 4px 12px; border: 1px solid var(--border); border-radius: 2px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer; }
+.ambient-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,168,255,0.08); }
+
+/* ── Columns ── */
+.left-col, .right-col {
+  display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  overflow-y: auto; scrollbar-width: none;
+}
+.left-col { border-right: 1px solid var(--border2); }
+.right-col { border-left: 1px solid var(--border2); }
+.left-col::-webkit-scrollbar, .right-col::-webkit-scrollbar { display: none; }
+
+.diag-bars { padding: 8px 14px 12px; }
+.diag-item { padding: 7px 0; border-bottom: 1px solid var(--border2); }
+.diag-item:last-child { border-bottom: none; }
+.diag-header { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.diag-label { font-size: 9px; letter-spacing: 2px; color: var(--text2); }
+.diag-value { font-size: 11px; font-weight: 700; color: var(--text); }
+.diag-value.warn { color: var(--warn); }
+.diag-value.danger { color: var(--danger); }
+.bar-track { height: 3px; background: rgba(0,168,255,0.08); border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent3), var(--accent)); box-shadow: 0 0 6px rgba(0,168,255,0.4); transition: width 1s ease; }
+.bar-fill.warn { background: linear-gradient(90deg, #cc5500, var(--warn)); box-shadow: 0 0 6px rgba(255,149,0,0.4); }
+.bar-fill.danger { background: linear-gradient(90deg, #990000, var(--danger)); box-shadow: 0 0 6px rgba(255,59,48,0.4); }
+
+.stat-rows { padding: 6px 14px 10px; }
+.stat-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border2); font-size: 10px; }
+.stat-row:last-child { border-bottom: none; }
+.stat-row-label { color: var(--muted); letter-spacing: 1px; }
+.stat-row-val { color: var(--text); }
+.stat-row-val.accent { color: var(--accent); }
+.stat-row-val.accent2 { color: var(--accent2); }
+.stat-row-val.danger { color: var(--danger); }
+.stat-row-val.green { color: var(--green); }
+
+.sentinel-count { padding: 8px 14px 4px; display: flex; align-items: baseline; gap: 8px; }
+.sentinel-number { font-size: 34px; font-weight: 900; line-height: 1; color: var(--green); text-shadow: 0 0 20px rgba(52,199,89,0.4); }
+.sentinel-number.warn { color: var(--warn); text-shadow: 0 0 20px rgba(255,149,0,0.4); }
+.sentinel-number.danger { color: var(--danger); text-shadow: 0 0 20px rgba(255,59,48,0.4); }
+.sentinel-sub { font-size: 9px; letter-spacing: 2px; color: var(--muted); }
+
+.project-item { padding: 8px 0; border-bottom: 1px solid var(--border2); }
+.project-item:last-child { border-bottom: none; }
+.project-name { font-size: 11px; color: var(--text); letter-spacing: 1px; margin-bottom: 3px; }
+.project-status { font-size: 9px; letter-spacing: 2px; color: var(--accent2); }
+.no-data { font-size: 10px; color: var(--muted); letter-spacing: 1px; padding: 8px 14px; }
+
+/* ── Center: chat ── */
+.center-col { display: flex; flex-direction: column; padding: 10px; gap: 8px; min-height: 0; }
+.control-bar { display: flex; gap: 6px; flex-shrink: 0; }
+.ctrl-btn { padding: 5px 14px; border: 1px solid var(--border); border-radius: 2px; background: transparent; color: var(--text2); font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer; position: relative; }
+.ctrl-btn:hover, .ctrl-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,168,255,0.06); }
+
+.messages { flex: 1; overflow-y: auto; padding: 4px 2px; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
+.messages::-webkit-scrollbar { width: 3px; }
+.messages::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+.messages.drag-over { outline: 1px dashed var(--accent); outline-offset: -4px; }
+
+.msg-block { padding: 10px 14px; border-left: 2px solid transparent; border-radius: 0 2px 2px 0; animation: msg-in .2s ease; }
+@keyframes msg-in { from { opacity:0; transform:translateY(4px);} to { opacity:1; transform:translateY(0);} }
+.msg-block.user { border-left-color: var(--accent2); background: rgba(0,255,204,0.03); }
+.msg-block.ai { border-left-color: var(--accent); background: rgba(0,168,255,0.03); }
+.msg-block.system { border-left-color: var(--muted); background: transparent; }
+.msg-label { font-size: 8px; letter-spacing: 3px; margin-bottom: 5px; }
+.msg-block.user .msg-label { color: var(--accent2); }
+.msg-block.ai .msg-label { color: var(--accent); }
+.msg-block.system .msg-label { color: var(--muted); }
+.msg-text { font-size: 13px; line-height: 1.65; color: var(--text); white-space: pre-wrap; }
+.msg-block.user .msg-text { color: var(--accent2); }
+.msg-block.system .msg-text { font-size: 11px; color: var(--muted); font-style: italic; }
+.msg-meta { display: flex; align-items: center; gap: 10px; margin-top: 5px; }
+.msg-model { font-size: 8px; letter-spacing: 1px; color: var(--muted); padding: 1px 6px; border: 1px solid var(--border2); border-radius: 1px; }
+.msg-latency { font-size: 8px; color: var(--muted); letter-spacing: 1px; }
+
+.thinking { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 10px; letter-spacing: 2px; color: var(--muted); border-left: 2px solid var(--accent); background: rgba(0,168,255,0.02); }
+.think-dots { display: flex; gap: 4px; }
+.think-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: think-bounce 1.2s ease-in-out infinite; }
+.think-dot:nth-child(2) { animation-delay: .2s; }
+.think-dot:nth-child(3) { animation-delay: .4s; }
+@keyframes think-bounce { 0%,80%,100% { transform:scale(.6); opacity:.3; } 40% { transform:scale(1); opacity:1; } }
+
+.input-area { flex-shrink: 0; display: flex; gap: 8px; align-items: stretch; }
+.chat-input { flex: 1; background: rgba(0,168,255,0.03); border: 1px solid var(--border); border-radius: 2px; color: var(--text); padding: 11px 16px; font-family: inherit; font-size: 13px; letter-spacing: .5px; outline: none; }
+.chat-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(0,168,255,0.15), inset 0 0 20px rgba(0,168,255,0.04); }
+.chat-input::placeholder { color: var(--muted); }
+.send-btn { padding: 0 20px; background: rgba(0,168,255,0.08); border: 1px solid var(--accent); border-radius: 2px; color: var(--accent); font-family: inherit; font-size: 10px; letter-spacing: 3px; cursor: pointer; }
+.send-btn:hover { background: rgba(0,168,255,0.15); box-shadow: 0 0 12px rgba(0,168,255,0.2); }
+.mic-btn { width: 44px; background: transparent; border: 1px solid var(--border); border-radius: 2px; color: var(--muted); font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.mic-btn:hover, .mic-btn.rec { border-color: var(--accent2); color: var(--accent2); background: rgba(0,255,204,0.06); }
+.mic-btn.rec { animation: mic-pulse .8s ease-in-out infinite; }
+@keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(0,255,204,0.4); } 50% { box-shadow: 0 0 0 6px rgba(0,255,204,0); } }
+.mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Right column ── */
+.voice-section { padding: 8px 14px 12px; }
+.voice-engine-name { font-size: 14px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin-bottom: 6px; }
+.voice-progress-track { height: 2px; background: rgba(0,168,255,0.1); border-radius: 1px; margin-bottom: 6px; overflow: hidden; }
+.voice-progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent3), var(--accent2)); border-radius: 1px; transition: width 1s ease; }
+.voice-chars { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); letter-spacing: 1px; margin-bottom: 10px; }
+.voice-btns { display: flex; gap: 6px; }
+.voice-btn { flex: 1; padding: 5px 0; border: 1px solid var(--border); border-radius: 2px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9px; letter-spacing: 1px; cursor: pointer; text-align: center; }
+.voice-btn:hover { border-color: var(--accent); color: var(--accent); }
+.voice-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,168,255,0.08); }
+.mute-btn { padding: 5px 12px; border: 1px solid var(--border); border-radius: 2px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer; }
+.mute-btn:hover { border-color: var(--warn); color: var(--warn); }
+.mute-btn.muted { border-color: var(--warn); color: var(--warn); background: rgba(255,149,0,0.08); }
+
+.alerts-list { padding: 8px 14px 10px; max-height: 130px; overflow-y: auto; }
+.alert-item { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-bottom: 1px solid var(--border2); font-size: 10px; }
+.alert-item:last-child { border-bottom: none; }
+.alert-dot { width: 5px; height: 5px; border-radius: 50%; margin-top: 3px; flex-shrink: 0; }
+.alert-dot.danger, .alert-dot.critical { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+.alert-dot.warn, .alert-dot.warning { background: var(--warn); box-shadow: 0 0 4px var(--warn); }
+.alert-dot.info { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.alert-text { color: var(--text2); line-height: 1.4; }
+
+.consciousness-text { padding: 10px 14px; font-size: 11px; line-height: 1.8; color: var(--text2); font-style: italic; border-left: 2px solid rgba(0,168,255,0.2); margin: 0 14px 10px; background: rgba(0,168,255,0.02); border-radius: 0 2px 2px 0; }
+.objectives-text { padding: 8px 14px 12px; font-size: 11px; line-height: 1.7; color: var(--text2); }
+.objectives-text strong { color: var(--accent2); font-weight: 600; }
+
+/* ── Footer ── */
+.hud-footer { grid-column: 1 / -1; display: flex; align-items: center; padding: 0 16px; gap: 6px; background: rgba(2,12,20,0.98); border-top: 1px solid var(--border); }
+.scene-btn { padding: 3px 12px; border: 1px solid var(--border2); border-radius: 1px; background: transparent; color: var(--muted); font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; text-decoration: none; }
+.scene-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,168,255,0.06); }
+.footer-right { margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 9px; letter-spacing: 2px; }
+.footer-status { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.footer-dot { width: 5px; height: 5px; border-radius: 50%; }
+.footer-dot.green { background: var(--green); box-shadow: 0 0 4px var(--green); }
+.footer-dot.yellow { background: var(--warn); box-shadow: 0 0 4px var(--warn); }
+.footer-dot.red { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+
+/* ── Overlay effects ── */
+.scanline { position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.015) 2px, rgba(0,0,0,0.015) 4px); pointer-events: none; z-index: 9999; }
+.corner { position: fixed; width: 20px; height: 20px; z-index: 9998; pointer-events: none; }
+.corner-tl { top: 8px; left: 8px; border-top: 2px solid rgba(0,168,255,0.3); border-left: 2px solid rgba(0,168,255,0.3); }
+.corner-tr { top: 8px; right: 8px; border-top: 2px solid rgba(0,168,255,0.3); border-right: 2px solid rgba(0,168,255,0.3); }
+.corner-bl { bottom: 8px; left: 8px; border-bottom: 2px solid rgba(0,168,255,0.3); border-left: 2px solid rgba(0,168,255,0.3); }
+.corner-br { bottom: 8px; right: 8px; border-bottom: 2px solid rgba(0,168,255,0.3); border-right: 2px solid rgba(0,168,255,0.3); }
+
+@media (max-width: 1100px) {
+  .hud-layout { grid-template-columns: 1fr; grid-template-rows: 56px auto auto auto 44px; height: auto; min-height: 100vh; }
+  .left-col, .right-col { border: none; border-top: 1px solid var(--border2); }
+  .center-col { min-height: 400px; }
+}
 </style>
 </head>
 <body>
-<div class="grid">
 
-  <header class="top">
-    <div class="wordmark">
-      <div class="arc-reactor"></div>
-      <div>
-        <div class="title">J.A.R.V.I.S</div>
-        <div class="mark" id="mark-line">MARK — · loading</div>
-      </div>
+<div class="scanline"></div>
+<div class="corner corner-tl"></div>
+<div class="corner corner-tr"></div>
+<div class="corner corner-bl"></div>
+<div class="corner corner-br"></div>
+
+<div class="hud-layout">
+
+  <header class="hud-header">
+    <div class="logo-mark"><div class="logo-mark-inner"></div></div>
+    <div class="logo-text">
+      <div class="logo-main">J.A.R.V.I.S</div>
+      <div class="logo-sub" id="mark-label">MARK — · LOADING</div>
     </div>
-    <div class="top-right">
-      <div class="status-pill"><span class="dot" id="status-dot"></span><span id="status-text">CONNECTING</span></div>
-      <div id="brain-line">MODEL: —</div>
-      <div id="clock">--:--:--</div>
-      <button id="ambient-btn" class="scene-btn" style="padding:4px 10px;font-size:9px" onclick="toggleAmbient('workshop')">🔇 AMBIENT</button>
+
+    <div class="header-center">
+      <div class="header-stat"><div class="header-stat-value" id="h-cpu">—%</div><div class="header-stat-label">REPULSORS</div></div>
+      <div class="header-divider"></div>
+      <div class="header-stat"><div class="header-stat-value" id="h-ram">—%</div><div class="header-stat-label">STRUCTURAL</div></div>
+      <div class="header-divider"></div>
+      <div class="header-stat"><div class="header-stat-value" id="h-disk">—%</div><div class="header-stat-label">STORAGE</div></div>
+      <div class="header-divider"></div>
+      <div class="header-stat"><div class="header-stat-value" id="h-uptime">—</div><div class="header-stat-label">UPTIME</div></div>
+    </div>
+
+    <div class="header-right">
+      <div class="status-badge"><div class="status-dot" id="status-dot"></div><span id="status-text">CONNECTING</span></div>
+      <div class="model-badge" id="model-badge">—</div>
+      <div class="time-display" id="clock">--:--:--</div>
+      <button class="ambient-btn" id="ambient-btn" onclick="toggleAmbient('workshop')">🔇 AMBIENT</button>
     </div>
   </header>
 
   <!-- LEFT COLUMN -->
-  <div class="col">
-    <section class="panel">
-      <h2>Suit Diagnostics</h2>
-      <div class="diag-row">
-        <div class="diag-label"><span>REPULSORS (CPU)</span><b id="cpu-val">0%</b></div>
-        <div class="bar-track"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+  <div class="left-col">
+    <div class="panel panel-glow">
+      <div class="panel-title">SUIT DIAGNOSTICS<span style="font-size:8px;color:var(--accent)" id="mark-tag">MARK —</span></div>
+      <div class="diag-bars">
+        <div class="diag-item">
+          <div class="diag-header"><span class="diag-label">REPULSORS (CPU)</span><span class="diag-value" id="cpu-val">—</span></div>
+          <div class="bar-track"><div class="bar-fill" id="cpu-bar" style="width:0%"></div></div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-header"><span class="diag-label">STRUCTURAL (RAM)</span><span class="diag-value" id="ram-val">—</span></div>
+          <div class="bar-track"><div class="bar-fill" id="ram-bar" style="width:0%"></div></div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-header"><span class="diag-label">STORAGE (DISK)</span><span class="diag-value" id="disk-val">—</span></div>
+          <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
+        </div>
+        <div class="diag-item">
+          <div class="diag-header"><span class="diag-label">UPTIME</span><span class="diag-value" style="color:var(--accent)" id="uptime-val">—</span></div>
+        </div>
       </div>
-      <div class="diag-row">
-        <div class="diag-label"><span>STRUCTURAL (RAM)</span><b id="ram-val">0%</b></div>
-        <div class="bar-track"><div class="bar-fill" id="ram-bar" style="width:0%"></div></div>
-      </div>
-      <div class="diag-row">
-        <div class="diag-label"><span>STORAGE (DISK)</span><b id="disk-val">0%</b></div>
-        <div class="bar-track"><div class="bar-fill" id="disk-bar" style="width:0%"></div></div>
-      </div>
-      <div class="diag-row" style="margin-bottom:0">
-        <div class="diag-label"><span>UPTIME</span><b id="uptime-val">—</b></div>
-      </div>
-    </section>
+    </div>
 
-    <section class="panel">
-      <h2>Sentinel Security</h2>
-      <div class="threat-count" id="threat-count">0</div>
-      <div style="font-size:11px;color:var(--dim);margin-top:4px">threats detected — last 24h</div>
-    </section>
-
-    <section class="panel">
-      <h2>Network Map</h2>
-      <div style="font-size:12px;line-height:1.8">
-        <div>Known devices: <b id="net-known" style="color:var(--text)">—</b></div>
-        <div>Unknown devices: <b id="net-unknown" style="color:var(--text)">—</b></div>
-        <div>Internet latency: <b id="net-latency" style="color:var(--text)">—</b></div>
+    <div class="panel">
+      <div class="panel-title">SENTINEL SECURITY</div>
+      <div class="sentinel-count">
+        <div class="sentinel-number" id="sentinel-num">—</div>
+        <div><div class="sentinel-sub">THREATS</div><div class="sentinel-sub">LAST 24H</div></div>
       </div>
-    </section>
+      <div class="stat-rows">
+        <div class="stat-row"><span class="stat-row-label">HONEYPOTS</span><span class="stat-row-val accent" id="honeypot-count">—</span></div>
+        <div class="stat-row"><span class="stat-row-label">BLOCKED IPS</span><span class="stat-row-val danger" id="blocked-count">—</span></div>
+        <div class="stat-row"><span class="stat-row-label">ANOMALIES</span><span class="stat-row-val" style="color:var(--warn)" id="anomaly-count">—</span></div>
+      </div>
+    </div>
 
-    <section class="panel">
-      <h2>Workshop</h2>
-      <div id="workshop-list"><div class="empty">No active projects.</div></div>
-    </section>
+    <div class="panel">
+      <div class="panel-title">NETWORK MAP</div>
+      <div class="stat-rows">
+        <div class="stat-row"><span class="stat-row-label">KNOWN DEVICES</span><span class="stat-row-val accent" id="net-known">—</span></div>
+        <div class="stat-row"><span class="stat-row-label">UNKNOWN</span><span class="stat-row-val danger" id="net-unknown">—</span></div>
+        <div class="stat-row"><span class="stat-row-label">LATENCY</span><span class="stat-row-val accent2" id="net-latency">—</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">WORKSHOP<a href="/hud/intel" style="font-size:8px;color:var(--accent);text-decoration:none;letter-spacing:1px">INTEL MAP →</a></div>
+      <div id="workshop-list"><div class="no-data">No active projects.</div></div>
+    </div>
   </div>
 
   <!-- CENTER COLUMN -->
-  <div class="col chat-panel">
-    <section class="panel" style="flex:1;display:flex;flex-direction:column;min-height:0">
-      <div class="chat-toolbar">
-        <div class="toggle" id="toggle-cot">CHAIN OF THOUGHT</div>
-        <div class="toggle" id="toggle-reflect">REFLECTION</div>
-        <div class="toggle" id="toggle-voice">VOICE INPUT</div>
-      </div>
-      <div id="chat-log"></div>
-      <div class="chat-input-row">
-        <input id="msg-input" type="text" placeholder="Speak, sir." autocomplete="off" />
-        <button class="icon-btn" id="mic-btn">🎙</button>
-        <button class="icon-btn" id="send-btn">SEND</button>
-      </div>
-    </section>
+  <div class="center-col">
+    <div class="control-bar">
+      <button class="ctrl-btn" id="btn-cot" onclick="showPanel('cot')">CHAIN OF THOUGHT</button>
+      <button class="ctrl-btn" id="btn-reflect" onclick="showPanel('reflect')">REFLECTION</button>
+      <button class="ctrl-btn" id="btn-voice" onclick="toggleMic()">VOICE INPUT</button>
+      <button class="ctrl-btn" style="margin-left:auto" onclick="clearChat()">CLEAR</button>
+    </div>
+
+    <div class="messages" id="messages">
+      <div class="msg-block system"><div class="msg-label">SYSTEM</div><div class="msg-text">JARVIS V5 online. Awaiting input, sir.</div></div>
+    </div>
+
+    <div class="input-area">
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+      <input class="chat-input" id="chat-input" placeholder="Speak, sir." autocomplete="off" />
+      <button class="send-btn" onclick="sendMessage()">SEND</button>
+    </div>
   </div>
 
   <!-- RIGHT COLUMN -->
-  <div class="col">
-    <section class="panel">
-      <h2>Voice Engine</h2>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:13px;color:var(--core);font-weight:700" id="voice-engine-name">—</span>
-        <div class="toggle" id="toggle-mute" style="margin:0">MUTE</div>
+  <div class="right-col">
+    <div class="panel">
+      <div class="panel-title">VOICE ENGINE<button class="mute-btn" id="mute-btn" onclick="toggleMute()">MUTE</button></div>
+      <div class="voice-section">
+        <div class="voice-engine-name" id="voice-engine-name">—</div>
+        <div class="voice-progress-track"><div class="voice-progress-fill" id="voice-progress" style="width:0%"></div></div>
+        <div class="voice-chars"><span>CHARACTERS TODAY</span><span id="voice-chars-display">— / —</span></div>
+        <div class="voice-btns">
+          <button class="voice-btn" data-engine="elevenlabs" onclick="setVoiceEngine('elevenlabs')">ELEVEN</button>
+          <button class="voice-btn" data-engine="edge" onclick="setVoiceEngine('edge')">EDGE</button>
+          <button class="voice-btn" data-engine="pyttsx3" onclick="setVoiceEngine('pyttsx3')">OFFLINE</button>
+        </div>
       </div>
-      <div class="diag-label"><span>CHARACTERS TODAY</span><b id="voice-chars-val">—</b></div>
-      <div class="bar-track"><div class="bar-fill" id="voice-chars-bar" style="width:0%"></div></div>
-      <div style="display:flex;gap:6px;margin-top:10px">
-        <div class="toggle" data-engine="elevenlabs">ELEVENLABS</div>
-        <div class="toggle" data-engine="edge">EDGE</div>
-        <div class="toggle" data-engine="pyttsx3">OFFLINE</div>
-      </div>
-    </section>
+    </div>
 
-    <section class="panel">
-      <h2>Live Alerts</h2>
-      <div id="alert-list"><div class="empty">No alerts.</div></div>
-    </section>
+    <div class="panel">
+      <div class="panel-title">LIVE ALERTS</div>
+      <div class="alerts-list" id="alerts-list"><div class="no-data">No alerts.</div></div>
+    </div>
 
-    <section class="panel">
-      <h2>Consciousness Feed</h2>
-      <div id="consciousness-feed" style="font-size:12px;color:var(--dim);line-height:1.5">Awaiting reflection...</div>
-    </section>
+    <div class="panel" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="panel-title">CONSCIOUSNESS FEED</div>
+      <div class="consciousness-text" id="consciousness-text" style="flex:1;overflow-y:auto">Awaiting reflection...</div>
+    </div>
 
-    <section class="panel">
-      <h2>Mission Objectives</h2>
-      <div id="goals-list"><div class="empty">No active goals.</div></div>
-    </section>
+    <div class="panel">
+      <div class="panel-title">MISSION OBJECTIVES</div>
+      <div class="objectives-text" id="objectives-text"><span class="no-data" style="padding:0">No active goals.</span></div>
+    </div>
   </div>
 
-  <footer class="bottom">
-    <div class="scenes">
-      <div class="scene-btn" data-scene="morning">MORNING</div>
-      <div class="scene-btn" data-scene="movie">MOVIE</div>
-      <div class="scene-btn" data-scene="night">NIGHT</div>
-      <div class="scene-btn" data-scene="away">AWAY</div>
-      <a class="scene-btn" href="/hud/holographic" style="text-decoration:none">HOLOGRAM</a>
-      <a class="scene-btn" href="/hud/intel" style="text-decoration:none">INTEL MAP</a>
-    </div>
-    <div class="footer-status">
-      <div class="sys-tag"><span class="dot" id="jarvis-dot"></span>JARVIS</div>
-      <div class="sys-tag"><span class="dot" id="friday-dot"></span>FRIDAY</div>
-      <div class="sys-tag">🔊 <span id="footer-voice-engine">—</span></div>
-      <div id="home-status">Lights: — · Lock: —</div>
+  <footer class="hud-footer">
+    <button class="scene-btn" data-scene="morning">MORNING</button>
+    <button class="scene-btn" data-scene="movie">MOVIE</button>
+    <button class="scene-btn" data-scene="night">NIGHT</button>
+    <button class="scene-btn" data-scene="away">AWAY</button>
+    <a href="/hud/holographic" class="scene-btn">HOLOGRAM</a>
+    <a href="/hud/intel" class="scene-btn">INTEL MAP</a>
+
+    <div class="footer-right">
+      <div class="footer-status"><div class="footer-dot" id="footer-jarvis-dot"></div><span>JARVIS</span></div>
+      <div class="footer-status"><div class="footer-dot yellow" id="footer-friday-dot"></div><span>FRIDAY</span></div>
+      <div class="footer-status"><div class="footer-dot" id="footer-el-dot"></div><span>ELEVENLABS</span></div>
+      <div class="footer-status"><div class="footer-dot" id="footer-retinal-dot"></div><span>RETINAL</span></div>
     </div>
   </footer>
+
 </div>
 
 <script>
-const HOST   = location.hostname;
+const HOST       = location.hostname;
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPort     = location.protocol === 'https:' ? '' : ':8000';
-// Same port logic as WS_URL below — forcing :8000 on an https:// page (Render
-// doesn't expose that port) silently breaks every fetch call, which is why
-// stats polling was showing empty data in production.
-const API    = `${location.protocol}//${HOST}${wsPort}`;
-const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
+const API        = `${location.protocol}//${HOST}${wsPort}`;
+const WS_URL     = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
 
-// Dev mode: skip the token prompt entirely on localhost — matches
-// DEV_MODE=true on the server, which bypasses auth for local requests.
-const DEV_MODE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 function getToken() { return localStorage.getItem('jarvis_token') || ''; }
 
 function ensureToken() {
-  // Accept a token via ?token=... query param for easy one-time setup, e.g.
-  // when opening the HUD on a phone from a link.
-  const urlParams = new URLSearchParams(window.location.search);
+  const urlParams = new URLSearchParams(location.search);
   const urlToken = urlParams.get('token');
   if (urlToken) {
     localStorage.setItem('jarvis_token', urlToken);
-    window.history.replaceState({}, '', window.location.pathname);
+    window.history.replaceState({}, '', location.pathname);
   }
-
   if (!getToken() && !DEV_MODE) {
     const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
     if (t) localStorage.setItem('jarvis_token', t);
@@ -293,110 +473,158 @@ async function jarvisPost(path, body = {}) {
 
 ensureToken();
 
-// ── Chat ───────────────────────────────────────────────────────────────────
-const chatLog = document.getElementById('chat-log');
-const input   = document.getElementById('msg-input');
-let ws, streamBubble = null;
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function tick() {
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+}
+tick(); setInterval(tick, 1000);
 
-function appendMsg(role, text) {
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
+// ── Chat ───────────────────────────────────────────────────────────────────────
+const messagesEl = document.getElementById('messages');
+const inputEl    = document.getElementById('chat-input');
+let ws = null, streamBubble = null;
+
+function cleanText(role, text) {
+  if (role !== 'ai') return text;
+  return text
+    .replace(/\[Confidence:\s*\d+%\]/gi, '')
+    .trim();
+}
+
+function addMessage(role, text, meta = {}) {
+  const thinking = messagesEl.querySelector('.thinking');
+  if (thinking) thinking.remove();
+
+  const block = document.createElement('div');
+  block.className = `msg-block ${role}`;
+  const labels = { user: 'YOU', ai: 'JARVIS', system: 'SYSTEM' };
+
+  let metaHtml = '';
+  if (meta.model) {
+    metaHtml = `<div class="msg-meta"><span class="msg-model">${meta.model.toUpperCase()}</span>${meta.latency ? `<span class="msg-latency">${meta.latency}ms</span>` : ''}</div>`;
+  }
+
   const body = document.createElement('div');
-  body.className = 'body';
-  body.textContent = text;
-  div.appendChild(body);
-  chatLog.appendChild(div);
-  chatLog.scrollTop = chatLog.scrollHeight;
+  body.className = 'msg-text';
+  body.textContent = cleanText(role, text);
+
+  block.innerHTML = `<div class="msg-label">${labels[role] || role.toUpperCase()}</div>`;
+  block.appendChild(body);
+  if (metaHtml) block.insertAdjacentHTML('beforeend', metaHtml);
+
+  messagesEl.appendChild(block);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
   return body;
 }
 
-// ── Drag-and-drop document analysis ─────────────────────────────────────────
-const chatPanel = document.querySelector('.chat-panel');
-if (chatPanel) {
-  chatPanel.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    chatPanel.classList.add('drag-over');
-  });
-  chatPanel.addEventListener('dragleave', () => chatPanel.classList.remove('drag-over'));
-  chatPanel.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    chatPanel.classList.remove('drag-over');
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
-    const form = new FormData();
-    form.append('file', file);
-    appendMsg('system', `Analyzing ${file.name}...`);
-    try {
-      const r = await fetch(`${API}/stark/documents/analyze`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getToken()}` },
-        body: form,
-      });
-      const data = await r.json();
-      appendMsg('ai', data.analysis || data.error || 'Could not analyze file.');
-    } catch (err) {
-      appendMsg('system', `Upload failed: ${err}`);
-    }
-  });
+function showThinking(text = 'PROCESSING...') {
+  let el = messagesEl.querySelector('.thinking');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'thinking';
+    el.innerHTML = `<div class="think-dots"><div class="think-dot"></div><div class="think-dot"></div><div class="think-dot"></div></div><span id="thinking-text">${text}</span>`;
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+function hideThinking() {
+  const el = messagesEl.querySelector('.thinking');
+  if (el) el.remove();
+}
+
+function clearChat() {
+  messagesEl.innerHTML = `<div class="msg-block system"><div class="msg-label">SYSTEM</div><div class="msg-text">Chat cleared.</div></div>`;
 }
 
 function connectWs() {
   try {
     ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(getToken())}`);
-    ws.onopen = () => setStatus('online');
+    ws.onopen  = () => setStatus('online');
     ws.onclose = () => { setStatus('offline'); setTimeout(connectWs, 3000); };
     ws.onerror = () => setStatus('degraded');
     ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.type === 'stream_start') {
-          streamBubble = appendMsg('ai', '');
-        } else if (data.type === 'token') {
-          if (!streamBubble) streamBubble = appendMsg('ai', '');
-          streamBubble.textContent += data.token;
-          chatLog.scrollTop = chatLog.scrollHeight;
-        } else if (data.type === 'stream_end') {
-          if (streamBubble) streamBubble.textContent = data.response ?? streamBubble.textContent;
-          streamBubble = null;
-          if (data.has_audio !== false) playLatestVoice();
-        } else if (data.type === 'response') {
-          appendMsg('ai', data.response || '(no response)');
-          streamBubble = null;
-          if (data.has_audio !== false) playLatestVoice();
-        } else if (data.type === 'error') {
-          appendMsg('ai', `Error: ${data.message}`);
-          streamBubble = null;
-        } else if (data.type === 'event') {
-          pushAlert({ mode: data.severity || 'info', ts: new Date().toLocaleTimeString(), message: data.message });
-        }
-      } catch (err) {}
+      try { handleWsMessage(JSON.parse(e.data)); } catch (err) {}
     };
   } catch (e) { setStatus('offline'); }
 }
 
-function sendMessage() {
-  const text = input.value.trim();
-  if (!text) return;
-  appendMsg('user', text);
-  input.value = '';
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ message: text }));
-  } else {
-    jarvisPost('/stark/chat', { message: text }).then(r => appendMsg('ai', r.response || '(no response)'));
+function handleWsMessage(data) {
+  if (data.type === 'stream_start') {
+    hideThinking();
+    streamBubble = addMessage('ai', '');
+  } else if (data.type === 'token') {
+    if (!streamBubble) streamBubble = addMessage('ai', '');
+    streamBubble.textContent += data.token;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  } else if (data.type === 'stream_end') {
+    if (streamBubble) streamBubble.textContent = cleanText('ai', data.response ?? streamBubble.textContent);
+    streamBubble = null;
+    updateModel(data.model || '', '');
+    if (data.has_audio !== false) playLatestVoiceFallback();
+  } else if (data.type === 'response') {
+    hideThinking();
+    addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+    if (data.has_audio !== false) playLatestVoiceFallback();
+  } else if (data.type === 'audio_ready') {
+    // Exact filename from the background TTS generation — no guessing.
+    playAudioFile(data.audio_file);
+  } else if (data.type === 'error') {
+    hideThinking();
+    addMessage('system', `Error: ${data.message}`);
+  } else if (data.type === 'system') {
+    addMessage('system', data.message || '');
+  } else if (data.type === 'alert') {
+    addAlert(data.message || '', data.severity || 'info');
   }
 }
 
-document.getElementById('send-btn').addEventListener('click', sendMessage);
-input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  inputEl.value = '';
+  addMessage('user', text);
+  showThinking();
 
-// Toggles
-['toggle-cot', 'toggle-reflect', 'toggle-voice'].forEach(id => {
-  document.getElementById(id).addEventListener('click', function () {
-    this.classList.toggle('active');
-  });
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ message: text }));
+  } else {
+    jarvisPost('/stark/chat', { message: text }).then(data => {
+      hideThinking();
+      addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+    }).catch(() => {
+      hideThinking();
+      addMessage('system', 'Connection error.');
+    });
+  }
+}
+
+inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
+
+// ── Drag-and-drop document analysis ─────────────────────────────────────────
+messagesEl.addEventListener('dragover', (e) => { e.preventDefault(); messagesEl.classList.add('drag-over'); });
+messagesEl.addEventListener('dragleave', () => messagesEl.classList.remove('drag-over'));
+messagesEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  messagesEl.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  addMessage('system', `Analyzing ${file.name}...`);
+  try {
+    const r = await fetch(`${API}/stark/documents/analyze`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    addMessage('ai', data.analysis || data.error || 'Could not analyze file.');
+  } catch (err) {
+    addMessage('system', `Upload failed: ${err}`);
+  }
 });
 
-// Voice input via Web Speech API
+// ── Voice input (Web Speech API) ──────────────────────────────────────────────
 const micBtn = document.getElementById('mic-btn');
 let recognition = null;
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -404,94 +632,189 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   recognition = new SR();
   recognition.continuous = false;
   recognition.interimResults = false;
-  recognition.onresult = (e) => {
-    input.value = e.results[0][0].transcript;
-    sendMessage();
-  };
-  recognition.onend = () => micBtn.classList.remove('rec');
-  micBtn.addEventListener('click', () => {
-    micBtn.classList.add('rec');
-    recognition.start();
-  });
+  recognition.onresult = (e) => { inputEl.value = e.results[0][0].transcript; sendMessage(); };
+  recognition.onend = () => { micBtn.classList.remove('rec'); document.getElementById('btn-voice').classList.remove('active'); };
 } else {
   micBtn.disabled = true;
   micBtn.title = 'Speech recognition not supported in this browser';
 }
 
-// ── Status ───────────────────────────────────────────────────────────────────
+function toggleMic() {
+  if (!recognition) return;
+  if (micBtn.classList.contains('rec')) {
+    recognition.stop();
+    return;
+  }
+  micBtn.classList.add('rec');
+  document.getElementById('btn-voice').classList.add('active');
+  addMessage('system', 'Voice input active — listening...');
+  recognition.start();
+}
+
+// ── Status / model badge ──────────────────────────────────────────────────────
 function setStatus(s) {
   const dot = document.getElementById('status-dot');
   const txt = document.getElementById('status-text');
-  const map = { online: ['', 'SYSTEMS ONLINE'], offline: ['danger', 'OFFLINE'], degraded: ['warn', 'DEGRADED'] };
-  const [cls, label] = map[s] || ['warn', s.toUpperCase()];
-  dot.className = 'dot' + (cls ? ' ' + cls : '');
-  txt.textContent = label;
+  const jd  = document.getElementById('footer-jarvis-dot');
+  const map = {
+    online:     { cls: '',       txt: 'SYSTEMS ONLINE', dotCls: 'green' },
+    connecting: { cls: 'warn',   txt: 'CONNECTING',     dotCls: 'yellow' },
+    degraded:   { cls: 'warn',   txt: 'DEGRADED',       dotCls: 'yellow' },
+    offline:    { cls: 'danger', txt: 'OFFLINE',         dotCls: 'red' },
+  };
+  const st = map[s] || map.connecting;
+  dot.className = `status-dot ${st.cls}`;
+  txt.textContent = st.txt;
+  if (jd) jd.className = `footer-dot ${st.dotCls}`;
 }
 
-function setBar(barId, valId, pct) {
-  pct = Math.round(pct || 0);
-  const bar = document.getElementById(barId);
-  bar.style.width = pct + '%';
-  bar.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
-  document.getElementById(valId).textContent = pct + '%';
+function updateModel(model, tier) {
+  const badge = document.getElementById('model-badge');
+  const m = (model || '').toLowerCase();
+  if (tier === 'fable' || m.includes('fable')) {
+    badge.textContent = '⚡ FABLE 5'; badge.className = 'model-badge fable';
+  } else if (m.includes('qwen')) {
+    badge.textContent = 'QWEN (REASONING)'; badge.className = 'model-badge';
+  } else if (m.includes('llama') || m.includes('groq')) {
+    badge.textContent = 'GROQ (STANDARD)'; badge.className = 'model-badge';
+  } else if (m.includes('claude') || m.includes('sonnet') || m.includes('opus')) {
+    badge.textContent = model.toUpperCase(); badge.className = 'model-badge';
+  } else if (model) {
+    badge.textContent = model.toUpperCase().slice(0, 20); badge.className = 'model-badge';
+  }
 }
 
-function pushAlert(a) {
-  const list = document.getElementById('alert-list');
-  if (list.querySelector('.empty')) list.innerHTML = '';
-  const div = document.createElement('div');
-  div.className = 'alert-item ' + (a.mode || a.severity || 'info');
-  div.textContent = `[${a.ts || ''}] ${a.message || a.text || ''}`;
-  list.prepend(div);
-  while (list.children.length > 20) list.lastChild.remove();
+// ── Alerts ─────────────────────────────────────────────────────────────────────
+function addAlert(text, severity = 'info') {
+  const list = document.getElementById('alerts-list');
+  const noData = list.querySelector('.no-data');
+  if (noData) noData.remove();
+  const item = document.createElement('div');
+  item.className = 'alert-item';
+  item.innerHTML = `<div class="alert-dot ${severity}"></div><div class="alert-text">${(text || '').slice(0, 120)}</div>`;
+  list.prepend(item);
+  while (list.children.length > 8) list.lastChild.remove();
 }
 
+// ── Audio ──────────────────────────────────────────────────────────────────────
+let voiceMuted = localStorage.getItem('jarvis_voice_muted') === 'true';
+if (voiceMuted) document.getElementById('mute-btn').classList.add('muted');
+
+function toggleMute() {
+  voiceMuted = !voiceMuted;
+  localStorage.setItem('jarvis_voice_muted', voiceMuted);
+  const btn = document.getElementById('mute-btn');
+  btn.textContent = voiceMuted ? 'UNMUTE' : 'MUTE';
+  btn.classList.toggle('muted', voiceMuted);
+}
+
+function playAudioFile(filename) {
+  if (voiceMuted || !filename) return;
+  const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+  audio.play().catch(() => {});
+}
+
+// Fallback for the non-websocket-audio_ready paths (plain HTTP /stark/chat,
+// or the WS response/stream_end events, which fire before generation is
+// necessarily done) — best-effort delay-then-fetch-latest, same as before.
+let lastVoicePlay = 0;
+function playLatestVoiceFallback() {
+  if (voiceMuted) return;
+  const now = Date.now();
+  if (now - lastVoicePlay < 1000) return;
+  lastVoicePlay = now;
+  setTimeout(() => {
+    const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
+    audio.play().catch(() => {});
+  }, 800);
+}
+
+function setVoiceEngine(engine) {
+  document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-engine="${engine}"]`)?.classList.add('active');
+  jarvisPost('/stark/voice/engine', { engine }).catch(() => {});
+}
+
+// ── Scenes ─────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.scene-btn[data-scene]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const scene = btn.dataset.scene;
+    jarvisPost('/stark/home/scene', { scene }).catch(() => {});
+    addAlert(`Scene activated: ${scene}`, 'info');
+  });
+});
+
+// ── Chain of thought / reflection quick prompts ───────────────────────────────
+function showPanel(panel) {
+  const map = {
+    cot:     'JARVIS show your chain of thought',
+    reflect: 'JARVIS give me a reflection on recent performance',
+  };
+  if (map[panel]) {
+    inputEl.value = map[panel];
+    sendMessage();
+  }
+}
+
+// ── Poll status ────────────────────────────────────────────────────────────────
 function formatUptime(hours) {
   if (!hours) return '0h';
   const h = Math.floor(hours), m = Math.round((hours - h) * 60);
   return `${h}h ${m}m`;
 }
 
-async function pollAll() {
+function setBar(barId, valId, pct) {
+  pct = Math.round(pct || 0);
+  const bar = document.getElementById(barId);
+  const val = document.getElementById(valId);
+  bar.style.width = pct + '%';
+  bar.className = 'bar-fill' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
+  val.textContent = pct + '%';
+  val.className = 'diag-value' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
+}
+
+async function pollStatus() {
   try {
     const d = await jarvisGet('/hud/status');
 
     setBar('cpu-bar', 'cpu-val', d.system.cpu);
     setBar('ram-bar', 'ram-val', d.system.ram);
     setBar('disk-bar', 'disk-val', d.system.disk);
-    document.getElementById('uptime-val').textContent = formatUptime(d.system.uptime_hours);
+    const uptimeStr = formatUptime(d.system.uptime_hours);
+    document.getElementById('h-uptime').textContent = uptimeStr;
+    document.getElementById('uptime-val').textContent = uptimeStr;
+    document.getElementById('h-cpu').textContent = `${Math.round(d.system.cpu)}%`;
+    document.getElementById('h-ram').textContent = `${Math.round(d.system.ram)}%`;
+    document.getElementById('h-disk').textContent = `${Math.round(d.system.disk)}%`;
 
-    // Prefer the top-level model/provider/tier (read live from core.state
-    // by /hud/status) — d.brain.model is kept as a fallback for safety.
-    const activeModel = d.model || d.brain.model || '—';
-    const activeTier = d.tier || d.brain.tier || '';
-    const modelLabel = activeTier ? `${activeModel} (${activeTier})` : activeModel;
-    document.getElementById('brain-line').textContent = `MODEL: ${modelLabel.toUpperCase()}`;
-
-    const mem = d.memory || {};
-    const threatEl = document.getElementById('threat-count');
-    threatEl.textContent = d.security.threats_24h;
-    threatEl.className = 'threat-count' + (d.security.threats_24h > 5 ? ' danger' : d.security.threats_24h > 0 ? ' warn' : '');
+    const model = d.model || d.brain.model || '—';
+    const tier  = d.tier || d.brain.tier || '';
+    updateModel(model, tier);
 
     if (d.mark && d.mark.mark) {
-      document.getElementById('mark-line').textContent =
-        `MARK ${d.mark.mark} — ${(d.mark.capabilities || []).length} capabilities online`;
+      const caps = d.mark.capability_count ?? (d.mark.capabilities || []).length;
+      document.getElementById('mark-label').textContent = `MARK ${d.mark.mark} — ${caps} CAPABILITIES ONLINE`;
+      document.getElementById('mark-tag').textContent = `MARK ${d.mark.mark}`;
     }
 
-    document.getElementById('jarvis-dot').className = 'dot';
-    document.getElementById('friday-dot').className = 'dot' + (d.friday_online ? '' : ' warn');
+    const sec = d.security || {};
+    const sentEl = document.getElementById('sentinel-num');
+    sentEl.textContent = sec.threats_24h ?? 0;
+    sentEl.className = 'sentinel-number' + (sec.threats_24h > 5 ? ' danger' : sec.threats_24h > 0 ? ' warn' : '');
+    document.getElementById('honeypot-count').textContent = sec.honeypot_hits ?? 0;
+    document.getElementById('blocked-count').textContent  = sec.blocked_ips ?? 0;
+    document.getElementById('anomaly-count').textContent  = sec.anomaly_count ?? 0;
 
-    const alertListEl = document.getElementById('alert-list');
     if (!d.alerts || d.alerts.length === 0) {
-      alertListEl.innerHTML = '<div class="empty">No alerts.</div>';
+      document.getElementById('alerts-list').innerHTML = '<div class="no-data">No alerts.</div>';
     } else {
-      alertListEl.innerHTML = '';
-      d.alerts.forEach(pushAlert);
+      document.getElementById('alerts-list').innerHTML = '';
+      d.alerts.forEach(a => addAlert(a.message, a.severity));
     }
 
-    // DEGRADED only when every LLM provider is down — a lone warning (CPU
-    // spike, Groq briefly rate-limited while Ollama/Anthropic still work)
-    // shouldn't flip the whole HUD to degraded.
+    const fd = document.getElementById('footer-friday-dot');
+    if (fd) fd.className = `footer-dot ${d.friday_online ? 'green' : 'yellow'}`;
+
     const allProvidersDown = !d.brain.groq && !d.brain.ollama;
     setStatus(allProvidersDown ? 'degraded' : 'online');
   } catch (e) {
@@ -499,14 +822,12 @@ async function pollAll() {
   }
 }
 
-async function fetchNetwork() {
+async function pollNetwork() {
   try {
     const d = await jarvisGet('/stark/network');
     const devices = d.devices || [];
-    const known   = devices.filter(dev => dev.trusted).length;
-    const unknown = devices.filter(dev => !dev.trusted).length;
-    document.getElementById('net-known').textContent = known;
-    document.getElementById('net-unknown').textContent = unknown;
+    document.getElementById('net-known').textContent   = devices.filter(x => x.trusted).length;
+    document.getElementById('net-unknown').textContent = devices.filter(x => !x.trusted).length;
   } catch (e) {}
   try {
     const h = await jarvisGet('/stark/network/internet');
@@ -514,117 +835,78 @@ async function fetchNetwork() {
   } catch (e) {}
 }
 
-async function fetchWorkshop() {
+async function pollWorkshop() {
   try {
     const projects = await jarvisGet('/stark/workshop');
-    const list = document.getElementById('workshop-list');
-    if (!Array.isArray(projects) || !projects.length) { list.innerHTML = '<div class="empty">No active projects.</div>'; return; }
-    list.innerHTML = '';
-    projects.slice(0, 5).forEach(p => {
-      const div = document.createElement('div');
-      div.className = 'goal-item';
-      div.innerHTML = `<div class="goal-title">${p.name || 'Untitled'}</div><div style="color:var(--dim);font-size:11px">${p.status || ''}</div>`;
-      list.appendChild(div);
-    });
+    const el = document.getElementById('workshop-list');
+    if (!Array.isArray(projects) || !projects.length) { el.innerHTML = '<div class="no-data">No active projects.</div>'; return; }
+    el.innerHTML = projects.slice(0, 5).map(p => `
+      <div class="project-item">
+        <div class="project-name">${p.name || 'Untitled'}</div>
+        <div class="project-status">${(p.status || 'ACTIVE').toUpperCase()}</div>
+      </div>`).join('');
   } catch (e) {}
 }
 
-async function fetchConsciousness() {
+async function pollConsciousness() {
   try {
     const d = await jarvisGet('/stark/consciousness/today');
-    document.getElementById('consciousness-feed').textContent = d.reflection || 'No reflection yet today.';
+    document.getElementById('consciousness-text').textContent = d.reflection || 'No reflection yet today.';
   } catch (e) {}
 }
 
 function parseMarkdown(text) {
-  return text
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/g, '<em>$1</em>');
+  return (text || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>');
 }
 
-async function fetchGoals() {
+async function pollObjectives() {
   try {
     const d = await jarvisGet('/stark/tasks/today');
-    const list = document.getElementById('goals-list');
-    if (!d.priorities) { list.innerHTML = '<div class="empty">No active goals.</div>'; return; }
-    list.innerHTML = `<div class="goal-item"><div class="goal-title">${parseMarkdown(d.priorities)}</div></div>`;
+    const el = document.getElementById('objectives-text');
+    el.innerHTML = d.priorities ? parseMarkdown(d.priorities) : '<span class="no-data" style="padding:0">No active goals.</span>';
   } catch (e) {}
 }
 
-// Scenes
-document.querySelectorAll('.scene-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const scene = btn.dataset.scene;
-    jarvisPost('/stark/mac/scene', { scene }).catch(() => {});
-    pushAlert({ mode: 'info', ts: new Date().toLocaleTimeString(), message: `Scene activated: ${scene}` });
-  });
-});
-
-// ── Voice engine (ElevenLabs cascade) ─────────────────────────────────────────
-let voiceMuted = localStorage.getItem('jarvis_voice_muted') === 'true';
-const muteToggle = document.getElementById('toggle-mute');
-if (voiceMuted) muteToggle.classList.add('active');
-muteToggle.addEventListener('click', () => {
-  voiceMuted = !voiceMuted;
-  localStorage.setItem('jarvis_voice_muted', voiceMuted);
-  muteToggle.classList.toggle('active', voiceMuted);
-});
-
-document.querySelectorAll('[data-engine]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('[data-engine]').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    jarvisPost('/stark/voice/engine', { engine: btn.dataset.engine }).catch(() => {});
-  });
-});
-
-let lastVoicePlay = 0;
-function playLatestVoice() {
-  if (voiceMuted) return;
-  const now = Date.now();
-  if (now - lastVoicePlay < 1000) return;  // debounce rapid stream_end/response
-  lastVoicePlay = now;
-  setTimeout(() => {
-    const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
-    audio.play().catch(() => {
-      // Autoplay blocked until user interacts with the page — safe to ignore.
-    });
-  }, 400); // small delay so the audio file has time to finish generating server-side
-}
-
-async function fetchVoiceStatus() {
+async function pollVoiceStatus() {
   try {
     const s = await jarvisGet('/stark/voice/status');
-    document.getElementById('voice-engine-name').textContent = (s.active_engine || 'none').toUpperCase();
-    document.getElementById('footer-voice-engine').textContent = (s.active_engine || 'none').toUpperCase();
+    const engine = (s.active_engine || 'none').toUpperCase();
+    document.getElementById('voice-engine-name').textContent = engine;
+    document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-engine="${s.active_engine}"]`)?.classList.add('active');
+    const ed = document.getElementById('footer-el-dot');
+    if (ed) ed.className = `footer-dot ${s.active_engine === 'elevenlabs' ? 'green' : 'yellow'}`;
   } catch (e) {}
   try {
     const u = await jarvisGet('/stark/voice/usage');
     const budget = u.daily_budget || {};
     const pct = budget.pct_used ?? 0;
-    document.getElementById('voice-chars-val').textContent = `${budget.chars_used ?? 0} / ${budget.chars_limit ?? '—'}`;
-    const bar = document.getElementById('voice-chars-bar');
-    bar.style.width = Math.min(100, pct) + '%';
-    bar.className = 'bar-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+    document.getElementById('voice-chars-display').textContent = `${(budget.chars_used ?? 0).toLocaleString()} / ${(budget.chars_limit ?? 0).toLocaleString()}`;
+    document.getElementById('voice-progress').style.width = `${Math.min(100, pct)}%`;
   } catch (e) {}
 }
 
-function tickClock() {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+async function pollRetinal() {
+  try {
+    const d = await jarvisGet('/stark/auth/retinal/status');
+    const rd = document.getElementById('footer-retinal-dot');
+    if (rd) rd.className = `footer-dot ${d.enrolled ? 'green' : 'yellow'}`;
+  } catch (e) {}
 }
 
-// Local clock display only — no network call, so this stays at 1s regardless
-// of the 30s-minimum policy below (that policy is about easing Groq load).
-tickClock(); setInterval(tickClock, 1000);
+// ── Init ───────────────────────────────────────────────────────────────────────
 connectWs();
-// Main vitals poll (CPU/RAM/disk/brain/alerts) — 30s minimum on every
-// network-polling interval to keep background request volume off Groq's
-// rate limit.
-pollAll(); setInterval(pollAll, 30000);
-// Slow-changing panels (network scan, workshop, consciousness, goals, voice
-// budget) — even less urgent, stay at 60s.
-fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus();
-setInterval(() => { fetchNetwork(); fetchWorkshop(); fetchConsciousness(); fetchGoals(); fetchVoiceStatus(); }, 60000);
+pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus(); pollRetinal();
+
+// Vitals — 30s minimum to keep polling load off Groq's rate limit.
+setInterval(pollStatus, 30000);
+// Slower-changing panels.
+setInterval(() => { pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus(); pollRetinal(); }, 60000);
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === '/') { inputEl.focus(); e.preventDefault(); }
+});
+inputEl.focus();
 
 console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
 </script>
