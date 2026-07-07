@@ -11,7 +11,8 @@ router = APIRouter(prefix="/stark/voice", tags=["voice"])
 def tts(body: dict):
     """Speak text through the TTS cascade (ElevenLabs -> edge-tts -> pyttsx3).
     On local Mac: plays through speakers immediately.
-    Also saves to static_voice.mp3 for remote clients if `remote` is set."""
+    Also saves a uniquely-named file under static/ for remote clients
+    (fetchable via GET /stark/voice/audio) if `remote` is set."""
     text   = body.get("text", "")
     engine = body.get("engine", "auto")
     remote = body.get("remote", False)
@@ -38,15 +39,43 @@ def tts(body: dict):
 
 
 @router.get("/audio")
-async def voice_audio():
-    """Serve the most recently generated voice audio.
-    Any device on the network can hit this to play the latest JARVIS speech."""
+async def voice_audio(file: str = ""):
+    """Serve JARVIS voice audio. Pass ?file=voice_xxx.mp3 for a specific
+    generation (services.elevenlabs_voice.generate_for_network's return
+    value); omit it to get whichever generation is currently latest
+    (tracked in core.state, set only after that file finishes writing).
+    Any device on the network can hit this to play JARVIS's speech.
+
+    Full no-cache headers (not just Cache-Control) since each generation
+    now has a unique filename anyway — belt and suspenders against any
+    client/proxy that still caches by URL."""
     from fastapi.responses import FileResponse
     from config.settings import BASE_DIR
-    path = str(BASE_DIR / "static_voice.mp3")
-    if not os.path.exists(path):
+
+    static_dir = BASE_DIR / "static"
+    target = file
+    if not target:
+        from core.state import state
+        target = state.get("latest_audio_file", "")
+
+    path = static_dir / target if target else None
+    if not path or not path.exists():
+        # Legacy fallback for anything still expecting the old fixed file
+        legacy = BASE_DIR / "static_voice.mp3"
+        path = legacy if legacy.exists() else None
+
+    if not path:
         return {"error": "No audio available"}
-    return FileResponse(path, media_type="audio/mpeg", headers={"Cache-Control": "no-cache"})
+
+    return FileResponse(
+        str(path),
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma":        "no-cache",
+            "Expires":       "0",
+        },
+    )
 
 
 @router.get("/status", dependencies=[Depends(verify_token)])

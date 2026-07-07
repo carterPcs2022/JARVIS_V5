@@ -13,6 +13,7 @@ class SuitAssembly:
         ("Structural Scanners", "memory",     3.0),
         ("Comm Array",          "websocket",  3.5),
         ("Friday Backup",       "friday",     4.0),
+        ("Retinal Scanner",     "retinal",    4.25),
         ("All Systems",         "complete",   4.5),
     ]
 
@@ -65,9 +66,17 @@ class SuitAssembly:
             "memory":     lambda: "online",
             "websocket":  lambda: "online",
             "friday":     lambda: "standby",
+            "retinal":    self._retinal_status,
             "complete":   lambda: "online",
         }
         return checks.get(system, lambda: "online")()
+
+    def _retinal_status(self) -> str:
+        try:
+            from services.retinal_scan import retinal
+            return "online" if retinal.status().get("enrolled") else "standby"
+        except Exception:
+            return "standby"
 
     def _icon(self, status: str) -> str:
         return {"online": "✓", "degraded": "⚠", "offline": "✗", "standby": "◎"}.get(status, "–")

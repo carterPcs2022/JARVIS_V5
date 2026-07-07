@@ -219,10 +219,28 @@ def speak_elevenlabs_stream(text: str) -> bool:
 
 def generate_for_network(text: str, output_path: str | None = None) -> str:
     """
-    Generate audio file so any device on the network can play it
-    via GET /stark/voice/audio. Returns file path or "".
+    Generate audio file so any device on the network can play it via
+    GET /stark/voice/audio. Returns the filename (not full path) of the
+    generated file, or "" on failure.
+
+    Previously always wrote to a single fixed static_voice.mp3 — a fast
+    follow-up message could fetch that URL while a slower one was still
+    mid-write (or before it started), playing stale or corrupt audio
+    regardless of any Cache-Control headers, since the bug was file
+    content changing under a fixed name, not browser caching. Each call
+    now gets its own timestamped filename under static/, and core.state
+    tracks whichever one is actually latest so a client with no specific
+    filename still gets the right file rather than a fixed one that may
+    not have finished writing yet.
     """
-    output_path = output_path or str(BASE_DIR / "static_voice.mp3")
+    import time
+    from core.state import state
+
+    static_dir = BASE_DIR / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    filename = output_path or f"voice_{int(time.time() * 1000)}.mp3"
+    full_path = static_dir / filename
+
     cleaned = clean_for_voice(text, max_chars=800)
     if not cleaned or not VOICE_ENABLED or IS_RAILWAY:
         return ""
@@ -238,10 +256,14 @@ def generate_for_network(text: str, output_path: str | None = None) -> str:
                 model_id=ELEVENLABS_MODEL,
             )
         )
-        with open(output_path, "wb") as f:
+        with open(full_path, "wb") as f:
             f.write(audio_bytes)
         _track_chars(len(cleaned))
-        return output_path
+        # Only recorded as "latest" once the file is fully written, so a
+        # concurrent reader either sees the previous complete file or this
+        # one — never a partially-written one under the "latest" name.
+        state.set("latest_audio_file", filename)
+        return filename
     except Exception as e:
         print(f"[ElevenLabs Network] Failed: {e}")
         return ""

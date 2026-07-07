@@ -136,7 +136,7 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
             from config.settings import VOICE_ENABLED
             if VOICE_ENABLED:
                 has_audio = True
-                loop.run_in_executor(None, _generate_voice_background, full_txt)
+                loop.run_in_executor(None, _generate_voice_background, full_txt, websocket, loop)
         except Exception:
             pass
 
@@ -172,11 +172,31 @@ def _persist(user_msg: str, response: str):
     evolution.log(user_msg, response, "stream", 0)
 
 
-def _generate_voice_background(text: str):
-    """Writes static_voice.mp3 (served at GET /stark/voice/audio) — never
-    called on the event loop directly, always via run_in_executor."""
+def _generate_voice_background(text: str, websocket: WebSocket, loop: asyncio.AbstractEventLoop):
+    """Writes a uniquely-named file under static/ (served at GET
+    /stark/voice/audio?file=...) — never called on the event loop
+    directly, always via run_in_executor.
+
+    Generation itself can take several seconds (a real ElevenLabs API
+    round-trip), far longer than a client would ever guess-and-wait for —
+    that mismatch, not browser caching, was the actual cause of "playing
+    old audio": the client fetched a fixed filename before this finished
+    writing it, or while a previous request was still writing over it.
+    Pushing the exact filename back once writing is done removes the
+    guesswork entirely."""
     try:
         from services.elevenlabs_voice import generate_for_network
-        generate_for_network(text)
+        filename = generate_for_network(text)
+        if filename:
+            asyncio.run_coroutine_threadsafe(
+                _send_audio_ready(websocket, filename), loop,
+            )
     except Exception as e:
         print(f"[WebSocket] Background voice generation failed: {e}")
+
+
+async def _send_audio_ready(websocket: WebSocket, filename: str):
+    try:
+        await websocket.send_json({"type": "audio_ready", "audio_file": filename})
+    except Exception:
+        pass  # client may have disconnected between the request and generation finishing

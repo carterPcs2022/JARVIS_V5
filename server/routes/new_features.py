@@ -140,3 +140,42 @@ def code_improve(body: dict):
 def code_explain(body: dict):
     from services.dev_intel import dev_intel
     return {"explanation": dev_intel.explain_file(body.get("file", ""))}
+
+
+# ── Retinal scan authentication ───────────────────────────────────────────────
+# Always explicit, user-initiated requests — never scheduled on a timer.
+
+@router.post("/auth/retinal/enroll")
+async def retinal_enroll(file: UploadFile = File(...)):
+    from services.retinal_scan import retinal
+
+    suffix = Path(file.filename or "eye.jpg").suffix or ".jpg"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        return retinal.enroll_from_image(tmp_path)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+@router.post("/auth/retinal/verify")
+async def retinal_verify(file: UploadFile = File(...)):
+    from services.retinal_scan import retinal
+
+    suffix = Path(file.filename or "eye.jpg").suffix or ".jpg"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        return retinal.capture_and_scan(tmp_path)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
+@router.get("/auth/retinal/status")
+def retinal_status():
+    from services.retinal_scan import retinal
+    return retinal.status()

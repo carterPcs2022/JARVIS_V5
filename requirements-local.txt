@@ -11,3 +11,7 @@ sounddevice>=0.4.6
 
 # Mac menu bar app (desktop_app/jarvis_menubar.py)
 rumps>=0.4.0
+
+# Retinal scan auth (services/retinal_scan.py) — iris pattern recognition.
+# Falls back to Claude vision analysis when not installed (works on Render).
+opencv-python>=4.8.0
