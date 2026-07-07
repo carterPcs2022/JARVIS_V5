@@ -226,16 +226,38 @@ spotify = SpotifyService()
 # Checked before the LLM call in core/brain_v2.py — music commands are
 # instant, keyword-matched, and skip the brain pipeline entirely.
 
+# Checked before SPOTIFY_PLAY so "no play the song" stops rather than plays.
+SPOTIFY_STOP = [
+    "stop playing", "pause", "no play", "stop music", "stop the music",
+    "turn off music", "silence",
+]
+
+SPOTIFY_PLAY = ["now play", "play ", "put on ", "start playing", "jarvis play"]
+
+
+def parse_spotify_command(text: str) -> dict | None:
+    """Classify a Spotify voice command as stop or play, distinguishing
+    "no play X" (stop) from "now play X" / "play X" (play a specific song)."""
+    t = text.lower().strip()
+
+    if any(s in t for s in SPOTIFY_STOP):
+        return {"action": "pause"}
+
+    for trigger in SPOTIFY_PLAY:
+        if trigger in t:
+            query = t.split(trigger, 1)[-1].strip()
+            query = query.replace("on spotify", "").strip()
+            return {"action": "play", "query": query}
+
+    return None
+
+
 def handle_spotify_command(text: str) -> str | None:
     """Returns a response string if `text` is a Spotify command, else None."""
     t = text.lower()
 
     if not spotify.is_connected():
         return None  # let the LLM handle it normally rather than claim music control that isn't set up
-
-    if any(w in t for w in ("pause", "stop the music", "stop playing")):
-        spotify.pause()
-        return "Music paused."
 
     if any(w in t for w in ("next", "skip")):
         spotify.next_track()
@@ -257,10 +279,12 @@ def handle_spotify_command(text: str) -> str | None:
         if mood in t and "music" in t:
             return _format_play_response(spotify.play_mood(mood))
 
-    for trigger in ("play ", "put on "):
-        if trigger in t:
-            query = t.split(trigger, 1)[-1].strip()
-            return _format_play_response(spotify.play(query))
+    command = parse_spotify_command(text)
+    if command:
+        if command["action"] == "pause":
+            spotify.pause()
+            return "Music paused."
+        return _format_play_response(spotify.play(command["query"]))
 
     return None
 
