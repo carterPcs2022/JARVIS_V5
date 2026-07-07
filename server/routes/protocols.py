@@ -225,3 +225,12 @@ def avengers_confirm(body: dict):
 def protocol_log():
     from core.protocols import _load_json, _PROTOCOL_LOG
     return {"events": _load_json(_PROTOCOL_LOG, list)[-100:]}
+
+
+# ── Generic run-by-number dispatch ────────────────────────────────────────────
+
+@router.post("/protocols/run/{number}", dependencies=[Depends(verify_master_only)])
+def run_protocol_by_number(number: int, body: dict | None = None):
+    """Run any protocol listed in core.protocols.PROTOCOL_MAP by number."""
+    from core.protocols import run_protocol
+    return run_protocol(number, body or {})

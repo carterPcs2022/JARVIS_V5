@@ -1914,3 +1914,72 @@ def _extra_protocol_status() -> dict:
         "P34_Mjolnir":     f"active — {len(trust_data)} token(s) tracked",
         "P35_Infinity":    f"active — {len([e for e in _load_json(_P35_LOG, list) if e.get('type')=='monthly_reflection'])} reflections",
     }
+
+
+# ── Generic dispatch: run a protocol by number ────────────────────────────────
+# Only protocols with a sensible standalone "run this now" action are listed —
+# ones like Ultron (12) or Shield (26) run automatically inside
+# ProtocolEngine.check() and have no standalone trigger.
+
+PROTOCOL_MAP = {
+    6:  "coldfire",
+    7:  "house_party",
+    11: "integrity_check",
+    16: "endgame_snapshot",
+    17: "scatter",
+    18: "sokovia",
+    19: "initiative",
+    22: "rescue",
+    25: "snap",
+    28: "benchmark",
+    30: "loki",
+    35: "infinity",
+}
+
+
+def run_protocol(number: int, params: dict | None = None) -> dict:
+    """Run a protocol by its number. `params` supplies whatever arguments
+    that protocol needs (e.g. passphrase for Coldfire/Scatter)."""
+    params = params or {}
+    name = PROTOCOL_MAP.get(number)
+    if not name:
+        return {"error": f"Protocol {number} not found or has no standalone trigger"}
+
+    try:
+        if name == "coldfire":
+            passphrase = params.get("passphrase", "")
+            if not passphrase:
+                return {"error": "passphrase required for Protocol 6 (Coldfire)"}
+            result = coldfire(passphrase)
+        elif name == "house_party":
+            from services.house_party import house_party
+            result = house_party.activate(params.get("task", ""))
+        elif name == "integrity_check":
+            result = integrity_check_startup()
+        elif name == "endgame_snapshot":
+            result = endgame_snapshot()
+        elif name == "scatter":
+            passphrase = params.get("passphrase", "")
+            if not passphrase:
+                return {"error": "passphrase required for Protocol 17 (Scatter)"}
+            result = scatter_identity(passphrase)
+        elif name == "sokovia":
+            result = sokovia.check(params.get("action", ""), params.get("details", {}))
+        elif name == "initiative":
+            result = {"suggestions": initiative.morning_initiative()}
+        elif name == "rescue":
+            result = rescue.activate(params.get("context", "Manually activated via API"))
+        elif name == "snap":
+            result = snap.activate()
+        elif name == "benchmark":
+            result = benchmark.quick_bench()
+        elif name == "loki":
+            result = loki.generate_surprise()
+        elif name == "infinity":
+            result = {"reflection": infinity.monthly_reflection(), "goals": infinity.set_monthly_goals()}
+        else:
+            return {"error": f"Protocol {name} not implemented"}
+
+        return {"protocol": number, "name": name, "result": result}
+    except Exception as e:
+        return {"error": str(e), "protocol": number}
