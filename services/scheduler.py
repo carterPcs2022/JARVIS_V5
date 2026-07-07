@@ -182,6 +182,14 @@ def _weekly_neuro_reanalysis():
         log.debug("Weekly neuro reanalysis failed: %s", e)
 
 
+def _weekly_model_update_check():
+    try:
+        from services.model_updater import model_updater
+        model_updater.check_and_apply()
+    except Exception as e:
+        log.debug("Weekly model update check failed: %s", e)
+
+
 def _morning_routine():
     try:
         from services.morning_routine import morning
@@ -337,6 +345,11 @@ def start():
         _scheduler.add_job(_weekly_active_learning_cycle, "cron", day_of_week="sun", hour=5, id="weekly_learning")
         _scheduler.add_job(_weekly_neuro_reanalysis, "cron", day_of_week="sun", hour=6, id="weekly_neuro")
 
+        # Model updater — checks Groq/Anthropic catalogs for a newer release
+        # of each currently-configured tier's model (Monday 3am)
+        _scheduler.add_job(_weekly_model_update_check, "cron", day_of_week="mon", hour=3, minute=0,
+                            id="weekly_model_update_check")
+
         # Absolute final batch: morning/evening routines, price/package tracking
         _scheduler.add_job(_morning_routine, "cron", hour=7, minute=30, id="morning_routine", replace_existing=True)
         _scheduler.add_job(_evening_routine, "cron", hour=22, minute=0, id="evening_routine", replace_existing=True)
@@ -374,7 +387,8 @@ def start():
                  "morning/evening routines, price/package tracking, "
                  "secret scan/dead man's switch/canary replant, log/audio cleanup, "
                  "proactive screen check (local), proactive research/2h, "
-                 "stark proactive thinking/30m, stark anticipate needs/5m")
+                 "stark proactive thinking/30m, stark anticipate needs/5m, "
+                 "weekly model update check")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

@@ -25,6 +25,16 @@ MAXIMUM_INTELLIGENCE_TRIGGERS = [
     "most important",
 ]
 
+MODEL_UPDATE_TRIGGERS = [
+    "check for new models",
+    "update your models",
+    "are there new models",
+    "upgrade your brain",
+    "check for upgrades",
+    "any new ai models",
+    "update yourself",
+]
+
 
 # ── Data models ───────────────────────────────────────────────────────────────
 
@@ -631,6 +641,26 @@ class Brain:
                 return Result(response=scene_response, ok=True, provider="home_automation")
         except Exception:
             pass
+
+        # ── Model self-update — instant, no LLM needed for the check itself ───
+        if any(t in user_input.lower() for t in MODEL_UPDATE_TRIGGERS):
+            try:
+                from services.model_updater import model_updater
+                result = model_updater.force_check_now()
+                if result["status"] == "updated":
+                    updates = result.get("updates", [])
+                    response = (
+                        f"Updates applied, sir. Upgraded {result['applied']} model(s): "
+                        + ", ".join(f"{u['tier']} to {u['new_model'].split('-')[-1]}" for u in updates[:3])
+                    )
+                else:
+                    response = "All models are current, sir. Running the latest available versions."
+
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="model_updater")
+            except Exception:
+                pass
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run

@@ -42,6 +42,7 @@ from server.routes.security_gov import router as security_gov_router
 from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
 from server.routes.new_features import router as new_features_router
 from server.routes.intel import router as intel_router
+from server.routes.model_updater import router as model_updater_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -79,6 +80,7 @@ app.include_router(security_firewalls_router)
 app.include_router(suit_security_router)
 app.include_router(new_features_router)
 app.include_router(intel_router)
+app.include_router(model_updater_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
@@ -290,6 +292,11 @@ async def hud_status():
         tier = state.get("active_tier", "") or ""
     except Exception:
         model = provider = tier = ""
+    try:
+        from services.model_updater import model_updater
+        model_update_status = model_updater.get_status()
+    except Exception:
+        model_update_status = {}
 
     return {
         # Top-level, read directly from live state — see core/llm/router.py,
@@ -325,6 +332,8 @@ async def hud_status():
             "anomaly_count": anomaly_count,
         },
         "mark":          mark,
+        "active_models":     model_update_status.get("current_models", {}),
+        "last_model_check":  model_update_status.get("last_checked", "never"),
         "friday_online": friday_online,
         "alerts":        recent_alerts[:10],
         "timestamp": __import__("datetime").datetime.now().isoformat(),
@@ -541,6 +550,17 @@ async def startup():
                 print("[JARVIS] Background predictive pre-loading started (USE_BACKGROUND_PREDICTION=true).")
         except Exception as e:
             print(f"[JARVIS] Background prediction skipped: {e}")
+
+        # ── Model updater — one-time startup check (~90s further past the
+        # 30s delay already elapsed above, so ~2 min after boot total) ────────
+        try:
+            await asyncio.sleep(60)
+            from services.model_updater import model_updater
+            update_result = model_updater.check_and_apply()
+            if update_result.get("applied"):
+                print(f"[JARVIS] Model updater: applied {update_result['applied']} update(s) on startup.")
+        except Exception as e:
+            print(f"[JARVIS] Model update check skipped: {e}")
 
         print("[JARVIS] Background LLM services started (30s post-boot delay elapsed).")
 
