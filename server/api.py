@@ -12,95 +12,100 @@ import time
 # misleading; this is uptime of the actual JARVIS process.
 BOOT_TIME = time.time()
 
-from utils.security import add_cors, verify_token
-from server.websocket import router as ws_router
-from server.routes.chat        import router as chat_router
-from server.routes.telemetry   import router as telemetry_router
-from server.routes.diagnostics import router as diag_router
-from server.routes.health      import router as health_router
-from server.routes.memory      import router as memory_router
-from server.routes.voice       import router as voice_router
-from server.routes.mac         import router as mac_router
-from server.routes.protocols   import router as protocols_router
-from server.routes.scatter     import router as scatter_router
-from server.routes.search      import router as search_router
-from server.routes.mark        import router as mark_router
-from server.routes.stark_extra import router as stark_extra_router
-from server.routes.final_features import router as final_router, protected as final_protected_router
-from server.routes.glasses import router as glasses_router
-from server.routes.protocols_18_35 import router as protocols_18_35_router
-from server.routes.brain_enhancement import router as brain_enhancement_router
-from server.routes.final_upgrade import router as final_upgrade_router
-from server.routes.final_completion import router as final_completion_router
-from server.routes.stark_infrastructure import router as stark_infra_router, phone_router as stark_phone_router
-from server.routes.mythos import router as mythos_router
-from server.routes.spotify import router as spotify_router, auth_router as spotify_auth_router
-from server.routes.ultimate_brain import router as ultimate_brain_router
-from server.routes.absolute_final import router as absolute_final_router
-from server.routes.security_max import router as security_max_router
-from server.routes.security_gov import router as security_gov_router
-from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
-from server.routes.new_features import router as new_features_router
-from server.routes.intel import router as intel_router
+app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 
-# The two newest, least battle-tested subsystems get an explicit opt-out and
-# an import guard — a failure importing either of these (or something they
-# transitively depend on) shouldn't be able to take down the entire app,
-# unlike the routers above whose import chains have been stable.
+# /health must always come up — Render's container health check hits this
+# path, and a non-200/unreachable response within its timeout kills the
+# whole deploy, not just one feature. Previously every router (including
+# health's own) was imported unguarded at module level: a single import
+# error anywhere in that chain — a missing dependency, bad top-level code
+# in any router file — meant `app` itself never finished constructing, so
+# uvicorn couldn't even bind the port and every request 502'd, independent
+# of anything the startup event handler does. If the real implementation
+# (server/routes/health.py — richer: uptime, full state snapshot) fails to
+# import, this minimal fallback keeps /health answering with a 200 instead
+# of the entire app failing to come up.
+try:
+    from server.routes.health import router as health_router
+    app.include_router(health_router)
+except Exception as e:
+    print(f"[JARVIS] health router failed to import, using minimal fallback: {e}")
+    @app.get("/health", include_in_schema=False)
+    def _health_fallback():
+        return {"healthy": True}
+
+from utils.security import add_cors, verify_token
+add_cors(app)
+
+
+def _safe_import(module_path: str, *attrs: str):
+    """Import `attrs` from `module_path`, returning None for each on
+    failure instead of letting one broken router take the entire app down
+    with it. Failures are logged, not silent."""
+    try:
+        mod = __import__(module_path, fromlist=attrs)
+        return tuple(getattr(mod, a) for a in attrs)
+    except Exception as e:
+        print(f"[JARVIS] Failed to import {module_path}: {e}")
+        return tuple(None for _ in attrs)
+
+
+def _include(*routers):
+    for r in routers:
+        if r is not None:
+            app.include_router(r)
+
+
+(ws_router,) = _safe_import("server.websocket", "router")
+(chat_router,) = _safe_import("server.routes.chat", "router")
+(telemetry_router,) = _safe_import("server.routes.telemetry", "router")
+(diag_router,) = _safe_import("server.routes.diagnostics", "router")
+(memory_router,) = _safe_import("server.routes.memory", "router")
+(voice_router,) = _safe_import("server.routes.voice", "router")
+(mac_router,) = _safe_import("server.routes.mac", "router")
+(protocols_router,) = _safe_import("server.routes.protocols", "router")
+(scatter_router,) = _safe_import("server.routes.scatter", "router")
+(search_router,) = _safe_import("server.routes.search", "router")
+(mark_router,) = _safe_import("server.routes.mark", "router")
+(stark_extra_router,) = _safe_import("server.routes.stark_extra", "router")
+(final_router, final_protected_router) = _safe_import("server.routes.final_features", "router", "protected")
+(glasses_router,) = _safe_import("server.routes.glasses", "router")
+(protocols_18_35_router,) = _safe_import("server.routes.protocols_18_35", "router")
+(brain_enhancement_router,) = _safe_import("server.routes.brain_enhancement", "router")
+(final_upgrade_router,) = _safe_import("server.routes.final_upgrade", "router")
+(final_completion_router,) = _safe_import("server.routes.final_completion", "router")
+(stark_infra_router, stark_phone_router) = _safe_import("server.routes.stark_infrastructure", "router", "phone_router")
+(mythos_router,) = _safe_import("server.routes.mythos", "router")
+(spotify_router, spotify_auth_router) = _safe_import("server.routes.spotify", "router", "auth_router")
+(ultimate_brain_router,) = _safe_import("server.routes.ultimate_brain", "router")
+(absolute_final_router,) = _safe_import("server.routes.absolute_final", "router")
+(security_max_router,) = _safe_import("server.routes.security_max", "router")
+(security_gov_router,) = _safe_import("server.routes.security_gov", "router")
+(security_firewalls_router, suit_security_router) = _safe_import("server.routes.security_firewalls", "router", "suit_router")
+(new_features_router,) = _safe_import("server.routes.new_features", "router")
+(intel_router,) = _safe_import("server.routes.intel", "router")
+
+# The two newest, least battle-tested subsystems also get an explicit
+# opt-out on top of the same import guard as everything else above.
 model_updater_router = None
 if os.getenv("DISABLE_MODEL_UPDATER", "").lower() != "true":
-    try:
-        from server.routes.model_updater import router as model_updater_router
-    except Exception as e:
-        print(f"[JARVIS] model_updater router failed to import, continuing without it: {e}")
+    (model_updater_router,) = _safe_import("server.routes.model_updater", "router")
 
 sandbox_router = None
 if os.getenv("DISABLE_SANDBOX", "").lower() != "true":
-    try:
-        from server.routes.sandbox import router as sandbox_router
-    except Exception as e:
-        print(f"[JARVIS] sandbox router failed to import, continuing without it: {e}")
+    (sandbox_router,) = _safe_import("server.routes.sandbox", "router")
 
-app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
-add_cors(app)
-
-app.include_router(ws_router)
-app.include_router(health_router)
-app.include_router(chat_router)
-app.include_router(telemetry_router)
-app.include_router(diag_router)
-app.include_router(memory_router)
-app.include_router(voice_router)
-app.include_router(mac_router)
-app.include_router(protocols_router)
-app.include_router(scatter_router)
-app.include_router(search_router)
-app.include_router(mark_router)
-app.include_router(stark_extra_router)
-app.include_router(final_router)
-app.include_router(final_protected_router)
-app.include_router(glasses_router)
-app.include_router(protocols_18_35_router)
-app.include_router(brain_enhancement_router)
-app.include_router(final_upgrade_router)
-app.include_router(final_completion_router)
-app.include_router(stark_infra_router)
-app.include_router(stark_phone_router)
-app.include_router(mythos_router)
-app.include_router(spotify_router)
-app.include_router(spotify_auth_router)
-app.include_router(ultimate_brain_router)
-app.include_router(absolute_final_router)
-app.include_router(security_max_router)
-app.include_router(security_gov_router)
-app.include_router(security_firewalls_router)
-app.include_router(suit_security_router)
-app.include_router(new_features_router)
-app.include_router(intel_router)
-if model_updater_router is not None:
-    app.include_router(model_updater_router)
-if sandbox_router is not None:
-    app.include_router(sandbox_router)
+_include(
+    ws_router, chat_router, telemetry_router, diag_router, memory_router,
+    voice_router, mac_router, protocols_router, scatter_router, search_router,
+    mark_router, stark_extra_router, final_router, final_protected_router,
+    glasses_router, protocols_18_35_router, brain_enhancement_router,
+    final_upgrade_router, final_completion_router, stark_infra_router,
+    stark_phone_router, mythos_router, spotify_router, spotify_auth_router,
+    ultimate_brain_router, absolute_final_router, security_max_router,
+    security_gov_router, security_firewalls_router, suit_security_router,
+    new_features_router, intel_router, model_updater_router, sandbox_router,
+)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
