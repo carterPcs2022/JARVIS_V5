@@ -136,12 +136,49 @@ class SpotifyService:
         return self._api("GET", "/me/player/currently-playing")
 
     def play(self, query: str = "") -> dict:
+        """Play on the user's active Spotify Connect device — JARVIS never
+        streams audio itself (Render has no speakers to play through and no
+        access to the user's), it just tells Spotify's own service which
+        device to play on, same as tapping play in the Spotify app."""
+        token = self._get_access_token()
+        if not token:
+            return {"error": "Not authenticated"}
+
+        devices = self._get_devices()
+        if not devices:
+            return {
+                "error": "No active Spotify device found",
+                "fix": "Open Spotify on your phone or Mac first",
+            }
+
+        device = devices[0]
+        device_id = device["id"]
+
         if query:
             result = self.search(query)
             uri = result.get("uri")
-            if uri:
-                return self._api("PUT", "/me/player/play", data={"uris": [uri]})
-        return self._api("PUT", "/me/player/play")
+            if not uri:
+                return {"error": f"Could not find: {query}"}
+
+            resp = self._api("PUT", "/me/player/play", data={"uris": [uri]}, params={"device_id": device_id})
+            if "error" in resp:
+                return resp
+            return {
+                "playing": True,
+                "track":   result.get("name", ""),
+                "artist":  result.get("artist", ""),
+                "device":  device.get("name", "your device"),
+            }
+
+        resp = self._api("PUT", "/me/player/play", params={"device_id": device_id})
+        if "error" in resp:
+            return resp
+        return {"playing": True, "device": device.get("name", "your device")}
+
+    def _get_devices(self) -> list:
+        """List the user's available Spotify Connect devices."""
+        resp = self._api("GET", "/me/player/devices")
+        return resp.get("devices", []) if "error" not in resp else []
 
     def pause(self) -> dict:
         return self._api("PUT", "/me/player/pause")
@@ -218,18 +255,29 @@ def handle_spotify_command(text: str) -> str | None:
 
     for mood in _MOOD_QUERIES:
         if mood in t and "music" in t:
-            spotify.play_mood(mood)
-            return f"Playing {mood} music, boss."
+            return _format_play_response(spotify.play_mood(mood))
 
     for trigger in ("play ", "put on "):
         if trigger in t:
             query = t.split(trigger, 1)[-1].strip()
-            if query:
-                result = spotify.search(query)
-                if result:
-                    spotify.play(query)
-                    return f"Playing {result['name']} by {result['artist']}."
-            spotify.play()
-            return "Resuming music."
+            return _format_play_response(spotify.play(query))
 
     return None
+
+
+def _format_play_response(result: dict) -> str:
+    """Turn a play()/play_mood() result dict into a single confirmed-or-explained
+    response — never asks the user to confirm, just plays it and says so, or
+    explains exactly why it couldn't (e.g. no active device)."""
+    if result.get("playing"):
+        track  = result.get("track", "")
+        artist = result.get("artist", "")
+        device = result.get("device", "your device")
+        if track:
+            return f"Playing {track}" + (f" by {artist}" if artist else "") + f" on {device}, sir."
+        return f"Resuming music on {device}, sir."
+
+    error = result.get("error", "")
+    if "No active Spotify device" in error:
+        return "No active Spotify device found. Open Spotify on your phone or Mac first, sir."
+    return f"Couldn't play that: {error}" if error else "Couldn't play that, sir."
