@@ -160,9 +160,25 @@ class ModelUpdater:
 
         if applied:
             self._announce_updates(applied)
+            self._commit_to_github(applied)
 
         return {"applied": len(applied), "updates": applied,
                 "message": f"Applied {len(applied)} model update(s)"}
+
+    def _commit_to_github(self, updates: list):
+        """Persist applied updates past the next Render redeploy — patching
+        files on disk alone doesn't survive that, since the filesystem is
+        ephemeral and nothing else here pushes to git. Only the two source
+        files actually get committed; memory/model_registry.json is
+        gitignored on purpose (it's local bookkeeping, not something this
+        repo tracks) and isn't needed for durability anyway."""
+        from utils.git_ops import commit_and_push
+        names = "; ".join(f"{u['tier']} to {u['new_model']}" for u in updates[:3])
+        commit_and_push(
+            ["config/settings.py", "core/llm/router.py"],
+            f"auto(models): update {names}",
+            log_prefix="[ModelUpdater]",
+        )
 
     def _update_in_memory(self, provider: str, tier: str, new_model: str):
         from core.llm import router

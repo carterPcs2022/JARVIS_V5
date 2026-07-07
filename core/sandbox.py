@@ -256,6 +256,9 @@ print("ALL_TESTS_PASSED")
                 "rolled_back",
             )
 
+            from utils.git_ops import commit_and_push
+            commit_and_push([filepath], f"auto(rollback): restored {filepath}", log_prefix="[Sandbox]")
+
             return {"success": True, "filepath": filepath, "message": "Rolled back successfully"}
         except Exception as e:
             return {"success": False, "error": str(e)}

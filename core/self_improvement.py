@@ -88,8 +88,22 @@ class SelfImprovementEngine:
             queue = [i for i in queue if i.get("id") != improvement_id]
             self._save_queue(queue)
             self._announce_deployment(item["filepath"], item["improvement"])
+            self._commit_improvement_to_github(item["filepath"], item["improvement"])
 
         return deploy
+
+    def _commit_improvement_to_github(self, filepath: str, improvement: dict):
+        """Persist an already human-approved deployment past the next
+        Render redeploy. This only ever runs after approve_improvement()
+        succeeds — the human approval gate on the deploy itself is
+        unaffected; this just makes that already-approved change durable."""
+        from utils.git_ops import commit_and_push
+        desc = improvement.get("description", "optimization")[:50]
+        commit_and_push(
+            [filepath],
+            f"auto(self-improve): {desc} in {filepath.split('/')[-1]}",
+            log_prefix="[SelfImprovement]",
+        )
 
     def reject_improvement(self, improvement_id: str) -> dict:
         queue = self._load_queue()
