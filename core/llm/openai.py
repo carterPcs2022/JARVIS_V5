@@ -2,7 +2,6 @@
 core/llm/openai.py — Groq client (OpenAI-compatible endpoint).
 Named openai.py because Groq uses the OpenAI API format exactly.
 """
-import time
 import httpx
 from typing import AsyncIterator
 from config.settings import GROQ_API_KEY, GROQ_MODEL, GROQ_BASE_URL
@@ -68,18 +67,15 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         r = c.post(f"{GROQ_BASE_URL}/chat/completions",
                    json=payload, headers=headers)
 
-        # Respect Groq's own retry-after rather than a fixed guess — capped
-        # at 30s so one slow-to-recover rate limit can't block a request
-        # thread indefinitely. Up to 2 retries (3 attempts total).
-        attempts = 0
-        while r.status_code == 429 and attempts < 2:
-            retry_after = int(r.headers.get("retry-after", 10))
-            wait = min(retry_after, 30)
-            print(f"[Groq] Rate limited — waiting {wait}s (attempt {attempts + 1}/2)")
-            time.sleep(wait)
-            r = c.post(f"{GROQ_BASE_URL}/chat/completions",
-                      json=payload, headers=headers)
-            attempts += 1
+        # Fail fast on 429 instead of sleeping through Groq's retry-after
+        # (previously up to 30s, twice — a single request could block for
+        # a minute before core/llm/router.py's chat() cascade ever got a
+        # chance to fall back to Ollama). Raising immediately here is also
+        # exactly what check_groq() in core/llm/router.py already expects:
+        # it catches httpx.HTTPStatusError and treats a 429 specifically as
+        # "up, just rate limited" rather than down.
+        if r.status_code == 429:
+            print("[Groq] Rate limited — failing fast so the caller can fall back immediately")
 
         r.raise_for_status()
         data = r.json()
