@@ -1,5 +1,6 @@
 """utils/security.py — Auth, rate limiting, CORS."""
 import hmac
+import ipaddress
 import os
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -9,6 +10,46 @@ import time
 from config.settings import API_TOKEN, ALLOWED_ORIGINS, ENVIRONMENT
 
 bearer = HTTPBearer(auto_error=False)
+
+# ── Trusted IP whitelist ──────────────────────────────────────────────────────
+# Shared by services/sentinel.py and services/behavioral_security.py so
+# loopback traffic, Render's internal network, and uptime monitors don't
+# trip brute-force/behavioral-anomaly alerts.
+TRUSTED_IPS: list[str] = [
+    "127.0.0.1",
+    "::1",
+    "10.0.0.0/8",       # Internal Render network
+    "169.254.0.0/16",   # Render health checks
+]
+
+# UptimeRobot's published IP list (https://uptimerobot.com/inc/files/ips-v4.txt)
+# is a large, individually-listed set that changes over time — hardcoding a
+# stale copy here would either miss real monitor IPs or silently keep
+# trusting addresses UptimeRobot no longer owns. Set UPTIMEROBOT_IP_RANGES
+# (comma-separated IPs/CIDRs, pulled from that URL) in .env instead.
+for _env_var in ("UPTIMEROBOT_IP_RANGES", "TRUSTED_IP_RANGES"):
+    _extra = os.getenv(_env_var, "")
+    if _extra:
+        TRUSTED_IPS += [ip.strip() for ip in _extra.split(",") if ip.strip()]
+
+
+def is_trusted_ip(ip: str) -> bool:
+    """True if `ip` matches an exact address or falls inside a CIDR range
+    in TRUSTED_IPS."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entry in TRUSTED_IPS:
+        try:
+            if "/" in entry:
+                if addr in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif addr == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
 
 def verify_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """

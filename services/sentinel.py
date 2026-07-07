@@ -167,6 +167,9 @@ def stop():
     return {"status": "sentinel stopped"}
 
 def record_failed_auth(ip: str):
+    from utils.security import is_trusted_ip
+    if is_trusted_ip(ip):
+        return
     now = time.time()
     _failed_logins[ip] = [t for t in _failed_logins[ip] if now - t < 300]
     _failed_logins[ip].append(now)

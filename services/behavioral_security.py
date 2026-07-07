@@ -25,6 +25,10 @@ class BehavioralSecurity:
 
     def record_request(self, ip: str, endpoint: str, method: str,
                        user_agent: str = "", body_size: int = 0):
+        from utils.security import is_trusted_ip
+        if is_trusted_ip(ip):
+            return
+
         key = self._ip_key(ip)
 
         if key not in self._ip_profiles:
