@@ -359,14 +359,16 @@ def start():
 
         # Model updater — checks Groq/Anthropic catalogs for a newer release
         # of each currently-configured tier's model (Monday 3am)
-        _scheduler.add_job(_weekly_model_update_check, "cron", day_of_week="mon", hour=3, minute=0,
-                            id="weekly_model_update_check")
+        if os.getenv("DISABLE_MODEL_UPDATER", "").lower() != "true":
+            _scheduler.add_job(_weekly_model_update_check, "cron", day_of_week="mon", hour=3, minute=0,
+                                id="weekly_model_update_check")
 
         # Self-programming sandbox — analyzes/writes/tests candidate
         # improvements and queues them for approval (Sunday 4am). No
         # autonomous deploy job exists — see core/self_improvement.py.
-        _scheduler.add_job(_weekly_self_improvement_cycle, "cron", day_of_week="sun", hour=4, minute=0,
-                            id="weekly_self_improvement_cycle")
+        if os.getenv("DISABLE_SANDBOX", "").lower() != "true":
+            _scheduler.add_job(_weekly_self_improvement_cycle, "cron", day_of_week="sun", hour=4, minute=0,
+                                id="weekly_self_improvement_cycle")
 
         # Absolute final batch: morning/evening routines, price/package tracking
         _scheduler.add_job(_morning_routine, "cron", hour=7, minute=30, id="morning_routine", replace_existing=True)

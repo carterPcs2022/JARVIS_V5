@@ -42,8 +42,24 @@ from server.routes.security_gov import router as security_gov_router
 from server.routes.security_firewalls import router as security_firewalls_router, suit_router as suit_security_router
 from server.routes.new_features import router as new_features_router
 from server.routes.intel import router as intel_router
-from server.routes.model_updater import router as model_updater_router
-from server.routes.sandbox import router as sandbox_router
+
+# The two newest, least battle-tested subsystems get an explicit opt-out and
+# an import guard — a failure importing either of these (or something they
+# transitively depend on) shouldn't be able to take down the entire app,
+# unlike the routers above whose import chains have been stable.
+model_updater_router = None
+if os.getenv("DISABLE_MODEL_UPDATER", "").lower() != "true":
+    try:
+        from server.routes.model_updater import router as model_updater_router
+    except Exception as e:
+        print(f"[JARVIS] model_updater router failed to import, continuing without it: {e}")
+
+sandbox_router = None
+if os.getenv("DISABLE_SANDBOX", "").lower() != "true":
+    try:
+        from server.routes.sandbox import router as sandbox_router
+    except Exception as e:
+        print(f"[JARVIS] sandbox router failed to import, continuing without it: {e}")
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -81,8 +97,10 @@ app.include_router(security_firewalls_router)
 app.include_router(suit_security_router)
 app.include_router(new_features_router)
 app.include_router(intel_router)
-app.include_router(model_updater_router)
-app.include_router(sandbox_router)
+if model_updater_router is not None:
+    app.include_router(model_updater_router)
+if sandbox_router is not None:
+    app.include_router(sandbox_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
@@ -346,32 +364,40 @@ async def hud_status():
 app.mount("/hud/static", StaticFiles(directory=str(HUD_DIR)), name="hud_static")
 
 
-@app.on_event("startup")
-async def startup():
-    import asyncio
-    from core.state import state
-    from services.sentinel import start as sentinel_start
+async def _early_background_start():
+    """Protocol 11/2/16/9 + sentinel + canary — none of this is LLM-related
+    or slow on its own, but it used to run synchronously inside the
+    `startup` event handler, which Starlette blocks *all* request serving
+    on (including /health) until it returns. A single unhandled exception
+    anywhere in that block used to be able to crash startup entirely, and
+    even without one, six sequential synchronous steps (each triggering
+    module imports on first use) could plausibly outrun Render's health
+    check timeout on a cold, CPU-throttled boot. Every step below is now
+    both backgrounded (doesn't block request serving) and individually
+    guarded (one failing step can't take the others down with it)."""
     from core.event_bus import bus
-    from core.llm.router import check_groq, check_ollama, check_anthropic
     from config.settings import ENVIRONMENT
 
-    state.set("environment", ENVIRONMENT)
-    print(f"[JARVIS] Environment: {ENVIRONMENT}")
+    try:
+        from core.protocols import integrity_check_startup
+        integrity_result = integrity_check_startup()
+        if integrity_result.get("modified"):
+            print(f"[P11 INTEGRITY] ⚠ Modified files: {integrity_result['modified']}")
+    except Exception as e:
+        print(f"[JARVIS] Integrity check failed: {e}")
 
-    # ── Protocol 11: Integrity Check — FIRST ─────────────────────────────────
-    from core.protocols import (
-        integrity_check_startup, register_dead_mans_switch,
-        start_endgame_loop, start_yinsen_watch
-    )
-    integrity_result = integrity_check_startup()
-    if integrity_result.get("modified"):
-        print(f"[P11 INTEGRITY] ⚠ Modified files: {integrity_result['modified']}")
+    try:
+        from core.protocols import register_dead_mans_switch
+        register_dead_mans_switch()
+    except Exception as e:
+        print(f"[JARVIS] Dead man's switch registration failed: {e}")
 
-    # ── Protocol 2: Dead Man's Switch ────────────────────────────────────────
-    register_dead_mans_switch()
-
-    base_dir = str(Path(__file__).parent.parent)
-    sentinel_start(base_dir)  # loads a saved baseline from disk if one exists, else builds fresh
+    try:
+        from services.sentinel import start as sentinel_start
+        base_dir = str(Path(__file__).parent.parent)
+        sentinel_start(base_dir)  # loads a saved baseline from disk if one exists, else builds fresh
+    except Exception as e:
+        print(f"[JARVIS] Sentinel failed to start: {e}")
 
     # ── Wake word — local Mac only, no-op on Render/Railway (no mic) ─────────
     if ENVIRONMENT == "local":
@@ -385,18 +411,40 @@ async def startup():
         except Exception as e:
             print(f"[JARVIS] Wake word detector skipped: {e}")
 
-    # ── Protocol 16: Endgame — hourly snapshot thread ─────────────────────────
-    start_endgame_loop()
+    try:
+        from core.protocols import start_endgame_loop
+        start_endgame_loop()
+    except Exception as e:
+        print(f"[JARVIS] Endgame loop failed to start: {e}")
 
-    # ── Protocol 9: Yinsen — idle check-in thread ────────────────────────────
-    start_yinsen_watch(hours=24)
+    try:
+        from core.protocols import start_yinsen_watch
+        start_yinsen_watch(hours=24)
+    except Exception as e:
+        print(f"[JARVIS] Yinsen watch failed to start: {e}")
 
-    # ── Canary tokens — plant fresh values in watched memory files ───────────
     try:
         from services.canary import canary
         canary.plant_in_memory_files()
     except Exception as e:
         print(f"[JARVIS] Canary planting skipped: {e}")
+
+
+@app.on_event("startup")
+async def startup():
+    import asyncio
+    from core.state import state
+    from core.event_bus import bus
+    from core.llm.router import check_groq, check_ollama, check_anthropic
+    from config.settings import ENVIRONMENT
+
+    state.set("environment", ENVIRONMENT)
+    print(f"[JARVIS] Environment: {ENVIRONMENT}")
+
+    # Nothing above this line does I/O; everything that does is
+    # backgrounded below so this handler returns immediately and
+    # Starlette can start serving /health right away.
+    asyncio.create_task(_early_background_start())
 
     # ── LLM probe ──────────────────────────────────────────────────────────────
     async def _probe():
@@ -555,14 +603,15 @@ async def startup():
 
         # ── Model updater — one-time startup check (~90s further past the
         # 30s delay already elapsed above, so ~2 min after boot total) ────────
-        try:
-            await asyncio.sleep(60)
-            from services.model_updater import model_updater
-            update_result = model_updater.check_and_apply()
-            if update_result.get("applied"):
-                print(f"[JARVIS] Model updater: applied {update_result['applied']} update(s) on startup.")
-        except Exception as e:
-            print(f"[JARVIS] Model update check skipped: {e}")
+        if os.getenv("DISABLE_MODEL_UPDATER", "").lower() != "true":
+            try:
+                await asyncio.sleep(60)
+                from services.model_updater import model_updater
+                update_result = model_updater.check_and_apply()
+                if update_result.get("applied"):
+                    print(f"[JARVIS] Model updater: applied {update_result['applied']} update(s) on startup.")
+            except Exception as e:
+                print(f"[JARVIS] Model update check skipped: {e}")
 
         print("[JARVIS] Background LLM services started (30s post-boot delay elapsed).")
 
