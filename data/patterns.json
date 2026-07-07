@@ -14,6 +14,14 @@
     ],
     "19": [
       "what time is it"
+    ],
+    "18": [
+      "Jarvis open spotify",
+      "Play shoot to thrill on spotify",
+      "Now play the song",
+      "Play Shoot to Thrill by AC/DC on spotify",
+      "play shoot to thrill on spotify",
+      "play the song and add to memory shoot to thrill is my favorite song"
     ]
   },
   "daily": {
@@ -27,6 +35,14 @@
     "Sunday": [
       "play spotify",
       "what time is it"
+    ],
+    "Monday": [
+      "Jarvis open spotify",
+      "Play shoot to thrill on spotify",
+      "Now play the song",
+      "Play Shoot to Thrill by AC/DC on spotify",
+      "play shoot to thrill on spotify",
+      "play the song and add to memory shoot to thrill is my favorite song"
     ]
   },
   "sequences": [
@@ -34,11 +50,22 @@
     "say only the word OK",
     "hi",
     "play spotify",
-    "what time is it"
+    "what time is it",
+    "Jarvis open spotify",
+    "Play shoot to thrill on spotify",
+    "Now play the song",
+    "Play Shoot to Thrill by AC/DC on spotify",
+    "play shoot to thrill on spotify",
+    "play the song and add to memory shoot to thrill is my favorite song"
   ],
   "topics": {
-    "jarvis": 1,
+    "jarvis": 2,
     "afternoon": 1,
-    "spotify": 1
+    "spotify": 5,
+    "thrill": 4,
+    "shoot": 4,
+    "ac/dc": 1,
+    "memory": 1,
+    "favorite": 1
   }
 }
