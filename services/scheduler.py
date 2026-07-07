@@ -190,6 +190,18 @@ def _weekly_model_update_check():
         log.debug("Weekly model update check failed: %s", e)
 
 
+def _weekly_self_improvement_cycle():
+    """Analyzes, writes, and sandbox-tests candidate improvements, queuing
+    anything that passes — never deploys. See core/self_improvement.py:
+    deployment only ever happens via an explicit human approval
+    (POST /stark/sandbox/approve/{id}), by design."""
+    try:
+        from core.self_improvement import self_improvement
+        self_improvement.run_improvement_cycle()
+    except Exception as e:
+        log.debug("Weekly self-improvement cycle failed: %s", e)
+
+
 def _morning_routine():
     try:
         from services.morning_routine import morning
@@ -350,6 +362,12 @@ def start():
         _scheduler.add_job(_weekly_model_update_check, "cron", day_of_week="mon", hour=3, minute=0,
                             id="weekly_model_update_check")
 
+        # Self-programming sandbox — analyzes/writes/tests candidate
+        # improvements and queues them for approval (Sunday 4am). No
+        # autonomous deploy job exists — see core/self_improvement.py.
+        _scheduler.add_job(_weekly_self_improvement_cycle, "cron", day_of_week="sun", hour=4, minute=0,
+                            id="weekly_self_improvement_cycle")
+
         # Absolute final batch: morning/evening routines, price/package tracking
         _scheduler.add_job(_morning_routine, "cron", hour=7, minute=30, id="morning_routine", replace_existing=True)
         _scheduler.add_job(_evening_routine, "cron", hour=22, minute=0, id="evening_routine", replace_existing=True)
@@ -388,7 +406,7 @@ def start():
                  "secret scan/dead man's switch/canary replant, log/audio cleanup, "
                  "proactive screen check (local), proactive research/2h, "
                  "stark proactive thinking/30m, stark anticipate needs/5m, "
-                 "weekly model update check")
+                 "weekly model update check, weekly self-improvement cycle (queue-only)")
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

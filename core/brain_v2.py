@@ -35,6 +35,19 @@ MODEL_UPDATE_TRIGGERS = [
     "update yourself",
 ]
 
+SANDBOX_TRIGGERS = {
+    "analyze yourself":     "analyze",
+    "check your code":      "analyze",
+    "what can you improve": "analyze",
+    "improve yourself":     "improve",
+    "optimize yourself":    "improve",
+    "self improvement":     "improve",
+    "fix your code":        "improve",
+    "run sandbox":          "improve",
+    "upgrade yourself":     "improve",
+    "pending improvements": "pending",
+}
+
 
 # ── Data models ───────────────────────────────────────────────────────────────
 
@@ -661,6 +674,51 @@ class Brain:
                 return Result(response=response, ok=True, provider="model_updater")
             except Exception:
                 pass
+
+        # ── Self-programming sandbox — analysis/improve/pending status ───────
+        # "improve" writes candidate code and sandbox-tests it synchronously
+        # (can take a while — it's a real LLM rewrite + subprocess test) but
+        # never deploys anything; that always requires a separate explicit
+        # approval via voice ("JARVIS approve improvement") is not wired here
+        # on purpose — deployment approval goes through
+        # POST /stark/sandbox/approve/{id}, not a voice trigger, since it's
+        # the one action in this whole pipeline that writes a real file.
+        low_input = user_input.lower()
+        for trigger, action in SANDBOX_TRIGGERS.items():
+            if trigger in low_input:
+                try:
+                    if action == "analyze":
+                        from core.self_analysis import self_analysis, ALLOWED_FILES
+                        result = self_analysis.analyze_self()
+                        count = result.get("safe", 0)
+                        response = (
+                            f"Self-analysis complete, sir. Found {count} potential improvements "
+                            f"across {len(ALLOWED_FILES)} core files. "
+                            f"Say 'JARVIS improve yourself' to write and test them."
+                            if count > 0 else
+                            "All code is optimal, sir. No improvements identified."
+                        )
+                    elif action == "improve":
+                        from core.self_improvement import self_improvement
+                        result = self_improvement.run_improvement_cycle()
+                        response = result.get("message", "Cycle complete.")
+                    elif action == "pending":
+                        from core.self_improvement import self_improvement
+                        pending = self_improvement.get_pending_approvals()
+                        response = (
+                            f"{len(pending)} improvement(s) awaiting your approval, sir."
+                            if pending else
+                            "No improvements pending approval."
+                        )
+                    else:
+                        continue
+
+                    from core.memory import save_turn
+                    save_turn(user_input, response)
+                    return Result(response=response, ok=True, provider="sandbox")
+                except Exception:
+                    pass
+                break
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run

@@ -43,6 +43,7 @@ from server.routes.security_firewalls import router as security_firewalls_router
 from server.routes.new_features import router as new_features_router
 from server.routes.intel import router as intel_router
 from server.routes.model_updater import router as model_updater_router
+from server.routes.sandbox import router as sandbox_router
 
 app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
 add_cors(app)
@@ -81,6 +82,7 @@ app.include_router(suit_security_router)
 app.include_router(new_features_router)
 app.include_router(intel_router)
 app.include_router(model_updater_router)
+app.include_router(sandbox_router)
 
 
 # ── Blocklist + canary check ──────────────────────────────────────────────────
