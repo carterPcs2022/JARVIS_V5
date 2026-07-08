@@ -307,6 +307,16 @@ def extract_facts(conversation_turn: str) -> list[str]:
         return []
 
 
+def get_all_facts(n: int = 200) -> list[str]:
+    """Flat list of the most recent stored fact strings — for external
+    consumers (e.g. FRIDAY's training sync) that just want the knowledge,
+    not the confidence/source/category bookkeeping recall_facts() carries."""
+    facts = _load(_SEMANTIC_FILE)
+    if not isinstance(facts, list):
+        return []
+    return [f["fact"] for f in facts[-n:] if f.get("fact")]
+
+
 def store_fact(fact: str, confidence: float = 0.9, source: str = "conversation",
                category: str = "general") -> dict:
     facts = _load(_SEMANTIC_FILE)
