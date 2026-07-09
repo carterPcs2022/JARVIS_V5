@@ -79,5 +79,57 @@ class ScenarioEngine:
         )
         return {"scenarios": scenarios, "comparison": result}
 
+    def analyze_futures(self, situation: str, n_scenarios: int = 10) -> dict:
+        """Actual parallel ensemble sampling: N independent instant-tier
+        calls each project one distinct outcome, tallied into a real
+        success rate — unlike run_simulation()'s single call asking the
+        LLM to describe a distribution from one shot. Infinity War's "14
+        million futures" framing, scaled down to something worth the
+        Groq calls it costs."""
+        import concurrent.futures
+        from core.llm.router import think
+
+        def run_one(i: int) -> dict:
+            text = think(
+                f"Future scenario {i + 1}/{n_scenarios}:\n"
+                f"Situation: {situation}\n\n"
+                f"Model one possible future outcome. What happens? Does it "
+                f"succeed or fail? Key decision point that determines outcome.\n"
+                f"Reply as: OUTCOME: [success/failure] | PATH: [key decision] | "
+                f"RESULT: [what happens]",
+                force_model="instant",
+            )
+            outcome = "success" if "SUCCESS" in text.upper() else "failure"
+            return {"scenario": i + 1, "text": text, "outcome": outcome}
+
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(run_one, i) for i in range(n_scenarios)]
+            for f in concurrent.futures.as_completed(futures, timeout=30):
+                try:
+                    results.append(f.result())
+                except Exception:
+                    pass
+
+        successes = [s for s in results if s["outcome"] == "success"]
+        failures = [s for s in results if s["outcome"] == "failure"]
+
+        if successes:
+            winning_path = think(
+                f"From {len(successes)} successful scenarios:\n"
+                + "\n".join(s["text"][:100] for s in successes[:3])
+                + "\n\nWhat is the single path to success? One clear recommendation.",
+                force_model="standard",
+            )
+        else:
+            winning_path = "No clear path to success found."
+
+        return {
+            "situation": situation, "scenarios": n_scenarios,
+            "successes": len(successes), "failures": len(failures),
+            "success_rate": f"{len(successes) / max(n_scenarios, 1) * 100:.0f}%",
+            "winning_path": winning_path,
+        }
+
 
 scenario_engine = ScenarioEngine()
