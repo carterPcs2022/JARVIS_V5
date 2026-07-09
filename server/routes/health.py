@@ -16,7 +16,7 @@ def root():
         "health":      "/health",
     }
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 def health():
     import time
     from server.api import BOOT_TIME

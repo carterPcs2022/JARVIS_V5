@@ -30,7 +30,7 @@ try:
     app.include_router(health_router)
 except Exception as e:
     print(f"[JARVIS] health router failed to import, using minimal fallback: {e}")
-    @app.get("/health", include_in_schema=False)
+    @app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
     def _health_fallback():
         return {"healthy": True}
 
