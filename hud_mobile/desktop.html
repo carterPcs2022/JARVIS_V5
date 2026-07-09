@@ -287,7 +287,9 @@ body::before {
 <div class="hud-layout">
 
   <header class="hud-header">
-    <div class="logo-mark"><div class="logo-mark-inner"></div></div>
+    <div class="logo-mark" style="overflow:hidden;background:transparent;border:none;box-shadow:none">
+      <canvas id="arc-mini" width="38" height="38" style="display:block"></canvas>
+    </div>
     <div class="logo-text">
       <div class="logo-main">J.A.R.V.I.S</div>
       <div class="logo-sub" id="mark-label">MARK — · LOADING</div>
@@ -922,6 +924,88 @@ document.addEventListener('keydown', e => {
 inputEl.focus();
 
 console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
+
+// Mini arc reactor for logo
+(function() {
+  const c   = document.getElementById('arc-mini');
+  if (!c) return;
+  const ctx = c.getContext('2d');
+  const W = 38, H = 38, CX = 19, CY = 19;
+  let t = 0;
+
+  function drawMini() {
+    ctx.clearRect(0, 0, W, H);
+    const glow = 0.5 + Math.sin(t * 2) * 0.3;
+
+    // Outer ring
+    ctx.beginPath();
+    ctx.arc(CX, CY, 17, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,140,0,${glow * 0.8})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Rotating segments
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(t * 0.5);
+    for (let i = 0; i < 6; i++) {
+      const a1 = (i / 6) * Math.PI * 2;
+      const a2 = a1 + Math.PI / 6 * 0.7;
+      ctx.beginPath();
+      ctx.arc(0, 0, 13, a1, a2);
+      ctx.strokeStyle = `rgba(255,160,0,${glow * 0.7})`;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Counter-rotate
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(-t * 0.8);
+    for (let i = 0; i < 4; i++) {
+      const a1 = (i / 4) * Math.PI * 2;
+      const a2 = a1 + Math.PI / 4 * 0.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 9, a1, a2);
+      ctx.strokeStyle = `rgba(255,100,0,${glow * 0.6})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Triangle core
+    ctx.save();
+    ctx.translate(CX, CY);
+    ctx.rotate(t * 0.1);
+    ctx.beginPath();
+    for (let i = 0; i < 3; i++) {
+      const angle = (i/3)*Math.PI*2 - Math.PI/6;
+      const x = Math.cos(angle)*6;
+      const y = Math.sin(angle)*6;
+      if (i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(255,200,100,${glow*0.9})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Center glow
+    const cg = ctx.createRadialGradient(CX,CY,0,CX,CY,5);
+    cg.addColorStop(0, `rgba(255,240,180,${glow})`);
+    cg.addColorStop(1, 'rgba(255,140,0,0)');
+    ctx.beginPath();
+    ctx.arc(CX, CY, 5, 0, Math.PI*2);
+    ctx.fillStyle = cg;
+    ctx.fill();
+
+    t += 0.015;
+    requestAnimationFrame(drawMini);
+  }
+  drawMini();
+})();
 </script>
 <script src="/hud/ambient.js"></script>
 </body>

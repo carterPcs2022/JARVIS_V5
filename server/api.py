@@ -238,6 +238,11 @@ async def intel_map():
     return FileResponse(HUD_DIR / "intelligence_map.html", headers=_NO_CACHE_HEADERS)
 
 
+@app.get("/hud/reactor")
+async def arc_reactor():
+    return FileResponse(HUD_DIR / "arc_reactor.html", headers=_NO_CACHE_HEADERS)
+
+
 @app.get("/hud/sw.js")
 async def hud_service_worker():
     """Served at exactly the path app.js registers (navigator.serviceWorker.

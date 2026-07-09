@@ -3,760 +3,651 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>J.A.R.V.I.S — Global Intelligence</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<title>JARVIS — Global Intelligence</title>
 <style>
-:root {
-  --bg:      #020810;
-  --panel:   rgba(0,180,255,0.04);
-  --border:  rgba(0,180,255,0.2);
-  --accent:  #00b4ff;
-  --accent2: #00ffcc;
-  --warn:    #ffaa00;
-  --danger:  #ff3333;
-  --honey:   #ffcc00;
-  --green:   #00ff88;
-  --text:    #c8e8ff;
-  --muted:   #2a4a6a;
-  --grid:    rgba(0,180,255,0.03);
-}
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
+* { margin:0; padding:0; box-sizing:border-box; }
 body {
-  background: var(--bg);
-  color: var(--text);
+  background: #000;
+  overflow: hidden;
   font-family: 'Courier New', monospace;
-  height: 100vh;
-  overflow: hidden;
-  background-image:
-    repeating-linear-gradient(
-      0deg, var(--grid) 0, var(--grid) 1px,
-      transparent 1px, transparent 40px
-    ),
-    repeating-linear-gradient(
-      90deg, var(--grid) 0, var(--grid) 1px,
-      transparent 1px, transparent 40px
-    );
+  color: #ff8c00;
 }
+canvas { display: block; }
 
-/* ── TOP BAR ── */
-.topbar {
+/* HUD overlay */
+.hud-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0;
-  height: 56px;
-  background: rgba(2,8,16,0.95);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  padding: 0 20px;
-  gap: 20px;
-  z-index: 1000;
-  backdrop-filter: blur(10px);
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
 }
 
-.logo {
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: 8px;
-  color: var(--accent);
-  text-shadow: 0 0 15px rgba(0,180,255,0.5);
+/* Corner brackets */
+.corner {
+  position: absolute;
+  width: 24px; height: 24px;
 }
+.c-tl { top:12px; left:12px;
+  border-top:2px solid rgba(255,140,0,0.5);
+  border-left:2px solid rgba(255,140,0,0.5); }
+.c-tr { top:12px; right:12px;
+  border-top:2px solid rgba(255,140,0,0.5);
+  border-right:2px solid rgba(255,140,0,0.5); }
+.c-bl { bottom:12px; left:12px;
+  border-bottom:2px solid rgba(255,140,0,0.5);
+  border-left:2px solid rgba(255,140,0,0.5); }
+.c-br { bottom:12px; right:12px;
+  border-bottom:2px solid rgba(255,140,0,0.5);
+  border-right:2px solid rgba(255,140,0,0.5); }
 
-.logo-sub {
-  font-size: 9px;
-  letter-spacing: 3px;
-  color: var(--muted);
-}
-
-.stats-row {
-  display: flex;
-  gap: 16px;
-  margin-left: auto;
-  align-items: center;
-}
-
-.stat-pill {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  font-size: 10px;
-  letter-spacing: 2px;
-}
-
-.stat-pill.danger { border-color: var(--danger); color: var(--danger); }
-.stat-pill.warn   { border-color: var(--warn);   color: var(--warn);   }
-.stat-pill.green  { border-color: var(--green);  color: var(--green);  }
-.stat-pill.honey  { border-color: var(--honey);  color: var(--honey);  }
-
-.threat-level {
-  padding: 4px 14px;
-  font-size: 11px;
-  letter-spacing: 3px;
-  font-weight: 700;
-  border-radius: 2px;
-}
-
-.threat-green  { background: rgba(0,255,136,0.1); border: 1px solid var(--green); color: var(--green); }
-.threat-yellow { background: rgba(255,204,0,0.1); border: 1px solid var(--honey); color: var(--honey); }
-.threat-orange { background: rgba(255,100,0,0.1); border: 1px solid #ff6600; color: #ff6600; }
-.threat-red    { background: rgba(255,51,51,0.1); border: 1px solid var(--danger); color: var(--danger); }
-
-.hud-btn {
-  padding: 5px 14px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background: transparent;
-  color: var(--accent);
-  font-family: inherit;
-  font-size: 10px;
-  letter-spacing: 2px;
-  cursor: pointer;
-  text-decoration: none;
-  display: flex;
-  align-items: center;
-}
-.hud-btn:hover { background: rgba(0,180,255,0.1); }
-
-/* ── MAP ── */
-#map {
-  position: fixed;
-  top: 56px; bottom: 0;
-  left: 0; right: 340px;
-}
-
-/* Override leaflet for dark theme */
-.leaflet-tile { filter: invert(1) hue-rotate(180deg) brightness(0.4) saturate(2); }
-.leaflet-container { background: #020810; }
-.leaflet-control-attribution { display: none; }
-.leaflet-control-zoom { display: none; }
-
-/* ── RIGHT PANEL ── */
-.side-panel {
-  position: fixed;
-  top: 56px; right: 0; bottom: 0;
-  width: 340px;
-  background: rgba(2,8,16,0.97);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.panel-section {
-  border-bottom: 1px solid rgba(0,180,255,0.08);
-  padding: 14px 16px;
-}
-
-.section-title {
-  font-size: 9px;
-  letter-spacing: 4px;
-  color: var(--muted);
-  margin-bottom: 12px;
-  text-transform: uppercase;
-}
-
-/* ── THREAT FEED ── */
-.threat-feed {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--muted) transparent;
-}
-
-.threat-feed::-webkit-scrollbar { width: 3px; }
-.threat-feed::-webkit-scrollbar-track { background: transparent; }
-.threat-feed::-webkit-scrollbar-thumb { background: var(--muted); }
-
-.threat-entry {
-  padding: 10px 16px;
-  border-bottom: 1px solid rgba(0,180,255,0.05);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.threat-entry:hover { background: rgba(0,180,255,0.05); }
-
-.threat-entry-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.threat-type-badge {
-  font-size: 9px;
-  letter-spacing: 2px;
-  padding: 2px 6px;
-  border-radius: 1px;
-}
-
-.badge-honeypot  { background: rgba(255,204,0,0.15); color: var(--honey); border: 1px solid rgba(255,204,0,0.3); }
-.badge-blocked   { background: rgba(255,51,51,0.15);  color: var(--danger); border: 1px solid rgba(255,51,51,0.3); }
-.badge-anomaly   { background: rgba(255,100,0,0.15);  color: #ff6600; border: 1px solid rgba(255,100,0,0.3); }
-.badge-injection { background: rgba(180,0,255,0.15);  color: #cc44ff; border: 1px solid rgba(180,0,255,0.3); }
-.badge-scan      { background: rgba(0,180,255,0.15);  color: var(--accent); border: 1px solid rgba(0,180,255,0.3); }
-
-.threat-ip {
-  font-size: 11px;
-  color: var(--text);
-  letter-spacing: 1px;
-}
-
-.threat-location {
-  font-size: 10px;
-  color: var(--muted);
-}
-
-.threat-ts {
-  font-size: 9px;
-  color: var(--muted);
-}
-
-/* ── DETAIL POPUP ── */
-.detail-panel {
-  position: fixed;
-  bottom: 20px;
-  left: 20px;
-  width: 320px;
-  background: rgba(2,8,16,0.97);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 16px;
-  z-index: 2000;
-  display: none;
-}
-
-.detail-panel.active { display: block; }
-.detail-panel::before {
-  content: '';
+/* Header */
+.hud-header {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--danger), transparent);
-}
-
-.detail-title {
-  font-size: 10px;
-  letter-spacing: 3px;
-  color: var(--danger);
-  margin-bottom: 10px;
-  display: flex;
-  justify-content: space-between;
-}
-
-.detail-close {
-  cursor: pointer;
-  color: var(--muted);
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 5px 0;
-  border-top: 1px solid rgba(0,180,255,0.05);
-  font-size: 11px;
-}
-
-.detail-label { color: var(--muted); }
-.detail-value { color: var(--text); text-align: right; max-width: 180px; word-break: break-all; }
-.detail-value.red  { color: var(--danger); }
-.detail-value.yellow { color: var(--honey); }
-
-/* ── LEGEND ── */
-.legend {
-  position: fixed;
-  bottom: 20px;
-  right: 360px;
-  background: rgba(2,8,16,0.9);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 12px 14px;
-  z-index: 1000;
-}
-
-.legend-item {
+  padding: 16px 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 10px;
-  letter-spacing: 1px;
-  color: var(--muted);
-  padding: 3px 0;
+  justify-content: space-between;
+  background: linear-gradient(180deg,
+    rgba(0,0,0,0.8) 0%, transparent 100%);
 }
 
-.legend-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
+.hud-title {
+  font-size: 11px;
+  letter-spacing: 6px;
+  color: rgba(255,140,0,0.9);
+  text-shadow: 0 0 10px rgba(255,140,0,0.4);
 }
 
-/* ── SCAN LINE ── */
-@keyframes scanline {
-  0%   { top: 56px; }
-  100% { top: 100vh; }
+.hud-status {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: rgba(255,140,0,0.5);
 }
 
+/* Threat counter */
+.threat-panel {
+  position: absolute;
+  top: 60px;
+  right: 24px;
+  text-align: right;
+}
+
+.threat-count {
+  font-size: 48px;
+  font-weight: 900;
+  color: #ff3b30;
+  text-shadow: 0 0 20px rgba(255,59,48,0.5);
+  line-height: 1;
+}
+
+.threat-label {
+  font-size: 9px;
+  letter-spacing: 3px;
+  color: rgba(255,140,0,0.5);
+}
+
+/* Left data panel */
+.data-left {
+  position: absolute;
+  top: 60px;
+  left: 24px;
+  width: 180px;
+}
+
+.data-item {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,140,0,0.1);
+}
+.data-item:last-child { border:none; }
+.data-label {
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: rgba(255,140,0,0.4);
+  margin-bottom: 2px;
+}
+.data-value {
+  font-size: 12px;
+  color: rgba(255,140,0,0.9);
+}
+.data-value.danger { color: #ff3b30; }
+.data-value.safe   { color: #34c759; }
+
+/* Bottom bar */
+.hud-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(0deg,
+    rgba(0,0,0,0.8) 0%, transparent 100%);
+}
+
+.footer-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.f-val {
+  font-size: 13px;
+  color: rgba(255,140,0,0.9);
+}
+.f-lbl {
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: rgba(255,140,0,0.4);
+}
+
+/* Back button */
+.back-btn {
+  position: absolute;
+  bottom: 60px;
+  left: 24px;
+  padding: 6px 16px;
+  border: 1px solid rgba(255,140,0,0.3);
+  border-radius: 2px;
+  background: rgba(0,0,0,0.5);
+  color: rgba(255,140,0,0.7);
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  pointer-events: all;
+  text-decoration: none;
+  display: inline-block;
+}
+.back-btn:hover {
+  border-color: rgba(255,140,0,0.7);
+  color: rgba(255,140,0,1);
+}
+
+/* Scanline */
 .scanline {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+  );
+}
+
+/* Loading */
+#loading {
   position: fixed;
-  left: 0;
-  right: 340px;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent, rgba(0,180,255,0.3), transparent);
-  animation: scanline 4s linear infinite;
-  z-index: 500;
-  pointer-events: none;
+  inset: 0;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 100;
+  transition: opacity 1s;
 }
-
-/* ── PULSE ANIMATION ── */
-@keyframes threat-pulse {
-  0%   { transform: scale(1);   opacity: 1; }
-  50%  { transform: scale(1.5); opacity: 0.7; }
-  100% { transform: scale(1);   opacity: 1; }
+.loading-text {
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: rgba(255,140,0,0.7);
 }
-
-.leaflet-marker-icon { animation: threat-pulse 2s ease-in-out infinite; }
-
-/* ── ATTACK LINES ── */
-.attack-line {
-  stroke-dasharray: 8 4;
-  animation: dash 1s linear infinite;
+.loading-bar {
+  width: 200px;
+  height: 2px;
+  background: rgba(255,140,0,0.1);
+  border-radius: 1px;
+  overflow: hidden;
 }
-@keyframes dash {
-  to { stroke-dashoffset: -12; }
+.loading-fill {
+  height: 100%;
+  background: rgba(255,140,0,0.7);
+  border-radius: 1px;
+  animation: load-progress 2s ease forwards;
+}
+@keyframes load-progress {
+  0%   { width: 0%; }
+  100% { width: 100%; }
 }
 </style>
 </head>
 <body>
 
-<!-- Scanline effect -->
-<div class="scanline"></div>
-
-<!-- Top bar -->
-<div class="topbar">
-  <div>
-    <div class="logo">J.A.R.V.I.S</div>
-    <div class="logo-sub">GLOBAL INTELLIGENCE NETWORK</div>
+<!-- Loading screen -->
+<div id="loading">
+  <div class="loading-text">INITIALIZING GLOBAL INTELLIGENCE</div>
+  <div class="loading-bar">
+    <div class="loading-fill"></div>
   </div>
-  <div class="stats-row">
-    <div class="stat-pill danger" id="stat-threats">THREATS: —</div>
-    <div class="stat-pill honey" id="stat-honeypot">HONEYPOTS: —</div>
-    <div class="stat-pill warn" id="stat-blocked">BLOCKED: —</div>
-    <div class="stat-pill green" id="stat-clean">MONITORED: —</div>
-    <div class="threat-level threat-green" id="threat-level">THREAT LEVEL: GREEN</div>
-    <a href="/hud" class="hud-btn">← HUD</a>
+  <div class="loading-text" style="font-size:8px;opacity:0.4">
+    STARK INDUSTRIES — CLASSIFIED
   </div>
 </div>
 
-<!-- Map -->
-<div id="map"></div>
+<!-- Three.js canvas -->
+<canvas id="globe"></canvas>
 
-<!-- Side panel -->
-<div class="side-panel">
-  <div class="panel-section">
-    <div class="section-title">LIVE THREAT FEED</div>
-    <div id="live-indicator" style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--accent)">
-      <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:threat-pulse 1s infinite"></span>
-      MONITORING ACTIVE
+<!-- HUD Overlay -->
+<div class="hud-overlay">
+  <div class="scanline"></div>
+  <div class="corner c-tl"></div>
+  <div class="corner c-tr"></div>
+  <div class="corner c-bl"></div>
+  <div class="corner c-br"></div>
+
+  <div class="hud-header">
+    <div class="hud-title">STARK GLOBAL INTELLIGENCE — LIVE</div>
+    <div class="hud-status" id="clock">--:--:--</div>
+  </div>
+
+  <div class="data-left" id="data-left">
+    <div class="data-item">
+      <div class="data-label">ACTIVE THREATS</div>
+      <div class="data-value danger" id="d-threats">—</div>
+    </div>
+    <div class="data-item">
+      <div class="data-label">NETWORK STATUS</div>
+      <div class="data-value safe" id="d-network">SECURE</div>
+    </div>
+    <div class="data-item">
+      <div class="data-label">SENTINEL</div>
+      <div class="data-value" id="d-sentinel">ACTIVE</div>
+    </div>
+    <div class="data-item">
+      <div class="data-label">UPTIME</div>
+      <div class="data-value" id="d-uptime">—</div>
+    </div>
+    <div class="data-item">
+      <div class="data-label">DEFCON</div>
+      <div class="data-value safe" id="d-defcon">5 — NORMAL</div>
     </div>
   </div>
-  <div class="threat-feed" id="threat-feed">
-    <div style="padding:20px;text-align:center;color:var(--muted);font-size:11px">
-      Loading threat intelligence...
+
+  <div class="threat-panel">
+    <div class="threat-count" id="t-count">0</div>
+    <div class="threat-label">THREATS</div>
+    <div class="threat-label">LAST 24H</div>
+  </div>
+
+  <div class="hud-footer">
+    <div class="footer-stat">
+      <div class="f-val" id="f-lat">—</div>
+      <div class="f-lbl">LATENCY</div>
+    </div>
+    <div class="footer-stat">
+      <div class="f-val" id="f-cpu">—</div>
+      <div class="f-lbl">CPU</div>
+    </div>
+    <div class="footer-stat">
+      <div class="f-val" id="f-ram">—</div>
+      <div class="f-lbl">RAM</div>
+    </div>
+    <div class="footer-stat">
+      <div class="f-val">JARVIS V5</div>
+      <div class="f-lbl">SYSTEM</div>
     </div>
   </div>
-  <div class="panel-section" style="font-size:10px;color:var(--muted);letter-spacing:1px">
-    <div id="last-update">LAST UPDATE: —</div>
-    <div id="monitoring-since" style="margin-top:4px">MONITORING SINCE: BOOT</div>
-  </div>
+
+  <a class="back-btn" href="/hud">← MAIN HUD</a>
 </div>
 
-<!-- Detail popup -->
-<div class="detail-panel" id="detail-panel">
-  <div class="detail-title">
-    <span>THREAT ANALYSIS</span>
-    <span class="detail-close" onclick="closeDetail()">✕</span>
-  </div>
-  <div id="detail-content"></div>
-</div>
-
-<!-- Legend -->
-<div class="legend">
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#ff3333;box-shadow:0 0 6px #ff3333"></div>
-    ACTIVE THREAT
-  </div>
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#ffcc00;box-shadow:0 0 6px #ffcc00"></div>
-    HONEYPOT TRIGGER
-  </div>
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#ff6600;box-shadow:0 0 6px #ff6600"></div>
-    BEHAVIORAL ANOMALY
-  </div>
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#cc44ff;box-shadow:0 0 6px #cc44ff"></div>
-    INJECTION ATTEMPT
-  </div>
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#00b4ff;box-shadow:0 0 6px #00b4ff"></div>
-    SCANNER / BOT
-  </div>
-  <div class="legend-item">
-    <div class="legend-dot" style="background:#00ff88;box-shadow:0 0 6px #00ff88"></div>
-    JARVIS SERVER
-  </div>
-</div>
-
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
-const BASE = `${location.protocol}//${location.host}`;
-// Never hardcode the real API token here — this file is committed to
-// source control. Same pattern as hud_mobile/desktop.html's getToken().
-const TOKEN = localStorage.getItem('jarvis_token') || '';
-
-// ── Map setup ─────────────────────────────────────────────────────────────────
-
-const map = L.map('map', {
-  center:          [20, 0],
-  zoom:            2.5,
-  zoomControl:     false,
-  attributionControl: false,
-  minZoom:         2,
-  maxZoom:         8,
-});
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  opacity: 0.6,
-}).addTo(map);
-
-// JARVIS server location (Render — Oregon, USA)
-const JARVIS_COORDS = [45.5051, -122.6750];
-
-// Add JARVIS server marker
-const jarvisIcon = L.divIcon({
-  html: `<div style="
-    width:16px;height:16px;border-radius:50%;
-    background:#00ff88;
-    box-shadow:0 0 20px #00ff88, 0 0 40px rgba(0,255,136,0.3);
-    border:2px solid rgba(0,255,136,0.5);
-    animation:threat-pulse 2s ease-in-out infinite;
-  "></div>`,
-  iconSize: [16,16],
-  iconAnchor: [8,8],
-  className: '',
-});
-
-L.marker(JARVIS_COORDS, {icon: jarvisIcon})
-  .bindTooltip('JARVIS SERVER — PORTLAND, OR', {
-    permanent: false,
-    className: 'jarvis-tooltip',
-  })
-  .addTo(map);
-
-// ── Threat colors ─────────────────────────────────────────────────────────────
-
-const THREAT_COLORS = {
-  'HONEYPOT':    '#ffcc00',
-  'BLOCKED':     '#ff3333',
-  'ANOMALY':     '#ff6600',
-  'INJECTION':   '#cc44ff',
-  'SCAN':        '#00b4ff',
-  'BEHAVIORAL':  '#ff6600',
-  'AUTH_FAILURE':'#ff3333',
-  'DEFAULT':     '#ff3333',
-};
-
-const THREAT_SIZES = {
-  'CRITICAL': 14,
-  'HIGH':     11,
-  'MEDIUM':   8,
-  'LOW':      6,
-  'DEFAULT':  8,
-};
-
-const markers     = {};
-const attackLines = [];
-let   threats     = [];
-
-// ── IP Geolocation ────────────────────────────────────────────────────────────
-// ipapi.co is a public, unauthenticated lookup — fine to call from the
-// browser directly. fetch() has no native `timeout` option, so an
-// AbortController is used instead of relying on one.
-
-const GEO_CACHE = {};
-
-async function geolocate(ip) {
-  if (GEO_CACHE[ip]) return GEO_CACHE[ip];
-  if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('169.254.')) {
-    return null;
-  }
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
-  try {
-    const r = await fetch(`https://ipapi.co/${ip}/json/`, {signal: controller.signal});
-    const d = await r.json();
-    if (d.latitude && d.longitude) {
-      const result = {
-        lat:     d.latitude,
-        lng:     d.longitude,
-        country: d.country_name || '',
-        city:    d.city || '',
-        org:     d.org || '',
-      };
-      GEO_CACHE[ip] = result;
-      return result;
-    }
-  } catch(e) {} finally {
-    clearTimeout(timeout);
-  }
-  return null;
+// Same API-base + token pattern as hud_mobile/desktop.html — no
+// hardcoded token here. /hud/status itself doesn't require auth (no
+// verify_token dependency on that route), so the Authorization header is
+// only attached when a token happens to already be in localStorage.
+const HOST   = location.hostname;
+const API    = `${location.protocol}//${HOST}${location.protocol === 'https:' ? '' : ':8000'}`;
+function getToken() { return localStorage.getItem('jarvis_token') || ''; }
+function authHeaders() {
+  const token = getToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
 }
 
-// ── Marker creation ───────────────────────────────────────────────────────────
-
-function makeMarker(threat, geo) {
-  const color = THREAT_COLORS[threat.threat_type] ||
-                THREAT_COLORS['DEFAULT'];
-  const size  = THREAT_SIZES[threat.severity] ||
-                THREAT_SIZES['DEFAULT'];
-
-  const icon = L.divIcon({
-    html: `<div style="
-      width:${size}px;
-      height:${size}px;
-      border-radius:50%;
-      background:${color};
-      box-shadow:0 0 ${size*2}px ${color},
-                 0 0 ${size*4}px rgba(${hexToRgb(color)},0.3);
-      border:1px solid rgba(255,255,255,0.3);
-      cursor:pointer;
-    "></div>`,
-    iconSize:   [size, size],
-    iconAnchor: [size/2, size/2],
-    className:  '',
-  });
-
-  const marker = L.marker([geo.lat, geo.lng], {icon});
-  marker.on('click', () => showDetail(threat, geo));
-
-  // Add pulsing ring for critical threats
-  if (threat.severity === 'CRITICAL' || threat.severity === 'HIGH') {
-    const ring = L.circleMarker([geo.lat, geo.lng], {
-      radius:      size * 2,
-      color:       color,
-      fillColor:   'transparent',
-      fillOpacity: 0,
-      weight:      1,
-      opacity:     0.4,
-      className:   'pulse-ring',
-    });
-    ring.addTo(map);
-    attackLines.push(ring);
-  }
-
-  return marker;
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function tick() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-US',{hour12:false});
 }
+setInterval(tick,1000); tick();
 
-function drawAttackLine(geo) {
-  const color = '#ff333366';
-  const line  = L.polyline(
-    [JARVIS_COORDS, [geo.lat, geo.lng]],
-    {
-      color,
-      weight:    1,
-      opacity:   0.3,
-      dashArray: '4 6',
-      className: 'attack-line',
-    }
+// ── Scene setup ───────────────────────────────────────────────────────────────
+const canvas   = document.getElementById('globe');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setClearColor(0x000000, 1);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(
+  60, window.innerWidth/window.innerHeight, 0.1, 1000
+);
+camera.position.z = 3.5;
+
+// ── Lighting ──────────────────────────────────────────────────────────────────
+const ambientLight = new THREE.AmbientLight(0xff8c00, 0.2);
+scene.add(ambientLight);
+const pointLight = new THREE.PointLight(0xffa500, 1, 10);
+pointLight.position.set(2, 2, 2);
+scene.add(pointLight);
+
+// ── Globe wireframe (Sokovia style) ───────────────────────────────────────────
+const RADIUS = 1.5;
+
+// Base sphere wireframe
+const sphereGeo  = new THREE.SphereGeometry(RADIUS, 24, 16);
+const sphereMat  = new THREE.MeshBasicMaterial({
+  color:       0xff8c00,
+  wireframe:   true,
+  opacity:     0.08,
+  transparent: true,
+});
+const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+scene.add(sphereMesh);
+
+// ── Golden filament network (the Sokovia data lines) ──────────────────────────
+const GROUP = new THREE.Group();
+scene.add(GROUP);
+
+// Generate random points on sphere surface
+function randomSpherePoint(r) {
+  const u     = Math.random();
+  const v     = Math.random();
+  const theta = 2 * Math.PI * u;
+  const phi   = Math.acos(2 * v - 1);
+  return new THREE.Vector3(
+    r * Math.sin(phi) * Math.cos(theta),
+    r * Math.sin(phi) * Math.sin(theta),
+    r * Math.cos(phi)
   );
-  line.addTo(map);
-  attackLines.push(line);
-  return line;
 }
 
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
-  return `${r},${g},${b}`;
+// Threat hotspots (lat/lon converted to 3D)
+const HOTSPOTS = [
+  {lat:40.7,  lon:-74.0,  intensity:0.9, label:'NEW YORK'},
+  {lat:51.5,  lon:-0.1,   intensity:0.7, label:'LONDON'},
+  {lat:48.8,  lon:2.3,    intensity:0.6, label:'PARIS'},
+  {lat:35.7,  lon:139.7,  intensity:0.8, label:'TOKYO'},
+  {lat:55.7,  lon:37.6,   intensity:0.9, label:'MOSCOW'},
+  {lat:39.9,  lon:116.4,  intensity:0.8, label:'BEIJING'},
+  {lat:28.6,  lon:77.2,   intensity:0.5, label:'NEW DELHI'},
+  {lat:-23.5, lon:-46.6,  intensity:0.4, label:'SÃO PAULO'},
+  {lat:37.5,  lon:127.0,  intensity:0.6, label:'SEOUL'},
+  {lat:19.4,  lon:-99.1,  intensity:0.5, label:'MEXICO CITY'},
+  {lat:1.3,   lon:103.8,  intensity:0.7, label:'SINGAPORE'},
+  {lat:41.0,  lon:29.0,   intensity:0.6, label:'ISTANBUL'},
+];
+
+function latLonTo3D(lat, lon, r) {
+  const phi   = (90 - lat) * (Math.PI / 180);
+  const theta = (lon + 180) * (Math.PI / 180);
+  return new THREE.Vector3(
+    -r * Math.sin(phi) * Math.cos(theta),
+     r * Math.cos(phi),
+     r * Math.sin(phi) * Math.sin(theta)
+  );
 }
 
-// ── Detail popup ──────────────────────────────────────────────────────────────
+// Draw filament lines between hotspots
+const lineMat = new THREE.LineBasicMaterial({
+  color:       0xffa500,
+  opacity:     0.4,
+  transparent: true,
+});
 
-function showDetail(threat, geo) {
-  const panel   = document.getElementById('detail-panel');
-  const content = document.getElementById('detail-content');
+const dimLineMat = new THREE.LineBasicMaterial({
+  color:       0xff6600,
+  opacity:     0.15,
+  transparent: true,
+});
 
-  const rows = [
-    ['IP ADDRESS', threat.ip || '—', 'red'],
-    ['THREAT TYPE', threat.threat_type || '—', 'yellow'],
-    ['SEVERITY', threat.severity || '—', 'red'],
-    ['COUNTRY', geo?.country || '—', ''],
-    ['CITY', geo?.city || '—', ''],
-    ['ORGANIZATION', geo?.org || '—', ''],
-    ['ENDPOINT', threat.endpoint || '—', ''],
-    ['TIMESTAMP', threat.ts || '—', ''],
-    ['STATUS', threat.blocked ? 'BLOCKED' : 'MONITORED', 'red'],
-  ];
+// Connect each hotspot to nearby ones
+for (let i = 0; i < HOTSPOTS.length; i++) {
+  for (let j = i+1; j < HOTSPOTS.length; j++) {
+    const a = latLonTo3D(HOTSPOTS[i].lat, HOTSPOTS[i].lon, RADIUS);
+    const b = latLonTo3D(HOTSPOTS[j].lat, HOTSPOTS[j].lon, RADIUS);
 
-  content.innerHTML = rows.map(([label, value, cls]) => `
-    <div class="detail-row">
-      <span class="detail-label">${label}</span>
-      <span class="detail-value ${cls}">${value}</span>
-    </div>
-  `).join('');
+    // Arc through space (not through globe)
+    const mid    = a.clone().add(b).multiplyScalar(0.5);
+    const midLen = mid.length();
+    mid.normalize().multiplyScalar(midLen + 0.3 + Math.random() * 0.4);
 
-  panel.classList.add('active');
-
-  // Pan map to threat
-  if (geo) {
-    map.setView([geo.lat, geo.lng], 5, {animate: true, duration: 1});
+    const curve  = new THREE.QuadraticBezierCurve3(a, mid, b);
+    const points = curve.getPoints(20);
+    const geo    = new THREE.BufferGeometry().setFromPoints(points);
+    const mat    = Math.random() > 0.4 ? dimLineMat : lineMat;
+    GROUP.add(new THREE.Line(geo, mat));
   }
 }
 
-function closeDetail() {
-  document.getElementById('detail-panel').classList.remove('active');
+// Random filament network across globe
+const points = [];
+for (let i = 0; i < 80; i++) {
+  points.push(randomSpherePoint(RADIUS));
 }
 
-// ── Threat feed rendering ─────────────────────────────────────────────────────
-
-function renderFeed(threats) {
-  const feed = document.getElementById('threat-feed');
-  if (!threats.length) {
-    feed.innerHTML = `
-      <div style="padding:30px;text-align:center;color:var(--muted);font-size:11px">
-        <div style="font-size:20px;margin-bottom:10px">🛡</div>
-        NO THREATS DETECTED<br>ALL SYSTEMS NOMINAL
-      </div>`;
-    return;
-  }
-
-  feed.innerHTML = threats.slice(0,50).map(t => {
-    const badgeClass = {
-      'HONEYPOT':  'badge-honeypot',
-      'BLOCKED':   'badge-blocked',
-      'ANOMALY':   'badge-anomaly',
-      'INJECTION': 'badge-injection',
-      'SCAN':      'badge-scan',
-    }[t.threat_type] || 'badge-blocked';
-
-    return `
-      <div class="threat-entry" onclick="focusThreat('${t.ip}')">
-        <div class="threat-entry-header">
-          <span class="threat-type-badge ${badgeClass}">
-            ${t.threat_type || 'THREAT'}
-          </span>
-          <span class="threat-ts">${(t.ts||'').slice(11,19)}</span>
-        </div>
-        <div class="threat-ip">${t.ip || '—'}</div>
-        <div class="threat-location">
-          ${t.country || ''} ${t.city ? '· ' + t.city : ''}
-          ${t.endpoint ? '· ' + t.endpoint.slice(0,30) : ''}
-        </div>
-      </div>`;
-  }).join('');
-}
-
-function focusThreat(ip) {
-  const threat = threats.find(t => t.ip === ip);
-  if (threat && GEO_CACHE[ip]) {
-    showDetail(threat, GEO_CACHE[ip]);
+for (let i = 0; i < points.length; i++) {
+  const count = Math.floor(Math.random() * 3) + 1;
+  for (let c = 0; c < count; c++) {
+    const j = Math.floor(Math.random() * points.length);
+    if (i === j) continue;
+    const a   = points[i];
+    const b   = points[j];
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    mid.normalize().multiplyScalar(RADIUS + 0.1 + Math.random()*0.3);
+    const curve  = new THREE.QuadraticBezierCurve3(a, mid, b);
+    const pts    = curve.getPoints(12);
+    const geo    = new THREE.BufferGeometry().setFromPoints(pts);
+    GROUP.add(new THREE.Line(geo, new THREE.LineBasicMaterial({
+      color:       0xff8c00,
+      opacity:     0.06 + Math.random() * 0.1,
+      transparent: true,
+    })));
   }
 }
 
-// ── Stats update ──────────────────────────────────────────────────────────────
+// ── Hotspot dots ──────────────────────────────────────────────────────────────
+HOTSPOTS.forEach(hs => {
+  const pos  = latLonTo3D(hs.lat, hs.lon, RADIUS + 0.01);
+  const size = 0.02 + hs.intensity * 0.025;
 
-function updateStats(threats) {
-  const honeypot  = threats.filter(t => t.threat_type === 'HONEYPOT').length;
-  const blocked   = threats.filter(t => t.blocked).length;
-  const critical  = threats.filter(t => t.severity === 'CRITICAL').length;
-
-  document.getElementById('stat-threats').textContent  = `THREATS: ${threats.length}`;
-  document.getElementById('stat-honeypot').textContent = `HONEYPOTS: ${honeypot}`;
-  document.getElementById('stat-blocked').textContent  = `BLOCKED: ${blocked}`;
-  document.getElementById('stat-clean').textContent    = `MONITORED: ${Object.keys(GEO_CACHE).length}`;
-
-  const level = document.getElementById('threat-level');
-  if (critical >= 3) {
-    level.className = 'threat-level threat-red';
-    level.textContent = 'THREAT LEVEL: CRITICAL';
-  } else if (critical >= 1 || threats.length >= 10) {
-    level.className = 'threat-level threat-orange';
-    level.textContent = 'THREAT LEVEL: ELEVATED';
-  } else if (threats.length >= 5) {
-    level.className = 'threat-level threat-yellow';
-    level.textContent = 'THREAT LEVEL: GUARDED';
-  } else {
-    level.className = 'threat-level threat-green';
-    level.textContent = 'THREAT LEVEL: GREEN';
-  }
-
-  document.getElementById('last-update').textContent =
-    'LAST UPDATE: ' + new Date().toLocaleTimeString();
-}
-
-// ── Main data fetch ───────────────────────────────────────────────────────────
-
-async function loadThreats() {
-  try {
-    const r = await fetch(`${BASE}/stark/intel/threats`, {
-      headers: TOKEN ? {'Authorization': `Bearer ${TOKEN}`} : {},
-    });
-    const data = r.ok ? await r.json() : {threats: []};
-    threats = data.threats || [];
-
-    // Geolocate all threats
-    const geoPromises = threats.map(async t => {
-      if (t.ip && !GEO_CACHE[t.ip]) {
-        const geo = await geolocate(t.ip);
-        if (geo) {
-          t.country = geo.country;
-          t.city    = geo.city;
-        }
-      }
-      return t;
-    });
-
-    await Promise.allSettled(geoPromises);
-
-    // Clear old markers/lines
-    Object.values(markers).forEach(m => map.removeLayer(m));
-    attackLines.forEach(l => map.removeLayer(l));
-    attackLines.length = 0;
-
-    // Plot threats on map
-    for (const threat of threats) {
-      const geo = GEO_CACHE[threat.ip];
-      if (geo) {
-        const marker = makeMarker(threat, geo);
-        marker.addTo(map);
-        markers[threat.ip] = marker;
-        drawAttackLine(geo);
-      }
-    }
-
-    // Update UI
-    renderFeed(threats);
-    updateStats(threats);
-
-  } catch(e) {
-    console.error('Intel load error:', e);
-  }
-}
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-
-loadThreats();
-setInterval(loadThreats, 30000);  // Refresh every 30s
-
-// Pulse effect on map
-setInterval(() => {
-  document.querySelectorAll('.pulse-ring').forEach(r => {
-    r.style.opacity = r.style.opacity === '0.1' ? '0.4' : '0.1';
+  // Inner dot
+  const geo  = new THREE.SphereGeometry(size, 8, 8);
+  const mat  = new THREE.MeshBasicMaterial({
+    color: hs.intensity > 0.7 ? 0xff3b30 : 0xff8c00,
   });
-}, 1500);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(pos);
+  GROUP.add(mesh);
+
+  // Outer ring pulse
+  const ringGeo = new THREE.RingGeometry(size*1.5, size*2.5, 16);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color:       hs.intensity > 0.7 ? 0xff3b30 : 0xffa500,
+    opacity:     0.4,
+    transparent: true,
+    side:        THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.copy(pos);
+  ring.lookAt(0, 0, 0);
+  GROUP.add(ring);
+});
+
+// ── Inner glow sphere ─────────────────────────────────────────────────────────
+const innerGeo = new THREE.SphereGeometry(RADIUS * 0.95, 32, 32);
+const innerMat = new THREE.MeshBasicMaterial({
+  color:       0xff6600,
+  opacity:     0.04,
+  transparent: true,
+});
+GROUP.add(new THREE.Mesh(innerGeo, innerMat));
+
+// ── Particle cloud (like the Sokovia data particles) ─────────────────────────
+const particleCount = 3000;
+const particlePositions = new Float32Array(particleCount * 3);
+
+for (let i = 0; i < particleCount; i++) {
+  const p = randomSpherePoint(RADIUS + Math.random() * 0.3);
+  particlePositions[i*3]   = p.x;
+  particlePositions[i*3+1] = p.y;
+  particlePositions[i*3+2] = p.z;
+}
+
+const particleGeo = new THREE.BufferGeometry();
+particleGeo.setAttribute(
+  'position',
+  new THREE.BufferAttribute(particlePositions, 3)
+);
+const particleMat = new THREE.PointsMaterial({
+  color:       0xff8c00,
+  size:        0.015,
+  opacity:     0.4,
+  transparent: true,
+});
+GROUP.add(new THREE.Points(particleGeo, particleMat));
+
+// ── Mouse drag interaction ────────────────────────────────────────────────────
+let isDragging = false;
+let prevMouse  = {x:0, y:0};
+let velocity   = {x:0, y:0};
+
+canvas.addEventListener('mousedown', e => {
+  isDragging = true;
+  prevMouse  = {x:e.clientX, y:e.clientY};
+  velocity   = {x:0, y:0};
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!isDragging) return;
+  const dx = e.clientX - prevMouse.x;
+  const dy = e.clientY - prevMouse.y;
+  velocity = {x:dy*0.005, y:dx*0.005};
+  GROUP.rotation.x += velocity.x;
+  GROUP.rotation.y += velocity.y;
+  sphereMesh.rotation.x += velocity.x;
+  sphereMesh.rotation.y += velocity.y;
+  prevMouse = {x:e.clientX, y:e.clientY};
+});
+
+canvas.addEventListener('mouseup',    () => isDragging = false);
+canvas.addEventListener('mouseleave', () => isDragging = false);
+
+// Touch support
+canvas.addEventListener('touchstart', e => {
+  isDragging = true;
+  prevMouse  = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (!isDragging) return;
+  const dx = e.touches[0].clientX - prevMouse.x;
+  const dy = e.touches[0].clientY - prevMouse.y;
+  velocity = {x:dy*0.005, y:dx*0.005};
+  GROUP.rotation.x += velocity.x;
+  GROUP.rotation.y += velocity.y;
+  sphereMesh.rotation.x += velocity.x;
+  sphereMesh.rotation.y += velocity.y;
+  prevMouse = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+}, {passive:false});
+canvas.addEventListener('touchend', () => isDragging = false);
+
+// ── Resize ────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+});
+
+// ── Animation loop ────────────────────────────────────────────────────────────
+let time = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  time += 0.005;
+
+  if (!isDragging) {
+    // Auto-rotate
+    GROUP.rotation.y += 0.0015;
+    sphereMesh.rotation.y += 0.0015;
+
+    // Apply velocity decay
+    velocity.x *= 0.95;
+    velocity.y *= 0.95;
+    GROUP.rotation.x += velocity.x;
+    GROUP.rotation.y += velocity.y;
+    sphereMesh.rotation.x += velocity.x;
+    sphereMesh.rotation.y += velocity.y;
+  }
+
+  // Pulse the inner glow
+  innerMat.opacity = 0.03 + Math.sin(time * 2) * 0.015;
+
+  // Pulse hotspot rings
+  GROUP.children.forEach((child, i) => {
+    if (child.geometry && child.geometry.type === 'RingGeometry') {
+      child.material.opacity =
+        0.2 + Math.sin(time * 3 + i) * 0.2;
+      const pulse = 1 + Math.sin(time * 4 + i) * 0.1;
+      child.scale.setScalar(pulse);
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ── Load HUD data ─────────────────────────────────────────────────────────────
+// Field names match the REAL /hud/status response shape (nested
+// system/security objects, uptime_seconds not uptime_str, no
+// sentinel_threats/latency_ms fields at all) — not the flat
+// d.sentinel_threats/d.uptime_str/d.latency_ms/d.cpu/d.ram this page
+// originally assumed, which would have silently shown placeholders
+// forever since none of those top-level keys exist.
+function formatUptime(seconds) {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+async function loadData() {
+  try {
+    const startedAt = performance.now();
+    const r = await fetch(`${API}/hud/status`, { headers: authHeaders() });
+    const d = await r.json();
+    const latencyMs = Math.round(performance.now() - startedAt);
+
+    const set = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val;
+    };
+
+    const threats = (d.security && d.security.threats_24h) || 0;
+    set('d-threats', threats);
+    set('t-count',   threats);
+    set('d-uptime',  d.uptime_seconds !== undefined ? formatUptime(d.uptime_seconds) : '—');
+    set('f-lat',     `${latencyMs}ms`);
+    set('f-cpu',     d.system && d.system.cpu !== undefined ? `${d.system.cpu}%` : '—');
+    set('f-ram',     d.system && d.system.ram !== undefined ? `${d.system.ram}%` : '—');
+
+    const tEl = document.getElementById('t-count');
+    if (tEl) {
+      tEl.style.color = threats > 50 ? '#ff3b30' :
+                        threats > 10 ? '#ff9500' : '#34c759';
+    }
+  } catch(e) {}
+}
+
+// Dismiss loading screen
+setTimeout(() => {
+  const loading = document.getElementById('loading');
+  loading.style.opacity = '0';
+  setTimeout(() => loading.remove(), 1000);
+}, 2200);
+
+loadData();
+setInterval(loadData, 10000);
 </script>
 </body>
 </html>

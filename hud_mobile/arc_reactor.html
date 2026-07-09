@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Arc Reactor — Mark 85</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  overflow: hidden;
+}
+</style>
+</head>
+<body>
+<canvas id="arc" width="400" height="400"></canvas>
+<script>
+// Mark 85 Arc Reactor — Pure Canvas
+// Matches the triangular core of Tony's final suit
+const canvas = document.getElementById('arc');
+const ctx    = canvas.getContext('2d');
+const W = 400, H = 400, CX = 200, CY = 200;
+let   t = 0;
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  const glow = 0.5 + Math.sin(t * 2) * 0.3;
+
+  // ── Outer ring ──────────────────────────────────────
+  const outerR = 170;
+  ctx.beginPath();
+  ctx.arc(CX, CY, outerR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,140,0,${glow * 0.6})`;
+  ctx.lineWidth   = 3;
+  ctx.stroke();
+
+  // Tick marks on outer ring
+  for (let i = 0; i < 60; i++) {
+    const angle  = (i / 60) * Math.PI * 2;
+    const isLong = i % 5 === 0;
+    const inner  = outerR - (isLong ? 14 : 7);
+    const x1 = CX + Math.cos(angle) * inner;
+    const y1 = CY + Math.sin(angle) * inner;
+    const x2 = CX + Math.cos(angle) * (outerR - 2);
+    const y2 = CY + Math.sin(angle) * (outerR - 2);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = isLong
+      ? `rgba(255,140,0,${glow * 0.9})`
+      : `rgba(255,140,0,${glow * 0.3})`;
+    ctx.lineWidth = isLong ? 2 : 1;
+    ctx.stroke();
+  }
+
+  // ── Rotating outer segmented ring ───────────────────
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(t * 0.3);
+  const seg1R = 150;
+  for (let i = 0; i < 8; i++) {
+    const startAngle = (i / 8) * Math.PI * 2;
+    const endAngle   = startAngle + Math.PI * 2 / 8 * 0.7;
+    ctx.beginPath();
+    ctx.arc(0, 0, seg1R, startAngle, endAngle);
+    ctx.strokeStyle = `rgba(255,160,0,${glow * 0.7})`;
+    ctx.lineWidth   = 6;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // ── Counter-rotating ring ────────────────────────────
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(-t * 0.5);
+  const seg2R = 132;
+  for (let i = 0; i < 12; i++) {
+    const startAngle = (i / 12) * Math.PI * 2;
+    const endAngle   = startAngle + Math.PI * 2 / 12 * 0.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, seg2R, startAngle, endAngle);
+    ctx.strokeStyle = `rgba(255,100,0,${glow * 0.6})`;
+    ctx.lineWidth   = 4;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // ── Inner rotating ring ──────────────────────────────
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(t * 0.8);
+  const seg3R = 112;
+  for (let i = 0; i < 6; i++) {
+    const startAngle = (i / 6) * Math.PI * 2;
+    const endAngle   = startAngle + Math.PI * 2 / 6 * 0.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, seg3R, startAngle, endAngle);
+    ctx.strokeStyle = `rgba(255,140,0,${glow * 0.8})`;
+    ctx.lineWidth   = 5;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // ── Mark 85 triangular core ──────────────────────────
+  // The signature triangle of the Mark 85
+  const triR   = 80;
+  const pulse  = 1 + Math.sin(t * 3) * 0.03;
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(t * 0.1);
+  ctx.scale(pulse, pulse);
+
+  // Triangle glow
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 - Math.PI / 6;
+    const x = Math.cos(angle) * triR;
+    const y = Math.sin(angle) * triR;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+
+  // Triangle fill gradient
+  const triGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, triR);
+  triGrad.addColorStop(0, `rgba(255,200,100,${glow * 0.3})`);
+  triGrad.addColorStop(0.4, `rgba(255,140,0,${glow * 0.15})`);
+  triGrad.addColorStop(1, `rgba(255,80,0,${glow * 0.05})`);
+  ctx.fillStyle   = triGrad;
+  ctx.fill();
+
+  // Triangle stroke
+  ctx.strokeStyle = `rgba(255,180,50,${glow * 0.9})`;
+  ctx.lineWidth   = 3;
+  ctx.shadowColor = '#ff8c00';
+  ctx.shadowBlur  = 20 * glow;
+  ctx.stroke();
+  ctx.shadowBlur  = 0;
+
+  // Inner triangle (double line effect)
+  ctx.beginPath();
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 - Math.PI / 6;
+    const x = Math.cos(angle) * (triR * 0.7);
+    const y = Math.sin(angle) * (triR * 0.7);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = `rgba(255,200,100,${glow * 0.5})`;
+  ctx.lineWidth   = 1.5;
+  ctx.stroke();
+
+  ctx.restore();
+
+  // ── Triangle corner nodes ────────────────────────────
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(t * 0.1);
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 - Math.PI / 6;
+    const x = Math.cos(angle) * triR;
+    const y = Math.sin(angle) * triR;
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,220,100,${glow})`;
+    ctx.fill();
+    // Node glow
+    const ng = ctx.createRadialGradient(x, y, 0, x, y, 15);
+    ng.addColorStop(0, `rgba(255,200,50,${glow * 0.4})`);
+    ng.addColorStop(1, 'rgba(255,150,0,0)');
+    ctx.beginPath();
+    ctx.arc(x, y, 15, 0, Math.PI * 2);
+    ctx.fillStyle = ng;
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // ── Core energy orb ──────────────────────────────────
+  const coreR  = 38;
+  const coreG  = ctx.createRadialGradient(
+    CX, CY, 0, CX, CY, coreR
+  );
+  coreG.addColorStop(0,   `rgba(255,240,180,${glow})`);
+  coreG.addColorStop(0.3, `rgba(255,180,50,${glow * 0.8})`);
+  coreG.addColorStop(0.7, `rgba(255,120,0,${glow * 0.4})`);
+  coreG.addColorStop(1,   'rgba(255,80,0,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, coreR, 0, Math.PI * 2);
+  ctx.fillStyle = coreG;
+  ctx.fill();
+
+  // Core rim
+  ctx.beginPath();
+  ctx.arc(CX, CY, coreR - 2, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,200,100,${glow * 0.6})`;
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  // Center bright point
+  const centerG = ctx.createRadialGradient(CX, CY, 0, CX, CY, 16);
+  centerG.addColorStop(0, `rgba(255,255,255,${glow})`);
+  centerG.addColorStop(0.5, `rgba(255,220,100,${glow * 0.7})`);
+  centerG.addColorStop(1, 'rgba(255,150,0,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, 16, 0, Math.PI * 2);
+  ctx.fillStyle = centerG;
+  ctx.fill();
+
+  // ── Outer ambient glow ───────────────────────────────
+  const ambG = ctx.createRadialGradient(
+    CX, CY, outerR, CX, CY, outerR + 40
+  );
+  ambG.addColorStop(0, `rgba(255,140,0,${glow * 0.1})`);
+  ambG.addColorStop(1, 'rgba(255,140,0,0)');
+  ctx.beginPath();
+  ctx.arc(CX, CY, outerR + 40, 0, Math.PI * 2);
+  ctx.fillStyle = ambG;
+  ctx.fill();
+
+  t += 0.015;
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
