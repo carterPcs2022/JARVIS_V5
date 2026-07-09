@@ -129,6 +129,14 @@ def _handle_mac_control(args: dict):
 
 def _handle_calendar_check(args: dict):
     from services.calendar_intel import calendar_intel
+    if not calendar_intel.is_connected():
+        # An empty list here is ambiguous ("no events" vs. "never checked a
+        # real calendar") — say so explicitly instead of letting the model
+        # guess or invent events.
+        return {
+            "connected": False,
+            "message": "Calendar isn't connected yet, sir. Set CALDAV_URL (and credentials, if needed) to connect one.",
+        }
     period = args.get("period", "today")
     if period == "today":
         return calendar_intel.get_today()

@@ -5,7 +5,30 @@ Model IDs are the real, current ones: claude-sonnet-5, claude-opus-4-8,
 claude-fable-5. The source build doc for this feature used fictional IDs
 (claude-sonnet-4-6, claude-opus-4-6, claude-fable-5-20260609) — those don't
 exist; every call with them would 404."""
+import httpx
 from config.settings import ANTHROPIC_API_KEY
+
+# Connect-timeout, not a flat total-request cap — extended thinking on the
+# deep/maximum tiers can legitimately take well over 8s to finish
+# generating (thinking budgets go up to 16000 tokens for fable); a fixed
+# short cap on the whole call would make those tiers fail constantly. This
+# still fails fast if the connection itself stalls, which is the actual
+# problem worth guarding against.
+_TIMEOUT_CONFIG = httpx.Timeout(connect=8.0, read=120.0, write=8.0, pool=8.0)
+
+# Anthropic is called far less often than Groq, but pooling the client is
+# free — same reasoning as core/llm/openai.py's _CLIENT (a fresh client
+# per call means a fresh TCP+TLS handshake every time).
+_CLIENT = None
+
+
+def _get_client():
+    global _CLIENT
+    if _CLIENT is None:
+        import anthropic
+        _CLIENT = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, timeout=_TIMEOUT_CONFIG)
+    return _CLIENT
+
 
 # Extended thinking is supported on all three top tiers.
 THINKING_CAPABLE_MODELS = ("claude-fable-5", "claude-opus-4-8", "claude-sonnet-5")
@@ -45,8 +68,7 @@ def call_anthropic(messages: list, system: str, model: str, max_tokens: int = 10
         return None
 
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        client = _get_client()
 
         params = {
             "model": model, "max_tokens": max_tokens,

@@ -8,6 +8,15 @@ from config.settings import GROQ_API_KEY, GROQ_MODEL, GROQ_BASE_URL
 
 TIMEOUT = 30
 
+# Connect-timeout, not a flat total-request timeout: a fixed few-second cap
+# on the *whole* call would kill the "research" tier's own legitimate
+# generations (up to 8192 output tokens — even at Groq's speed that can
+# take longer than a few seconds to fully stream). A tight connect timeout
+# still gets the actual goal (fail fast if the connection itself is
+# hanging/broken) without cutting off an already-in-progress, working
+# response.
+_TIMEOUT_CONFIG = httpx.Timeout(connect=3.0, read=TIMEOUT, write=5.0, pool=5.0)
+
 # Module-level clients, reused across every call instead of opening a
 # fresh TCP+TLS connection per request — Groq is the primary provider,
 # hit on nearly every chat message, so keep-alive connection reuse here
@@ -16,7 +25,7 @@ TIMEOUT = 30
 # concurrent use across threads, so a single shared instance is fine
 # even though chat()/embed() can be called from multiple request threads.
 _CLIENT = httpx.Client(
-    timeout=TIMEOUT,
+    timeout=_TIMEOUT_CONFIG,
     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=30),
 )
 _ASYNC_CLIENT: httpx.AsyncClient | None = None
@@ -29,7 +38,7 @@ def _get_async_client() -> httpx.AsyncClient:
     global _ASYNC_CLIENT
     if _ASYNC_CLIENT is None:
         _ASYNC_CLIENT = httpx.AsyncClient(
-            timeout=TIMEOUT,
+            timeout=_TIMEOUT_CONFIG,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=30),
         )
     return _ASYNC_CLIENT

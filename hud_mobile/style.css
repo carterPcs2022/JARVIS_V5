@@ -1,16 +1,16 @@
 :root {
-  --arc:    #00d4ff;
-  --arc2:   #0090b8;
-  --warn:   #ff9900;
+  --arc:    #ff8c00;
+  --arc2:   #cc5500;
+  --warn:   #ff6600;
   --danger: #ff2244;
   --ok:     #00ff88;
-  --bg:     #020c14;
-  --bg2:    #041828;
-  --bg3:    #061f33;
-  --text:   #c8eaf8;
-  --dim:    #3a6a80;
+  --bg:     #0d0600;
+  --bg2:    #1a0d00;
+  --bg3:    #241200;
+  --text:   #fff0d4;
+  --dim:    #805520;
   --radius: 8px;
-  --glow:   0 0 8px var(--arc), 0 0 20px rgba(0,212,255,.25);
+  --glow:   0 0 8px var(--arc), 0 0 20px rgba(255,140,0,.25);
   --glow-ok: 0 0 8px var(--ok), 0 0 20px rgba(0,255,136,.2);
   /* safe areas for iPhone notch / home bar */
   --safe-top:    env(safe-area-inset-top,    0px);
@@ -277,7 +277,7 @@ body::before {
 
 .bubble.user {
   align-self: flex-end;
-  background: rgba(0,144,184,.2);
+  background: rgba(204,85,0,.2);
   border: 1px solid var(--arc2);
   color: var(--arc);
 }

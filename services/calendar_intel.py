@@ -53,6 +53,15 @@ def _event_to_dict(event) -> dict:
 
 class CalendarIntelligence:
 
+    def is_connected(self) -> bool:
+        """get_today()/get_upcoming() return [] both when there are
+        genuinely no events AND when CalDAV was never configured — that
+        makes an empty result indistinguishable from "not connected" to
+        anything downstream (the LLM, in particular, has no way to tell
+        the difference and may just say "no events today" when the truth
+        is it never checked a real calendar at all)."""
+        return bool(os.environ.get("CALDAV_URL")) and caldav is not None
+
     # ------------------------------------------------------------------ #
     # Fetching events                                                      #
     # ------------------------------------------------------------------ #
