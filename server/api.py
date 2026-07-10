@@ -766,6 +766,11 @@ def evolution():
     from core import evolution as evo
     return evo.report()
 
+@app.get("/stark/clips", dependencies=[Depends(verify_token)])
+def clips(limit: int = 10):
+    from core.memory import get_clips
+    return {"clips": get_clips(limit)}
+
 @app.post("/stark/backup", dependencies=[Depends(verify_token)])
 def backup():
     from services.backup import backup_all

@@ -25,6 +25,12 @@ MAXIMUM_INTELLIGENCE_TRIGGERS = [
     "most important",
 ]
 
+CLIP_TRIGGERS = [
+    "clip that", "save that", "remember that",
+    "mark that", "jarvis clip", "save this moment",
+    "bookmark that",
+]
+
 MODEL_UPDATE_TRIGGERS = [
     "check for new models",
     "update your models",
@@ -654,6 +660,42 @@ class Brain:
                 return Result(response=scene_response, ok=True, provider="home_automation")
         except Exception:
             pass
+
+        # ── "Clip that" — bookmark the last exchange ──────────────────────────
+        if any(t in user_input.lower() for t in CLIP_TRIGGERS):
+            try:
+                from core.memory import get_short_term, save_clip, save_turn
+                from core.event_bus import bus
+                from core.llm.router import think
+
+                recent = get_short_term(1)
+                last_exchange = recent[-1] if recent else {}
+
+                clip = {
+                    "ts": datetime.now().isoformat(),
+                    "user": last_exchange.get("user", ""),
+                    "jarvis": last_exchange.get("ai", ""),
+                    "context": user_input,
+                    "tags": [],
+                }
+
+                tags_raw = think(
+                    f"Generate 3 short tags for this clip:\n"
+                    f"User: {clip['user']}\n"
+                    f"JARVIS: {clip['jarvis']}\n\n"
+                    f"Reply: tag1, tag2, tag3",
+                    force_model="instant",
+                )
+                clip["tags"] = [t.strip() for t in tags_raw.split(",") if t.strip()][:3]
+
+                save_clip(clip)
+                bus.system(f"Clipped. Tagged: {', '.join(clip['tags'])}")
+
+                response = f"Clipped, sir. Tagged as: {', '.join(clip['tags'])}."
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="clip")
+            except Exception:
+                pass
 
         # ── Model self-update — instant, no LLM needed for the check itself ───
         if any(t in user_input.lower() for t in MODEL_UPDATE_TRIGGERS):

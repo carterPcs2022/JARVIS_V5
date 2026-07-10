@@ -582,3 +582,23 @@ def semantic_compress(memories: list, target_size: int = 10) -> list:
         return memories[-target_size:]
 
     return "\n\n".join(parts)
+
+
+# ── Clips ("clip that") ────────────────────────────────────────────────────
+CLIPS_FILE = Path("memory/clips.json")
+
+
+def save_clip(clip: dict):
+    clips = _load(CLIPS_FILE)
+    if not isinstance(clips, list):
+        clips = []
+    clips.append(clip)
+    clips = clips[-500:]  # Keep last 500 clips
+    _save(CLIPS_FILE, clips)
+
+
+def get_clips(limit: int = 10) -> list:
+    clips = _load(CLIPS_FILE)
+    if not isinstance(clips, list):
+        return []
+    return clips[-limit:]
