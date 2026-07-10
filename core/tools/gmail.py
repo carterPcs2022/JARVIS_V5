@@ -1,151 +1,199 @@
 """
-core/tools/gmail.py — Gmail via Google OAuth2.
+core/tools/gmail.py — Gmail via IMAP/SMTP + a Gmail App Password
+(Google Account -> Security -> App Passwords, requires 2FA enabled) —
+not OAuth2. Simpler setup, no Cloud Console project, no browser consent
+flow, no credentials JSON file.
 
 First-time setup:
-  1. Go to https://console.cloud.google.com → Create project → Enable Gmail API
-  2. Create OAuth 2.0 credentials (Desktop app) → Download JSON
-  3. Save it as JARVIS_V5/config/gmail_credentials.json
-  4. On first use JARVIS will open a browser for you to authorize — token is saved automatically.
+  1. Enable 2-Step Verification on the Google account, if not already on.
+  2. Google Account -> Security -> App Passwords -> generate one for "Mail".
+  3. Set env vars: GMAIL_ADDRESS=you@gmail.com, GMAIL_APP_PASSWORD=<the 16-char password>.
+
+Note on message IDs: check_inbox()/search_emails() now return IMAP UIDs
+(strings), not Gmail API message IDs — a different ID space than the old
+OAuth version used. mark_as_read() expects the same IMAP UID it just gave
+you back, not a Gmail API id from anywhere else.
 """
-import os, base64, json
-from pathlib import Path
+import os
+import imaplib
+import smtplib
+import email
+from email.header import decode_header
 from email.mime.text import MIMEText
-from config.settings import BASE_DIR
 
-CREDENTIALS_FILE = BASE_DIR / "config" / "gmail_credentials.json"
-TOKEN_FILE       = BASE_DIR / "config" / "gmail_token.json"
-SCOPES           = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.modify",
-]
+GMAIL_USER = os.getenv("GMAIL_ADDRESS", "")
+GMAIL_PASS = os.getenv("GMAIL_APP_PASSWORD", "")
 
 
-def _get_service():
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
-    from googleapiclient.discovery import build
-
-    creds = None
-    if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Gmail credentials not found at {CREDENTIALS_FILE}. "
-                    "See setup instructions in core/tools/gmail.py"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
-        TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(TOKEN_FILE, "w") as f:
-            f.write(creds.to_json())
-
-    return build("gmail", "v1", credentials=creds)
+def _connect() -> imaplib.IMAP4_SSL:
+    mail = imaplib.IMAP4_SSL("imap.gmail.com")
+    mail.login(GMAIL_USER, GMAIL_PASS)
+    return mail
 
 
-def _parse_message(msg: dict) -> dict:
-    headers = {h["name"]: h["value"] for h in msg["payload"].get("headers", [])}
-    snippet = msg.get("snippet", "")
-    body    = ""
+def _decode_subject(msg) -> str:
+    raw = msg.get("Subject", "") or ""
+    if not raw:
+        return "(no subject)"
+    decoded = decode_header(raw)[0][0]
+    if isinstance(decoded, bytes):
+        decoded = decoded.decode(errors="replace")
+    return decoded or "(no subject)"
 
-    parts = msg["payload"].get("parts", [])
-    if parts:
-        for part in parts:
-            if part.get("mimeType") == "text/plain":
-                data = part.get("body", {}).get("data", "")
-                if data:
-                    body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
-                    break
-    else:
-        data = msg["payload"].get("body", {}).get("data", "")
-        if data:
-            body = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+
+def _get_body(msg) -> str:
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() == "text/plain":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    return payload.decode(errors="replace")
+        return ""
+    payload = msg.get_payload(decode=True)
+    return payload.decode(errors="replace") if payload else ""
+
+
+def _parse_message(mail: imaplib.IMAP4_SSL, uid: bytes) -> dict:
+    _, data = mail.fetch(uid, "(RFC822 FLAGS)")
+    raw = data[0][1]
+    flags_blob = data[0][0].decode(errors="replace") if isinstance(data[0][0], (bytes, bytearray)) else str(data[0][0])
+    msg = email.message_from_bytes(raw)
+    body = _get_body(msg)
 
     return {
-        "id":      msg["id"],
-        "from":    headers.get("From", ""),
-        "to":      headers.get("To", ""),
-        "subject": headers.get("Subject", "(no subject)"),
-        "date":    headers.get("Date", ""),
-        "snippet": snippet,
-        "body":    body[:2000],
-        "unread":  "UNREAD" in msg.get("labelIds", []),
+        "id": uid.decode(),
+        "from": msg.get("From", ""),
+        "to": msg.get("To", ""),
+        "subject": _decode_subject(msg),
+        "date": msg.get("Date", ""),
+        "snippet": body[:200],
+        "body": body[:2000],
+        "unread": "\\Seen" not in flags_blob,
     }
 
 
+def _fetch(mail: imaplib.IMAP4_SSL, uids: list, max_results: int) -> list[dict]:
+    emails = []
+    # Each message gets its own try/except — one malformed message
+    # (bad encoding, missing headers, non-text body) must not wipe out
+    # the rest of the batch.
+    for uid in reversed(uids[-max_results:]):
+        try:
+            emails.append(_parse_message(mail, uid))
+        except Exception as e:
+            print(f"[JARVIS Gmail] Failed to parse message {uid}: {e}")
+    return emails
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
+# Signatures unchanged from the OAuth version — server/routes/mac.py and
+# services/scheduler.py call these by name/position, not aware of the
+# swap underneath.
 
 def check_inbox(max_results: int = 10, unread_only: bool = True) -> list[dict]:
     """Return the latest inbox emails."""
+    if not is_configured():
+        return [{"error": "Gmail not configured"}]
+    mail = None
     try:
-        svc = _get_service()
-        q   = "in:inbox is:unread" if unread_only else "in:inbox"
-        res = svc.users().messages().list(userId="me", q=q, maxResults=max_results).execute()
-        msgs = res.get("messages", [])
-        emails = []
-        for m in msgs:
-            full = svc.users().messages().get(userId="me", id=m["id"], format="full").execute()
-            emails.append(_parse_message(full))
-        return emails
+        mail = _connect()
+        mail.select("inbox")
+        criterion = "UNSEEN" if unread_only else "ALL"
+        _, ids = mail.search(None, criterion)
+        uids = ids[0].split()
+        return _fetch(mail, uids, max_results)
     except Exception as e:
         return [{"error": str(e)}]
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 def search_emails(query: str, max_results: int = 5) -> list[dict]:
-    """Search Gmail with any query string."""
+    """Search Gmail with Gmail's own query syntax (from:, subject:,
+    is:unread, etc) via the X-GM-RAW IMAP extension Google's servers
+    support — same query language the old Gmail-API version accepted."""
+    if not is_configured():
+        return [{"error": "Gmail not configured"}]
+    mail = None
     try:
-        svc = _get_service()
-        res = svc.users().messages().list(userId="me", q=query, maxResults=max_results).execute()
-        msgs = res.get("messages", [])
-        emails = []
-        for m in msgs:
-            full = svc.users().messages().get(userId="me", id=m["id"], format="full").execute()
-            emails.append(_parse_message(full))
-        return emails
+        mail = _connect()
+        mail.select("inbox")
+        _, ids = mail.search(None, "X-GM-RAW", f'"{query}"')
+        uids = ids[0].split()
+        return _fetch(mail, uids, max_results)
     except Exception as e:
         return [{"error": str(e)}]
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 def send_email(to: str, subject: str, body: str) -> dict:
-    """Send an email from the authorized account."""
+    """Send an email from the authorized account via SMTP (IMAP itself
+    has no send capability — Gmail's SMTP server accepts the same app
+    password)."""
+    if not is_configured():
+        return {"ok": False, "message": "Gmail not configured"}
     try:
-        svc = _get_service()
         msg = MIMEText(body)
-        msg["to"]      = to
-        msg["subject"] = subject
-        raw  = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-        sent = svc.users().messages().send(userId="me", body={"raw": raw}).execute()
-        return {"ok": True, "id": sent["id"], "message": f"Email sent to {to}"}
+        msg["From"] = GMAIL_USER
+        msg["To"] = to
+        msg["Subject"] = subject
+        with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+            smtp.starttls()
+            smtp.login(GMAIL_USER, GMAIL_PASS)
+            smtp.sendmail(GMAIL_USER, [to], msg.as_string())
+        return {"ok": True, "message": f"Email sent to {to}"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
 
 def mark_as_read(message_id: str) -> dict:
+    """message_id must be an IMAP UID this module returned (from
+    check_inbox()/search_emails()), not any other ID space."""
+    if not is_configured():
+        return {"ok": False, "message": "Gmail not configured"}
+    mail = None
     try:
-        svc = _get_service()
-        svc.users().messages().modify(
-            userId="me", id=message_id,
-            body={"removeLabelIds": ["UNREAD"]}
-        ).execute()
+        mail = _connect()
+        mail.select("inbox")
+        mail.store(message_id.encode(), "+FLAGS", "\\Seen")
         return {"ok": True, "message": f"Marked {message_id} as read"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 def get_unread_count() -> int:
+    if not is_configured():
+        return -1
+    mail = None
     try:
-        svc  = _get_service()
-        res  = svc.users().labels().get(userId="me", id="INBOX").execute()
-        return res.get("messagesUnread", 0)
+        mail = _connect()
+        mail.select("inbox")
+        _, ids = mail.search(None, "UNSEEN")
+        return len(ids[0].split())
     except Exception:
         return -1
+    finally:
+        if mail is not None:
+            try:
+                mail.logout()
+            except Exception:
+                pass
 
 
 def is_configured() -> bool:
-    return CREDENTIALS_FILE.exists()
+    return bool(GMAIL_USER and GMAIL_PASS)
