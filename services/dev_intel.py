@@ -15,8 +15,11 @@ _CODE_EXT  = {".py", ".js", ".ts", ".tsx", ".jsx"}
 def _load_json(path: Path, default):
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.stat().st_size > 0:
-        with open(path) as f:
-            return json.load(f)
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            return default
     return default
 
 

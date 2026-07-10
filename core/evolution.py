@@ -10,10 +10,14 @@ from config.settings import EVOLUTION_LOG
 
 def _load() -> dict:
     EVOLUTION_LOG.parent.mkdir(parents=True, exist_ok=True)
+    default = {"sessions": [], "model_scores": {}, "version": 5}
     if EVOLUTION_LOG.exists():
-        with open(EVOLUTION_LOG) as f:
-            return json.load(f)
-    return {"sessions": [], "model_scores": {}, "version": 5}
+        try:
+            with open(EVOLUTION_LOG) as f:
+                return json.load(f)
+        except Exception:
+            return default
+    return default
 
 
 def _save(data: dict):

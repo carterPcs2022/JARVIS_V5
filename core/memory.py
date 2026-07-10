@@ -13,10 +13,17 @@ from config.settings import (SHORT_TERM_FILE, LONG_TERM_FILE,
 
 def _load(path: Path) -> list | dict:
     path.parent.mkdir(parents=True, exist_ok=True)
+    default = [] if "profile" not in path.name else {}
     if path.exists() and path.stat().st_size > 0:
-        with open(path) as f:
-            return json.load(f)
-    return [] if "profile" not in path.name else {}
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            # A truncated/corrupted file (e.g. from a crash mid-write)
+            # must not take down every caller of this — this is the
+            # foundational loader for the whole memory system.
+            return default
+    return default
 
 
 def _save(path: Path, data):
