@@ -560,6 +560,70 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
 });
 
+// ── Voice reactivity ──────────────────────────────────────────────────────────
+// This page is a separate window from the main HUD (hud_mobile/desktop.html),
+// so it can't see that page's in-memory JS state — polls the server's
+// shared /hud/voice_state instead, which desktop.html's real Audio
+// play/ended/pause listeners keep in sync with actual playback.
+let voiceActive     = false;
+let voiceIntensity  = 0;
+let voicePulseRings = [];
+
+class PulseRing {
+  constructor() {
+    const geo = new THREE.RingGeometry(RADIUS, RADIUS + 0.02, 64);
+    const mat = new THREE.MeshBasicMaterial({
+      color:       0xff8c00,
+      opacity:     0.8,
+      transparent: true,
+      side:        THREE.DoubleSide,
+    });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.scale = 1;
+    this.opacity = 0.8;
+    scene.add(this.mesh);
+  }
+
+  update() {
+    this.scale   += 0.04;
+    this.opacity -= 0.025;
+    this.mesh.scale.setScalar(this.scale);
+    this.mesh.material.opacity = Math.max(0, this.opacity);
+    return this.opacity > 0;
+  }
+
+  dispose() {
+    scene.remove(this.mesh);
+  }
+}
+
+function onVoiceStart() {
+  voiceActive    = true;
+  voiceIntensity = 1;
+  for (let i = 0; i < 3; i++) {
+    setTimeout(() => { voicePulseRings.push(new PulseRing()); }, i * 200);
+  }
+}
+
+function onVoiceEnd() {
+  voiceActive = false;
+}
+
+let lastVoiceCheck = 0;
+function checkVoiceState() {
+  const now = Date.now();
+  if (now - lastVoiceCheck < 500) return;
+  lastVoiceCheck = now;
+  fetch(`${API}/hud/voice_state`, { headers: authHeaders() })
+    .then(r => r.json())
+    .then(d => {
+      const speaking = d.speaking || false;
+      if (speaking && !voiceActive) onVoiceStart();
+      if (!speaking && voiceActive) onVoiceEnd();
+    })
+    .catch(() => {});
+}
+
 // ── Animation loop ────────────────────────────────────────────────────────────
 let time = 0;
 function animate() {
@@ -580,18 +644,61 @@ function animate() {
     sphereMesh.rotation.y += velocity.y;
   }
 
+  // Voice reactivity
+  if (voiceActive) {
+    voiceIntensity = Math.min(1, voiceIntensity + 0.1);
+
+    // Spin faster when speaking
+    GROUP.rotation.y += 0.008 * voiceIntensity;
+
+    // Pulse the particle cloud outward
+    const positions = particleGeo.attributes.position.array;
+    for (let i = 0; i < particleCount * 3; i += 3) {
+      const r   = RADIUS + 0.1 + Math.sin(time * 8 + i) * 0.15 * voiceIntensity;
+      const len = Math.sqrt(positions[i]**2 + positions[i+1]**2 + positions[i+2]**2);
+      const scale = r / (len || 1);
+      positions[i]   *= scale;
+      positions[i+1] *= scale;
+      positions[i+2] *= scale;
+    }
+    particleGeo.attributes.position.needsUpdate = true;
+
+    // Brighten filaments
+    GROUP.children.forEach(child => {
+      if (child.material && child.material.opacity !== undefined) {
+        child.material.opacity = Math.min(0.9, child.material.opacity + 0.02 * voiceIntensity);
+      }
+    });
+
+    // Spawn a pulse ring every ~20 frames while speaking
+    if (Math.floor(time * 60) % 20 === 0) {
+      voicePulseRings.push(new PulseRing());
+    }
+  } else {
+    voiceIntensity = Math.max(0, voiceIntensity - 0.05);
+  }
+
+  // Update pulse rings
+  voicePulseRings = voicePulseRings.filter(ring => {
+    const alive = ring.update();
+    if (!alive) ring.dispose();
+    return alive;
+  });
+
   // Pulse the inner glow
-  innerMat.opacity = 0.03 + Math.sin(time * 2) * 0.015;
+  innerMat.opacity = 0.03 + Math.sin(time * 2) * 0.015 + voiceIntensity * 0.04;
 
   // Pulse hotspot rings
   GROUP.children.forEach((child, i) => {
     if (child.geometry && child.geometry.type === 'RingGeometry') {
       child.material.opacity =
-        0.2 + Math.sin(time * 3 + i) * 0.2;
-      const pulse = 1 + Math.sin(time * 4 + i) * 0.1;
+        0.2 + Math.sin(time * 3 + i) * 0.2 + voiceIntensity * 0.3;
+      const pulse = 1 + Math.sin(time * 4 + i) * 0.1 + voiceIntensity * 0.15;
       child.scale.setScalar(pulse);
     }
   });
+
+  checkVoiceState();
 
   renderer.render(scene, camera);
 }

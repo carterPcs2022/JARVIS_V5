@@ -711,9 +711,35 @@ function toggleMute() {
   btn.classList.toggle('muted', voiceMuted);
 }
 
+// Voice-reactive visuals (arc reactor logo + intelligence_map.html's
+// globe, which is a separate page and can't see this page's JS state)
+// are driven from these real Audio element events — not from the server
+// at TTS-generation time, since the server has no way to know when the
+// browser actually starts/stops playback.
+function _wireVoiceReactivity(audio) {
+  const notify = (path) => fetch(`${API}${path}`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+  audio.addEventListener('play', () => {
+    if (window.onJarvisSpeak) window.onJarvisSpeak();
+    notify('/hud/voice_start');
+  });
+  audio.addEventListener('ended', () => {
+    if (window.onJarvisDone) window.onJarvisDone();
+    notify('/hud/voice_end');
+  });
+  audio.addEventListener('pause', () => {
+    if (window.onJarvisDone) window.onJarvisDone();
+    notify('/hud/voice_end');
+  });
+  audio.addEventListener('error', () => {
+    if (window.onJarvisDone) window.onJarvisDone();
+    notify('/hud/voice_end');
+  });
+}
+
 function playAudioFile(filename) {
   if (voiceMuted || !filename) return;
   const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+  _wireVoiceReactivity(audio);
   audio.play().catch(() => {});
 }
 
@@ -728,6 +754,7 @@ function playLatestVoiceFallback() {
   lastVoicePlay = now;
   setTimeout(() => {
     const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
+    _wireVoiceReactivity(audio);
     audio.play().catch(() => {});
   }, 800);
 }
@@ -925,59 +952,86 @@ inputEl.focus();
 
 console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
 
-// Mini arc reactor for logo
+// Mini arc reactor for logo — voice-reactive: surges when JARVIS speaks.
+// window.onJarvisSpeak/onJarvisDone are called from playAudioFile()'s
+// and playLatestVoiceFallback()'s real Audio play/ended/pause listeners
+// above, so this stays in sync with actual playback, not a guess.
 (function() {
   const c   = document.getElementById('arc-mini');
   if (!c) return;
   const ctx = c.getContext('2d');
   const W = 38, H = 38, CX = 19, CY = 19;
   let t = 0;
+  let speaking = false;
+  let speakIntensity = 0;
+
+  window.onJarvisSpeak = function() {
+    speaking = true;
+    speakIntensity = 0;
+  };
+  window.onJarvisDone = function() {
+    speaking = false;
+  };
 
   function drawMini() {
     ctx.clearRect(0, 0, W, H);
-    const glow = 0.5 + Math.sin(t * 2) * 0.3;
 
-    // Outer ring
+    if (speaking) {
+      speakIntensity = Math.min(1, speakIntensity + 0.08);
+    } else {
+      speakIntensity = Math.max(0, speakIntensity - 0.04);
+    }
+
+    const baseGlow = 0.5 + Math.sin(t * 2) * 0.3;
+    const glow     = baseGlow + speakIntensity * 0.5;
+    const speed    = 1 + speakIntensity * 4;
+
+    // Outer ring — pulses when speaking
     ctx.beginPath();
     ctx.arc(CX, CY, 17, 0, Math.PI * 2);
     ctx.strokeStyle = `rgba(255,140,0,${glow * 0.8})`;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth   = speaking ? 2.5 : 1.5;
+    ctx.shadowColor = '#ff8c00';
+    ctx.shadowBlur  = speaking ? 8 * speakIntensity : 0;
     ctx.stroke();
+    ctx.shadowBlur  = 0;
 
-    // Rotating segments
+    // Rotating segments — faster when speaking
     ctx.save();
     ctx.translate(CX, CY);
-    ctx.rotate(t * 0.5);
+    ctx.rotate(t * 0.5 * speed);
     for (let i = 0; i < 6; i++) {
       const a1 = (i / 6) * Math.PI * 2;
-      const a2 = a1 + Math.PI / 6 * 0.7;
+      const a2 = a1 + Math.PI / 6 * (0.7 + speakIntensity * 0.3);
       ctx.beginPath();
       ctx.arc(0, 0, 13, a1, a2);
       ctx.strokeStyle = `rgba(255,160,0,${glow * 0.7})`;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth   = 2.5 + speakIntensity * 2;
       ctx.stroke();
     }
     ctx.restore();
 
-    // Counter-rotate
+    // Counter-rotate — faster when speaking
     ctx.save();
     ctx.translate(CX, CY);
-    ctx.rotate(-t * 0.8);
+    ctx.rotate(-t * 0.8 * speed);
     for (let i = 0; i < 4; i++) {
       const a1 = (i / 4) * Math.PI * 2;
-      const a2 = a1 + Math.PI / 4 * 0.6;
+      const a2 = a1 + Math.PI / 4 * (0.6 + speakIntensity * 0.4);
       ctx.beginPath();
       ctx.arc(0, 0, 9, a1, a2);
       ctx.strokeStyle = `rgba(255,100,0,${glow * 0.6})`;
-      ctx.lineWidth = 2;
+      ctx.lineWidth   = 2 + speakIntensity * 1.5;
       ctx.stroke();
     }
     ctx.restore();
 
-    // Triangle core
+    // Triangle core — expands when speaking
     ctx.save();
     ctx.translate(CX, CY);
-    ctx.rotate(t * 0.1);
+    ctx.rotate(t * 0.1 * speed);
+    const triScale = 1 + speakIntensity * 0.3;
+    ctx.scale(triScale, triScale);
     ctx.beginPath();
     for (let i = 0; i < 3; i++) {
       const angle = (i/3)*Math.PI*2 - Math.PI/6;
@@ -988,18 +1042,32 @@ console.log('JARVIS DESKTOP HUD ONLINE — ALL SYSTEMS NOMINAL');
     }
     ctx.closePath();
     ctx.strokeStyle = `rgba(255,200,100,${glow*0.9})`;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth   = 1.5 + speakIntensity;
+    ctx.shadowColor = '#ffaa00';
+    ctx.shadowBlur  = speakIntensity * 6;
     ctx.stroke();
+    ctx.shadowBlur  = 0;
     ctx.restore();
 
-    // Center glow
-    const cg = ctx.createRadialGradient(CX,CY,0,CX,CY,5);
+    // Center glow — blazes when speaking
+    const coreSize = 5 + speakIntensity * 4;
+    const cg = ctx.createRadialGradient(CX,CY,0,CX,CY,coreSize);
     cg.addColorStop(0, `rgba(255,240,180,${glow})`);
+    cg.addColorStop(0.5, `rgba(255,160,50,${glow * 0.6})`);
     cg.addColorStop(1, 'rgba(255,140,0,0)');
     ctx.beginPath();
-    ctx.arc(CX, CY, 5, 0, Math.PI*2);
+    ctx.arc(CX, CY, coreSize, 0, Math.PI*2);
     ctx.fillStyle = cg;
     ctx.fill();
+
+    // Pulse rings when speaking
+    if (speaking && Math.sin(t * 8) > 0.7) {
+      ctx.beginPath();
+      ctx.arc(CX, CY, 17 + speakIntensity * 4, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(255,140,0,${speakIntensity * 0.3})`;
+      ctx.lineWidth   = 1;
+      ctx.stroke();
+    }
 
     t += 0.015;
     requestAnimationFrame(drawMini);

@@ -243,6 +243,43 @@ async def arc_reactor():
     return FileResponse(HUD_DIR / "arc_reactor.html", headers=_NO_CACHE_HEADERS)
 
 
+# ── Voice-reactive visuals ───────────────────────────────────────────────────
+# core/state.py already has a "voice_active" field (declared, never toggled) —
+# reused here instead of a fresh global dict, since it's already the
+# established thread-safe state singleton every other module uses. This
+# process runs a single uvicorn worker (see Procfile — no --workers flag),
+# so in-memory state is safe here without needing cross-process sync.
+#
+# Toggled from the browser's real Audio element play/ended/pause events
+# (hud_mobile/desktop.html), not from services/voice.py at TTS-generation
+# time — generation happens on the server before the client ever starts
+# playback, so a server-side hook there would have no idea of actual
+# playback timing. The browser is the only thing that knows when audio is
+# really playing.
+
+@app.get("/hud/voice_state")
+async def voice_state():
+    """Is JARVIS currently speaking? Polled by hud_mobile/intelligence_map.html,
+    which is a separate page/window and so can't just read desktop.html's
+    in-page JS state directly."""
+    from core.state import state
+    return {"speaking": state.get("voice_active", False)}
+
+
+@app.post("/hud/voice_start", dependencies=[Depends(verify_token)])
+async def voice_start_endpoint():
+    from core.state import state
+    state.set("voice_active", True)
+    return {"ok": True}
+
+
+@app.post("/hud/voice_end", dependencies=[Depends(verify_token)])
+async def voice_end_endpoint():
+    from core.state import state
+    state.set("voice_active", False)
+    return {"ok": True}
+
+
 @app.get("/hud/sw.js")
 async def hud_service_worker():
     """Served at exactly the path app.js registers (navigator.serviceWorker.
