@@ -31,6 +31,25 @@ CLIP_TRIGGERS = [
     "bookmark that",
 ]
 
+# (method name on services.mac_bridge.mac_bridge, args) — dispatched via
+# getattr() rather than lambdas capturing mac_bridge, so the module only
+# needs importing once at call time, matching this file's existing
+# local-import convention instead of a module-level import.
+MAC_APP_TRIGGERS = {
+    "open spotify":   ("open_app", ("Spotify",)),
+    "open chrome":    ("open_app", ("Google Chrome",)),
+    "open safari":    ("open_app", ("Safari",)),
+    "open terminal":  ("open_app", ("Terminal",)),
+    "open finder":    ("open_app", ("Finder",)),
+    "open notes":     ("open_app", ("Notes",)),
+    "open calendar":  ("open_app", ("Calendar",)),
+    "open mail":      ("open_app", ("Mail",)),
+    "do not disturb": ("do_not_disturb", (True,)),
+    "focus mode":     ("do_not_disturb", (True,)),
+    "mute mac":       ("set_volume", (0,)),
+    "mac volume":     ("set_volume", (50,)),
+}
+
 MODEL_UPDATE_TRIGGERS = [
     "check for new models",
     "update your models",
@@ -696,6 +715,28 @@ class Brain:
                 return Result(response=response, ok=True, provider="clip")
             except Exception:
                 pass
+
+        # ── Mac Bridge app/system triggers ─────────────────────────────────────
+        for trigger, (method_name, args) in MAC_APP_TRIGGERS.items():
+            if trigger in user_input.lower():
+                try:
+                    from services.mac_bridge import mac_bridge
+                    from services.voice import speak
+                    from core.memory import save_turn
+
+                    bridge_result = getattr(mac_bridge, method_name)(*args)
+                    label = trigger.replace("open", "").strip().title() or trigger.title()
+                    if isinstance(bridge_result, dict) and bridge_result.get("error"):
+                        # Bridge unconfigured/unreachable — don't claim success
+                        # for something that didn't happen.
+                        response = f"Can't reach the Mac bridge right now, sir: {bridge_result['error']}"
+                    else:
+                        response = f"Done, sir. {label} activated."
+                    speak(response)
+                    save_turn(user_input, response)
+                    return Result(response=response, ok=True, provider="mac_bridge")
+                except Exception:
+                    break
 
         # ── Model self-update — instant, no LLM needed for the check itself ───
         if any(t in user_input.lower() for t in MODEL_UPDATE_TRIGGERS):
