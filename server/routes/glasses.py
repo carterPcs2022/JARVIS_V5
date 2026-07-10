@@ -186,6 +186,68 @@ async def glasses_status():
     }
 
 
+# ── Computer vision — analyze a photo taken through the glasses ─────────────────
+
+async def _save_upload(image: UploadFile) -> str:
+    suffix = ".jpg"
+    name = (image.filename or "").lower()
+    if "png" in name:
+        suffix = ".png"
+    elif "webp" in name:
+        suffix = ".webp"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await image.read())
+        return tmp.name
+
+
+@router.post("/analyze", dependencies=[Depends(verify_token)])
+async def glasses_analyze(image: UploadFile = File(...), question: str = ""):
+    """Analyze a photo captured through the glasses — describes what's
+    visible, flags anything important, and speaks a one-sentence summary
+    through the glasses speaker."""
+    from services.glasses_cv import glasses_cv
+
+    path = await _save_upload(image)
+    try:
+        return glasses_cv.analyze_frame(path, question)
+    finally:
+        os.unlink(path)
+
+
+@router.post("/threat", dependencies=[Depends(verify_token)])
+async def glasses_threat(image: UploadFile = File(...)):
+    """Quick threat assessment of a photo captured through the glasses."""
+    from services.glasses_cv import glasses_cv
+
+    path = await _save_upload(image)
+    try:
+        return glasses_cv.threat_scan(path)
+    finally:
+        os.unlink(path)
+
+
+@router.post("/identify", dependencies=[Depends(verify_token)])
+async def glasses_identify(image: UploadFile = File(...)):
+    """Describe a person visible in a glasses photo — never attempts
+    name identification, matching services/vision.py's ethical stance."""
+    from services.glasses_cv import glasses_cv
+
+    path = await _save_upload(image)
+    try:
+        return glasses_cv.identify_person(path)
+    finally:
+        os.unlink(path)
+
+
+@router.get("/hud_text", dependencies=[Depends(verify_token)])
+async def glasses_hud_text():
+    """Ultra-brief status string formatted for the glasses' own tiny
+    in-lens display — distinct from /status, which is a pipeline health
+    check (JSON diagnostics), not a display string."""
+    from services.glasses_hud import glasses_hud
+    return {"text": glasses_hud.get_status_text()}
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def _transcribe(audio_path: str) -> str:

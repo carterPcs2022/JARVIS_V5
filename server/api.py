@@ -238,6 +238,16 @@ async def intel_map():
     return FileResponse(HUD_DIR / "intelligence_map.html", headers=_NO_CACHE_HEADERS)
 
 
+@app.get("/hud/helmet")
+async def helmet_hud():
+    return FileResponse(HUD_DIR / "helmet.html", headers=_NO_CACHE_HEADERS)
+
+
+@app.get("/hud/helmet_mobile")
+async def helmet_mobile():
+    return FileResponse(HUD_DIR / "helmet_mobile.html", headers=_NO_CACHE_HEADERS)
+
+
 @app.get("/hud/reactor")
 async def arc_reactor():
     return FileResponse(HUD_DIR / "arc_reactor.html", headers=_NO_CACHE_HEADERS)

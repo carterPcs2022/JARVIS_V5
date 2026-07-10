@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0d0600">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>J.A.R.V.I.S — Helmet HUD</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --accent:  #ff8c00;
+  --accent2: #ffaa33;
+  --gold:    #ffd700;
+  --warn:    #ff6600;
+  --danger:  #ff3b30;
+  --green:   #34c759;
+}
+
+body {
+  background: #000;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── CAMERA FEED ── */
+#camera {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: 0; opacity: 0.85; display: none;
+}
+#camera-placeholder {
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at center, #1a0f00 0%, #0d0600 100%);
+  z-index: 0;
+}
+
+/* ── HELMET MASK OVERLAY ── */
+.helmet-overlay { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+
+.helmet-mask {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 100% 30% at 50% -5%, rgba(0,0,0,0.95) 0%, transparent 100%),
+    radial-gradient(ellipse 100% 25% at 50% 105%, rgba(0,0,0,0.95) 0%, transparent 100%),
+    radial-gradient(ellipse 25% 100% at -5% 50%, rgba(0,0,0,0.95) 0%, transparent 100%),
+    radial-gradient(ellipse 25% 100% at 105% 50%, rgba(0,0,0,0.95) 0%, transparent 100%);
+}
+
+.eye-left, .eye-right {
+  position: absolute; top: 28%; width: 22%; height: 14%;
+  border-radius: 40% 60% 60% 40% / 50% 50% 50% 50%;
+}
+.eye-left  { left: 15%; }
+.eye-right { right: 15%; }
+
+.eye-glow {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(ellipse at center, rgba(255,140,0,0.15) 0%, transparent 70%);
+  box-shadow: inset 0 0 20px rgba(255,140,0,0.1), 0 0 30px rgba(255,140,0,0.08);
+  animation: eye-pulse 3s ease-in-out infinite;
+}
+@keyframes eye-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+.scan-lines {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,140,0,0.015) 3px, rgba(255,140,0,0.015) 4px);
+}
+
+.scan-sweep {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255,140,0,0.3), transparent);
+  animation: sweep 4s linear infinite;
+  opacity: 0.4;
+}
+@keyframes sweep { 0% { top: 0%; } 100% { top: 100%; } }
+
+/* ── TARGETING RETICLE ── */
+.reticle-container {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 160px; height: 160px;
+}
+.reticle-outer {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(255,140,0,0.3);
+  animation: reticle-rotate 8s linear infinite;
+}
+.reticle-outer::before, .reticle-outer::after {
+  content: ''; position: absolute; top: -2px; width: 12px; height: 12px;
+  border-top: 2px solid rgba(255,140,0,0.8);
+}
+.reticle-outer::before { left: -2px;  border-left: 2px solid rgba(255,140,0,0.8); }
+.reticle-outer::after  { right: -2px; border-right: 2px solid rgba(255,140,0,0.8); }
+@keyframes reticle-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.reticle-inner {
+  position: absolute; inset: 20px; border-radius: 50%;
+  border: 1px solid rgba(255,140,0,0.5);
+  animation: reticle-rotate 4s linear infinite reverse;
+}
+
+.reticle-crosshair-h, .reticle-crosshair-v { position: absolute; background: rgba(255,140,0,0.4); }
+.reticle-crosshair-h { top: 50%; left: 10%; width: 80%; height: 1px; transform: translateY(-50%); }
+.reticle-crosshair-v { left: 50%; top: 10%; height: 80%; width: 1px; transform: translateX(-50%); }
+
+.reticle-center {
+  position: absolute; top: 50%; left: 50%; width: 8px; height: 8px;
+  background: rgba(255,140,0,0.8); border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px rgba(255,140,0,0.6);
+  animation: center-pulse 1s ease-in-out infinite;
+}
+@keyframes center-pulse {
+  0%, 100% { transform: translate(-50%,-50%) scale(1); opacity: 0.8; }
+  50%       { transform: translate(-50%,-50%) scale(1.4); opacity: 1; }
+}
+
+.target-readout {
+  position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 2px; color: rgba(255,140,0,0.7);
+  white-space: nowrap; animation: blink 2s step-end infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── CORNER DATA PANELS ── */
+.data-panel { position: absolute; font-size: 10px; letter-spacing: 1px; line-height: 1.8; }
+.panel-tl { top: 8%; left: 4%; color: rgba(255,140,0,0.8); }
+.panel-tr { top: 8%; right: 4%; text-align: right; color: rgba(255,140,0,0.8); }
+.panel-bl { bottom: 12%; left: 4%; color: rgba(255,170,51,0.7); }
+.panel-br { bottom: 12%; right: 4%; text-align: right; color: rgba(255,170,51,0.7); }
+
+.panel-label { font-size: 8px; letter-spacing: 3px; color: rgba(255,140,0,0.5); margin-bottom: 4px; text-transform: uppercase; }
+.panel-value { color: rgba(255,140,0,0.9); font-size: 11px; }
+.panel-value.green  { color: rgba(52,199,89,0.9); }
+.panel-value.warn   { color: rgba(255,102,0,0.9); }
+.panel-value.danger { color: rgba(255,59,48,0.9); }
+
+/* ── STATUS BAR ── */
+.status-bar {
+  position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 20px; align-items: center;
+  font-size: 9px; letter-spacing: 2px; color: rgba(255,140,0,0.6);
+}
+.status-indicator { display: flex; align-items: center; gap: 5px; }
+.s-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(52,199,89,0.8); box-shadow: 0 0 5px rgba(52,199,89,0.5);
+  animation: status-pulse 2s ease-in-out infinite;
+}
+.s-dot.warn   { background: rgba(255,102,0,0.8);  box-shadow: 0 0 5px rgba(255,102,0,0.5); }
+.s-dot.danger { background: rgba(255,59,48,0.8);  box-shadow: 0 0 5px rgba(255,59,48,0.5); }
+@keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── ARC REACTOR POWER BAR ── */
+.power-bar { position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); width: 200px; text-align: center; }
+.power-label { font-size: 8px; letter-spacing: 3px; color: rgba(255,140,0,0.4); margin-bottom: 4px; }
+.power-track { height: 2px; background: rgba(255,140,0,0.1); border-radius: 1px; overflow: hidden; }
+.power-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(204,85,0,0.8), rgba(255,140,0,0.8), rgba(255,215,0,0.8));
+  box-shadow: 0 0 6px rgba(255,140,0,0.5);
+  transition: width 2s ease;
+}
+.power-pct { font-size: 9px; color: rgba(255,140,0,0.6); letter-spacing: 2px; margin-top: 3px; }
+
+/* ── JARVIS RESPONSE ── */
+.jarvis-response {
+  position: absolute; top: 60%; left: 50%; transform: translateX(-50%);
+  width: 60%; max-width: 500px; text-align: center;
+  font-size: 13px; color: rgba(255,140,0,0.85); letter-spacing: 1px; line-height: 1.7;
+  text-shadow: 0 0 20px rgba(255,140,0,0.3);
+  opacity: 0; transition: opacity 0.5s; pointer-events: none;
+}
+.jarvis-response.visible { opacity: 1; }
+
+/* ── VOICE INPUT INDICATOR ── */
+.voice-active {
+  position: absolute; bottom: 18%; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; letter-spacing: 3px; color: rgba(255,170,51,0.8);
+  opacity: 0; transition: opacity 0.3s;
+}
+.voice-active.visible { opacity: 1; }
+.voice-wave { display: flex; gap: 3px; align-items: center; }
+.wave-bar { width: 3px; background: rgba(255,170,51,0.8); border-radius: 2px; animation: wave 0.8s ease-in-out infinite; }
+.wave-bar:nth-child(1) { height: 8px;  animation-delay: 0s; }
+.wave-bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { height: 20px; animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { height: 8px;  animation-delay: 0.4s; }
+@keyframes wave { 0%, 100% { transform: scaleY(0.5); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
+
+/* ── ALERT FLASH ── */
+.alert-flash { position: absolute; inset: 0; pointer-events: none; border: 3px solid transparent; transition: border-color 0.3s; z-index: 20; }
+.alert-flash.danger {
+  border-color: rgba(255,59,48,0.6);
+  box-shadow: inset 0 0 40px rgba(255,59,48,0.15);
+  animation: danger-flash 0.5s ease-in-out 3;
+}
+@keyframes danger-flash { 0%, 100% { border-color: rgba(255,59,48,0.6); } 50% { border-color: rgba(255,59,48,0.1); } }
+
+/* ── NAV CONTROLS ── */
+.nav-bar { position: absolute; top: 2%; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 100; }
+.nav-btn {
+  padding: 4px 12px; border: 1px solid rgba(255,140,0,0.3); border-radius: 2px;
+  background: rgba(0,0,0,0.5); color: rgba(255,140,0,0.7);
+  font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer;
+  backdrop-filter: blur(4px); pointer-events: all;
+  text-decoration: none; display: flex; align-items: center;
+}
+.nav-btn:hover { border-color: rgba(255,140,0,0.7); color: rgba(255,140,0,1); background: rgba(255,140,0,0.1); }
+.nav-btn.active { border-color: var(--accent2); color: var(--accent2); background: rgba(255,140,0,0.15); }
+
+/* ── MOBILE OVERRIDES ── */
+@media (max-width: 768px) {
+  .data-panel { font-size: 9px; }
+  .panel-tl { top: 12%; left: 2%; }
+  .panel-tr { top: 12%; right: 2%; }
+  .panel-bl { bottom: 20%; left: 2%; }
+  .panel-br { bottom: 20%; right: 2%; }
+
+  .reticle-container { width: 120px; height: 120px; }
+
+  .power-bar { width: 160px; bottom: 10%; }
+
+  .jarvis-response { width: 80%; font-size: 12px; top: 58%; }
+
+  .nav-bar { top: 1%; gap: 6px; }
+
+  .nav-btn { font-size: 8px; padding: 3px 8px; min-height: 36px; }
+}
+
+/* iPhone notch safe areas */
+@supports (padding: max(0px)) {
+  .nav-bar { top: max(2%, env(safe-area-inset-top)); }
+  .power-bar { bottom: max(10%, env(safe-area-inset-bottom)); }
+}
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay muted playsinline></video>
+<div id="camera-placeholder"></div>
+<canvas id="capture-canvas" style="display:none"></canvas>
+
+<div class="alert-flash" id="alert-flash"></div>
+
+<div class="nav-bar">
+  <a href="/hud" class="nav-btn">← HUD</a>
+  <button class="nav-btn" id="camera-btn" onclick="toggleCamera()">📷</button>
+  <button class="nav-btn" id="voice-btn" onclick="startVoice()">🎤</button>
+  <button class="nav-btn" onclick="scanThreat()">🔍</button>
+  <button class="nav-btn" onclick="toggleFullscreen()">⛶</button>
+</div>
+
+<div class="helmet-overlay">
+  <div class="helmet-mask"></div>
+  <div class="scan-lines"></div>
+  <div class="scan-sweep"></div>
+
+  <div class="eye-left"><div class="eye-glow"></div></div>
+  <div class="eye-right"><div class="eye-glow"></div></div>
+
+  <div class="reticle-container">
+    <div class="reticle-outer"></div>
+    <div class="reticle-inner"></div>
+    <div class="reticle-crosshair-h"></div>
+    <div class="reticle-crosshair-v"></div>
+    <div class="reticle-center"></div>
+    <div class="target-readout" id="target-readout">TAP TO SPEAK</div>
+  </div>
+
+  <div class="data-panel panel-tl">
+    <div class="panel-label">SUIT DIAGNOSTICS</div>
+    <div>REPULSORS  <span class="panel-value" id="h-cpu">—%</span></div>
+    <div>STRUCTURAL <span class="panel-value" id="h-ram">—%</span></div>
+    <div>POWER      <span class="panel-value green" id="h-power">—%</span></div>
+    <div>UPTIME     <span class="panel-value" id="h-uptime">—</span></div>
+  </div>
+
+  <div class="data-panel panel-tr">
+    <div class="panel-label">SENTINEL</div>
+    <div>THREATS  <span class="panel-value danger" id="h-threats">—</span></div>
+    <div>NETWORK  <span class="panel-value green">SECURE</span></div>
+    <div>MARK     <span class="panel-value" id="h-mark">—</span></div>
+  </div>
+
+  <div class="data-panel panel-bl">
+    <div class="panel-label">J.A.R.V.I.S</div>
+    <div>STATUS  <span class="panel-value green" id="h-status">—</span></div>
+    <div>MODEL   <span class="panel-value" id="h-model">—</span></div>
+    <div>FRIDAY  <span class="panel-value" id="h-friday">—</span></div>
+  </div>
+
+  <div class="data-panel panel-br">
+    <div class="panel-label">TEMPORAL</div>
+    <div><span class="panel-value" id="h-time">--:--:--</span></div>
+    <div><span class="panel-value" id="h-date">---</span></div>
+  </div>
+
+  <div class="power-bar">
+    <div class="power-label">ARC REACTOR OUTPUT</div>
+    <div class="power-track"><div class="power-fill" id="power-fill" style="width:0%"></div></div>
+    <div class="power-pct" id="power-pct">—%</div>
+  </div>
+
+  <div class="jarvis-response" id="jarvis-response"></div>
+
+  <div class="voice-active" id="voice-active">
+    <div class="voice-wave">
+      <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+      <div class="wave-bar"></div><div class="wave-bar"></div>
+    </div>
+    JARVIS LISTENING
+  </div>
+
+  <div class="status-bar">
+    <div class="status-indicator"><div class="s-dot" id="status-dot"></div><span id="status-txt">CONNECTING</span></div>
+    <span>|</span><span id="mark-txt">MARK —</span>
+  </div>
+</div>
+
+<script>
+const API   = `${location.protocol}//${location.hostname}${location.protocol==='https:'?'':':8000'}`;
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsPort  = location.protocol === 'https:' ? '' : ':8000';
+
+function getToken() { return localStorage.getItem('jarvis_token') || ''; }
+function ensureToken() {
+  const urlParams = new URLSearchParams(location.search);
+  const urlToken = urlParams.get('token');
+  if (urlToken) {
+    localStorage.setItem('jarvis_token', urlToken);
+    window.history.replaceState({}, '', location.pathname);
+  }
+  if (!getToken()) {
+    const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
+    if (t) localStorage.setItem('jarvis_token', t);
+  }
+}
+ensureToken();
+
+let cameraOn = false, ws = null, responseTimer = null, cameraStream = null;
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  document.getElementById('h-time').textContent = now.toLocaleTimeString('en-US', {hour12:false});
+  document.getElementById('h-date').textContent  = now.toLocaleDateString('en-US', {weekday:'short',month:'short',day:'numeric'});
+}
+setInterval(tick, 1000); tick();
+
+// ── Camera — rear-facing by default on a phone ("point iPhone camera at
+// anything" is the point of this version, unlike the Mac version's
+// front-facing webcam self-view) ───────────────────────────────────────────
+async function toggleCamera() {
+  const video = document.getElementById('camera');
+  const placeholder = document.getElementById('camera-placeholder');
+  const btn = document.getElementById('camera-btn');
+
+  if (!cameraOn) {
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 1280, height: 720 } });
+      video.srcObject = cameraStream;
+      video.style.display = 'block';
+      placeholder.style.display = 'none';
+      cameraOn = true;
+      btn.classList.add('active');
+    } catch (e) {
+      showResponse('Camera access denied.');
+    }
+  } else {
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+    video.style.display = 'none';
+    placeholder.style.display = 'block';
+    cameraOn = false;
+    btn.classList.remove('active');
+  }
+}
+
+function captureFrame() {
+  const video = document.getElementById('camera');
+  if (!cameraOn || !video.videoWidth) return null;
+  const canvas = document.getElementById('capture-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+}
+
+async function scanThreat() {
+  if (!cameraOn) { showResponse('Enable the camera first.'); return; }
+  showResponse('Scanning...');
+  const blob = await captureFrame();
+  if (!blob) { showResponse('Could not capture frame.'); return; }
+
+  const form = new FormData();
+  form.append('image', blob, 'frame.jpg');
+  try {
+    const r = await fetch(`${API}/stark/glasses/threat`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    showResponse(data.assessment || data.error || 'Scan inconclusive.');
+    if (data.threat_level === 'danger') {
+      const flash = document.getElementById('alert-flash');
+      flash.classList.add('danger');
+      setTimeout(() => flash.classList.remove('danger'), 2000);
+    }
+  } catch (e) {
+    showResponse('Threat scan failed.');
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWs() {
+  ws = new WebSocket(`${wsProto}//${location.hostname}${wsPort}/ws/chat?token=${encodeURIComponent(getToken())}`);
+  ws.onopen  = () => setStatus('online');
+  ws.onclose = () => { setStatus('offline'); setTimeout(connectWs, 3000); };
+  ws.onerror = () => setStatus('degraded');
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'response' || data.type === 'stream_end') {
+        if (data.response) showResponse(data.response);
+        if (data.model) updateModelBadge(data.model);
+      } else if (data.type === 'audio_ready') {
+        playAudioFile(data.audio_file);
+      }
+    } catch (err) {}
+  };
+}
+
+function showResponse(text) {
+  const el = document.getElementById('jarvis-response');
+  el.textContent = text;
+  el.classList.add('visible');
+  clearTimeout(responseTimer);
+  responseTimer = setTimeout(() => el.classList.remove('visible'), 8000);
+}
+
+function playAudioFile(filename) {
+  if (!filename) return;
+  const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+  audio.play().catch(() => {});
+}
+
+// ── Voice input ───────────────────────────────────────────────────────────────
+let mediaRecorder = null, audioChunks = [], voiceActive = false;
+
+async function startVoice() {
+  if (voiceActive) { stopVoice(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.onstop = sendVoice;
+    mediaRecorder.start();
+    voiceActive = true;
+
+    document.getElementById('voice-active').classList.add('visible');
+    document.getElementById('voice-btn').classList.add('active');
+    document.getElementById('target-readout').textContent = 'VOICE ACTIVE';
+
+    if (navigator.vibrate) navigator.vibrate(20);
+    setTimeout(() => { if (voiceActive) stopVoice(); }, 10000);
+  } catch (e) {
+    showResponse('Microphone access denied.');
+  }
+}
+
+function stopVoice() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  }
+  voiceActive = false;
+  document.getElementById('voice-active').classList.remove('visible');
+  document.getElementById('voice-btn').classList.remove('active');
+  document.getElementById('target-readout').textContent = 'TAP TO SPEAK';
+}
+
+async function sendVoice() {
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  const form = new FormData();
+  form.append('audio', blob, 'voice.webm');
+
+  showResponse('Processing voice input...');
+
+  try {
+    const r = await fetch(`${API}/stark/glasses/listen`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body:    form,
+    });
+    const contentType = r.headers.get('content-type') || '';
+    if (contentType.includes('audio')) {
+      const text = r.headers.get('X-Jarvis-Text') || '(response received)';
+      showResponse(text);
+      const audioBlob = await r.blob();
+      new Audio(URL.createObjectURL(audioBlob)).play().catch(() => {});
+    } else {
+      const data = await r.json();
+      showResponse(data.response || data.error || 'No response.');
+    }
+  } catch (e) {
+    showResponse('Voice processing failed.');
+  }
+}
+
+// Tap anywhere on the overlay (outside the nav bar) to activate voice —
+// the nav mic button still works too, this is just the glanceable/
+// one-handed path while wearing glasses.
+document.body.addEventListener('click', (e) => {
+  if (e.target.closest('.nav-bar')) return;
+  startVoice();
+});
+
+// ── Status poll ───────────────────────────────────────────────────────────────
+function setStatus(s) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-txt');
+  const map = {
+    online:     ['', 'SYSTEMS ONLINE'],
+    offline:    ['danger', 'OFFLINE'],
+    degraded:   ['warn', 'DEGRADED'],
+    connecting: ['warn', 'CONNECTING'],
+  };
+  const [cls, label] = map[s] || map.connecting;
+  dot.className = 's-dot' + (cls ? ' ' + cls : '');
+  txt.textContent = label;
+}
+
+function updateModelBadge(model) {
+  const m = (model || '').toLowerCase();
+  const label = m.includes('fable') ? '⚡ FABLE 5' : (model || '').toUpperCase().slice(0, 20);
+  document.getElementById('h-model').textContent = label || '—';
+}
+
+async function pollStatus() {
+  try {
+    const r = await fetch(`${API}/hud/status`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const d = await r.json();
+
+    document.getElementById('h-cpu').textContent = `${Math.round(d.system.cpu)}%`;
+    document.getElementById('h-ram').textContent = `${Math.round(d.system.ram)}%`;
+
+    const up = d.system.uptime_hours || 0;
+    const h = Math.floor(up), m = Math.round((up - h) * 60);
+    document.getElementById('h-uptime').textContent = h ? `${h}h ${m}m` : `${m}m`;
+
+    const threats = (d.security && d.security.threats_24h) || 0;
+    document.getElementById('h-threats').textContent = threats;
+
+    updateModelBadge(d.model || d.brain.model || '—');
+    document.getElementById('h-friday').textContent = d.friday_online ? 'ONLINE' : 'STANDBY';
+
+    if (d.mark && d.mark.mark) {
+      document.getElementById('h-mark').textContent = d.mark.mark;
+      document.getElementById('mark-txt').textContent = `MARK ${d.mark.mark}`;
+    }
+
+    const power = Math.max(20, Math.round(100 - (d.system.cpu || 0)));
+    document.getElementById('power-fill').style.width = `${power}%`;
+    document.getElementById('power-pct').textContent = `${power}%`;
+    document.getElementById('h-power').textContent = `${power}%`;
+
+    const allProvidersDown = !d.brain.groq && !d.brain.ollama;
+    setStatus(allProvidersDown ? 'degraded' : 'online');
+    document.getElementById('h-status').textContent = allProvidersDown ? 'DEGRADED' : 'ONLINE';
+
+    if (threats > 50) {
+      const flash = document.getElementById('alert-flash');
+      flash.classList.add('danger');
+      setTimeout(() => flash.classList.remove('danger'), 2000);
+    }
+  } catch (e) {
+    setStatus('offline');
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+connectWs();
+pollStatus();
+setInterval(pollStatus, 5000);
+toggleCamera();
+</script>
+</body>
+</html>
