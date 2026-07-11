@@ -293,6 +293,11 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 AVENGERS_PASSPHRASE = os.getenv("AVENGERS_PASSPHRASE", "")
 PEPPER_TOKEN        = os.getenv("PEPPER_TOKEN", "")
 
+# Mayday phrase — spoken/typed to trigger an immediate, no-LLM distress
+# alert (core/brain_v2.py). Checked verbatim, so pick something you
+# wouldn't say in ordinary conversation.
+JARVIS_MAYDAY_PHRASE = os.getenv("JARVIS_MAYDAY_PHRASE", "code red")
+
 # ── Memory ────────────────────────────────────────────────────────────────────
 MEMORY_DIR         = BASE_DIR / "memory"
 SHORT_TERM_FILE    = MEMORY_DIR / "short_term.json"

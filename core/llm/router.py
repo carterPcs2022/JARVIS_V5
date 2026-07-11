@@ -477,7 +477,20 @@ def think(user_input: str, context: str = "",
     messages = [{"role": "system", "content": sys_prompt}]
     if context:
         messages.append({"role": "system", "content": f"Context:\n{context}"})
-    messages.append({"role": "user", "content": user_input})
+
+    user_content = user_input
+    # Dual-process (System 1/2) routing: only kicks in when the caller hasn't
+    # already pinned a tier (agents/tools that pass force_model deliberately
+    # keep their exact behavior) and the query isn't an instant time/date
+    # shortcut (chat() answers those with zero LLM calls regardless of tier,
+    # so classifying them would just be wasted work).
+    if force_model is None and _instant_response(user_input) is None:
+        from core.dual_process import dual_process  # deferred: dual_process imports think() at module load, so a top-level import here would be circular
+        if dual_process.classify(user_input) == "system2":
+            force_model = "opus"
+            user_content = f"[SLOW DELIBERATE THINKING]\nQuestion: {user_input}"
+
+    messages.append({"role": "user", "content": user_content})
     return chat(messages, max_tokens=max_tokens, temperature=temperature if temperature is not None else 0.6,
                use_cache=use_cache, force_model=force_model, query=user_input)["content"]
 
