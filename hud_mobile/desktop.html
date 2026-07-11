@@ -370,6 +370,7 @@ body::before {
       <button class="ctrl-btn" id="btn-cot" onclick="showPanel('cot')">CHAIN OF THOUGHT</button>
       <button class="ctrl-btn" id="btn-reflect" onclick="showPanel('reflect')">REFLECTION</button>
       <button class="ctrl-btn" id="btn-voice" onclick="toggleMic()">VOICE INPUT</button>
+      <button class="ctrl-btn" id="voice-mode-btn" onclick="toggleWakeWord()">VOICE OFF</button>
       <button class="ctrl-btn" style="margin-left:auto" onclick="clearChat()">CLEAR</button>
     </div>
 
@@ -379,9 +380,10 @@ body::before {
 
     <div class="input-area">
       <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
-      <input class="chat-input" id="chat-input" placeholder="Speak, sir." autocomplete="off" />
+      <input class="chat-input" id="chat-input" placeholder="Say 'JARVIS' or type here, sir..." autocomplete="off" />
       <button class="send-btn" onclick="sendMessage()">SEND</button>
     </div>
+    <div class="voice-hint" id="voice-hint" style="display:none;font-size:9px;letter-spacing:.5px;color:var(--muted);padding:4px 2px 0;">Hands-free listening — say "JARVIS" to give a command.</div>
   </div>
 
   <!-- RIGHT COLUMN -->
@@ -654,6 +656,219 @@ function toggleMic() {
   recognition.start();
 }
 
+// ── Wake-word / hands-free voice mode ─────────────────────────────────────────
+// Separate from the push-to-talk mic above: this keeps a lightweight
+// SpeechRecognition instance running continuously just to listen for the
+// wake word "jarvis", then records the actual command with MediaRecorder
+// and sends the audio to the server for real transcription (Groq/Whisper)
+// instead of relying on the browser's own STT for the command itself —
+// gives consistent transcription quality across browsers/OSes.
+const voiceModeBtn = document.getElementById('voice-mode-btn');
+const voiceHintEl  = document.getElementById('voice-hint');
+let wakeRecognition = null;
+let voiceModeOn = false;
+let mediaRecorder = null;
+let commandChunks = [];
+let silenceTimer = null;
+const WAKE_WORD = 'jarvis';
+const SILENCE_MS = 4000;
+const FOLLOWUP_MS = 6000;
+
+// Floating "listening" pill — distinct from the addMessage() system log
+// lines already used elsewhere in this flow, since a persistent visual
+// state (listening vs. "did you mean me?") reads faster at a glance than
+// scanning the chat log while you're mid-sentence.
+function showListeningIndicator(active, symbol) {
+  let el = document.getElementById('voice-listening-indicator');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'voice-listening-indicator';
+    el.style.cssText = `
+      position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+      padding: 8px 20px; border-radius: 20px; font-size: 11px;
+      letter-spacing: 2px; z-index: 100; display: none;
+      backdrop-filter: blur(10px); transition: all 0.2s;
+    `;
+    document.body.appendChild(el);
+  }
+  if (!active) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  if (symbol === '?') {
+    el.style.background = 'rgba(255,204,0,0.15)';
+    el.style.border = '1px solid rgba(255,204,0,0.4)';
+    el.style.color = '#ffcc00';
+    el.textContent = '? DID YOU MEAN ME?';
+  } else {
+    el.style.background = 'rgba(255,140,0,0.15)';
+    el.style.border = '1px solid rgba(255,140,0,0.4)';
+    el.style.color = '#ff8c00';
+    el.textContent = '● LISTENING...';
+  }
+}
+
+// Local browser TTS for an instant ack on ambiguous wake-word detections —
+// no server/API round trip for a reflexive "Sir?", so it's not gated by
+// Groq/network latency the way the real response is.
+function speakQuick(text) {
+  try {
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.1; u.volume = 0.8;
+    window.speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+function toggleWakeWord() {
+  if (voiceModeOn) {
+    stopWakeWord();
+  } else {
+    startWakeWord();
+  }
+}
+
+function startWakeWord() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    addMessage('system', 'Wake-word mode not supported in this browser.');
+    return;
+  }
+  voiceModeOn = true;
+  voiceModeBtn.textContent = 'VOICE ON';
+  voiceModeBtn.classList.add('active');
+  voiceHintEl.style.display = '';
+  addMessage('system', 'Hands-free mode active — say "JARVIS" to give a command.');
+  _startWakeListener();
+}
+
+function stopWakeWord() {
+  voiceModeOn = false;
+  voiceModeBtn.textContent = 'VOICE OFF';
+  voiceModeBtn.classList.remove('active');
+  voiceHintEl.style.display = 'none';
+  if (wakeRecognition) { try { wakeRecognition.stop(); } catch (e) {} }
+  _stopCommandCapture(false);
+}
+
+function _startWakeListener() {
+  if (!voiceModeOn) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  wakeRecognition = new SR();
+  wakeRecognition.continuous = true;
+  wakeRecognition.interimResults = true;
+  wakeRecognition.onresult = (e) => {
+    const last = e.results[e.results.length - 1];
+    const transcript = last[0].transcript.toLowerCase();
+    // last[0].confidence is unreliable/0 on some browsers (notably interim
+    // results in Chrome often report 0) — when that happens this just
+    // always takes the "high confidence" branch, which is the same
+    // behavior as before this change, not a regression.
+    const confidence = last[0].confidence || 0;
+    if (!transcript.includes(WAKE_WORD)) return;
+
+    if (confidence > 0 && confidence < 0.35) return; // background noise — ignored entirely
+
+    try { wakeRecognition.stop(); } catch (err) {}
+    if (confidence > 0 && confidence < 0.65) {
+      showListeningIndicator(true, '?');
+      speakQuick('Sir?');
+    } else {
+      showListeningIndicator(true, '●');
+    }
+    _beginCommandCapture(SILENCE_MS);
+  };
+  // Browsers auto-end continuous recognition after a while — just restart
+  // it while voice mode is still on, so listening stays "continuous" in effect.
+  wakeRecognition.onend = () => {
+    if (voiceModeOn && !mediaRecorder) _startWakeListener();
+  };
+  wakeRecognition.onerror = () => { /* mic glitches shouldn't kill hands-free mode */ };
+  try { wakeRecognition.start(); } catch (e) {}
+}
+
+async function _beginCommandCapture(timeoutMs) {
+  if (!voiceModeOn || mediaRecorder) return;
+  // Interrupt: a wake word heard mid-response means "stop talking and
+  // listen to me now" — same as a real conversation. Harmless to call
+  // when nothing is playing.
+  if (currentAudio && !currentAudio.paused) {
+    currentAudio.pause();
+    currentAudio.currentTime = 0;
+  }
+  try { window.speechSynthesis.cancel(); } catch (e) {}
+
+  addMessage('system', 'Listening for your command...');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    commandChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) commandChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      showListeningIndicator(false);
+      _sendCommandAudio();
+    };
+    mediaRecorder.start();
+    _resetSilenceTimer(timeoutMs || SILENCE_MS);
+  } catch (e) {
+    addMessage('system', 'Microphone access denied — cannot capture command.');
+    showListeningIndicator(false);
+    mediaRecorder = null;
+    if (voiceModeOn) _startWakeListener();
+  }
+}
+
+function _resetSilenceTimer(timeoutMs) {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  // No true VAD here — a fixed timeout is a simple, good-enough stand-in for
+  // "the user finished the command" without pulling in an audio-level analyzer.
+  silenceTimer = setTimeout(() => _stopCommandCapture(true), timeoutMs || SILENCE_MS);
+}
+
+function _stopCommandCapture(shouldSend) {
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    if (!shouldSend) mediaRecorder.onstop = () => mediaRecorder.stream?.getTracks().forEach((t) => t.stop());
+    mediaRecorder.stop();
+  }
+  mediaRecorder = null;
+}
+
+async function _sendCommandAudio() {
+  const blob = new Blob(commandChunks, { type: 'audio/webm' });
+  commandChunks = [];
+  if (blob.size < 500) {
+    if (voiceModeOn) _startWakeListener();
+    return;
+  }
+  const form = new FormData();
+  form.append('audio', blob, 'command.webm');
+  try {
+    const r = await fetch(`${API}/stark/voice/transcribe`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    if (data.text) {
+      inputEl.value = data.text;
+      sendMessage();
+      return; // sendMessage's response will open its own conversation window
+    }
+  } catch (e) {
+    addMessage('system', 'Transcription failed.');
+  }
+  if (voiceModeOn) _startWakeListener();
+}
+
+// ── Conversation continuity ─────────────────────────────────────────────────
+// After JARVIS finishes speaking a response, keep listening briefly without
+// requiring the wake word again — lets "and what about tomorrow" work as a
+// natural follow-up instead of every turn needing "jarvis" repeated.
+function openConversationWindow() {
+  if (!voiceModeOn || mediaRecorder) return;
+  showListeningIndicator(true, '●');
+  _beginCommandCapture(FOLLOWUP_MS);
+}
+
 // ── Status / model badge ──────────────────────────────────────────────────────
 function setStatus(s) {
   const dot = document.getElementById('status-dot');
@@ -716,6 +931,8 @@ function toggleMute() {
 // are driven from these real Audio element events — not from the server
 // at TTS-generation time, since the server has no way to know when the
 // browser actually starts/stops playback.
+let currentAudio = null;
+
 function _wireVoiceReactivity(audio) {
   const notify = (path) => fetch(`${API}${path}`, { method: 'POST', headers: authHeaders() }).catch(() => {});
   audio.addEventListener('play', () => {
@@ -725,6 +942,7 @@ function _wireVoiceReactivity(audio) {
   audio.addEventListener('ended', () => {
     if (window.onJarvisDone) window.onJarvisDone();
     notify('/hud/voice_end');
+    openConversationWindow();
   });
   audio.addEventListener('pause', () => {
     if (window.onJarvisDone) window.onJarvisDone();
@@ -739,6 +957,7 @@ function _wireVoiceReactivity(audio) {
 function playAudioFile(filename) {
   if (voiceMuted || !filename) return;
   const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+  currentAudio = audio;
   _wireVoiceReactivity(audio);
   audio.play().catch(() => {});
 }
@@ -754,6 +973,7 @@ function playLatestVoiceFallback() {
   lastVoicePlay = now;
   setTimeout(() => {
     const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
+    currentAudio = audio;
     _wireVoiceReactivity(audio);
     audio.play().catch(() => {});
   }, 800);
