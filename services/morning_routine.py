@@ -25,10 +25,20 @@ class MorningRoutine:
         parts = [f"Good morning. It's {_now_local().strftime('%I:%M %p')}."]
 
         try:
-            from core.tools.web import get_weather
-            weather = get_weather("your location")
-            if weather:
-                parts.append(f"Weather: {weather}")
+            # get_weather() geocodes a real city name via open-meteo — it
+            # was previously called with the literal string "your location",
+            # which isn't a real place and silently failed every single
+            # morning (caught by this except, so the brief just quietly
+            # lost the weather line). WEATHER_CITY has to be an actual city.
+            weather_city = os.getenv("WEATHER_CITY", "")
+            if weather_city:
+                from core.tools.web import get_weather
+                weather = get_weather(weather_city)
+                if weather and not weather.get("error"):
+                    parts.append(
+                        f"Weather in {weather_city}: {weather['temp_f']}°F, "
+                        f"feels like {weather['feels_like_f']}°F."
+                    )
         except Exception:
             pass
 
