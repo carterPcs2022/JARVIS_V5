@@ -1,10 +1,36 @@
 """server/routes/voice.py — REST TTS + WebSocket voice pipeline."""
 import asyncio, base64, tempfile, os
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, UploadFile, File, WebSocket, WebSocketDisconnect
 from utils.security import verify_token
 from services.voice import speak, transcribe
 
 router = APIRouter(prefix="/stark/voice", tags=["voice"])
+
+
+@router.post("/transcribe", dependencies=[Depends(verify_token)])
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """Transcribe an uploaded audio clip — used by the HUD's browser-based
+    wake-word/hands-free capture (hud_mobile/desktop.html) to turn a
+    recorded command into text. Token-gated like every other POST route on
+    this router; the HUD already attaches `Authorization: Bearer <token>`
+    on its own fetch calls (see authHeaders() in desktop.html), so this
+    matches the convention rather than opening a public hole."""
+    suffix = ".webm" if "webm" in (audio.filename or "") else ".wav"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await audio.read())
+        audio_path = tmp.name
+
+    try:
+        loop = asyncio.get_event_loop()
+        text = await loop.run_in_executor(None, transcribe, audio_path)
+        if text.startswith("["):
+            return {"text": "", "error": text}
+        return {"text": text}
+    finally:
+        try:
+            os.remove(audio_path)
+        except Exception:
+            pass
 
 
 @router.post("/speak", dependencies=[Depends(verify_token)])

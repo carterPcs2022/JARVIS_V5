@@ -251,39 +251,12 @@ async def glasses_hud_text():
 # ── Helpers ──────────────────────────────────────────────────────────────────────
 
 def _transcribe(audio_path: str) -> str:
-    """Transcribe audio. Prefers local faster-whisper (fine on a Mac with
-    requirements-local.txt installed); falls back to Groq's hosted Whisper
-    API, which is what actually runs in production since faster-whisper is
-    too heavy for a free-tier host like Render."""
-    from config.settings import IS_RENDER, FASTER_WHISPER_AVAILABLE
-    if IS_RENDER or not FASTER_WHISPER_AVAILABLE:
-        return _transcribe_groq(audio_path)
-    try:
-        from faster_whisper import WhisperModel
-        model = WhisperModel("base", device="cpu", compute_type="int8")
-        segments, _ = model.transcribe(audio_path, beam_size=5)
-        return " ".join(s.text.strip() for s in segments).strip()
-    except Exception as e:
-        print(f"[Glasses] Local transcription error: {e}")
-        return _transcribe_groq(audio_path)
-
-
-def _transcribe_groq(audio_path: str) -> str:
-    """Transcribe using Groq's hosted Whisper API (free tier: 7,200s/day)."""
-    try:
-        from groq import Groq
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        with open(audio_path, "rb") as f:
-            transcription = client.audio.transcriptions.create(
-                file=(os.path.basename(audio_path), f.read()),
-                model="whisper-large-v3-turbo",
-                response_format="text",
-                language="en",
-            )
-        return str(transcription).strip()
-    except Exception as e:
-        print(f"[Glasses] Groq transcription error: {e}")
-        return ""
+    """Prefer local faster-whisper, fall back to Groq's hosted Whisper API —
+    shared with the browser HUD's transcribe endpoint via services.voice so
+    this logic only lives in one place (see services/voice.py:transcribe)."""
+    from services.voice import transcribe as _shared_transcribe
+    text = _shared_transcribe(audio_path)
+    return "" if text.startswith("[Transcribe error") else text
 
 
 def _generate_voice(text: str) -> str:

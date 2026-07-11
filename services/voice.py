@@ -149,12 +149,43 @@ def listen(seconds: int = 6) -> str:
         return f"[Listen error: {e}]"
 
 def transcribe(path: str) -> str:
+    """Transcribe audio. Prefers local faster-whisper; falls back to Groq's
+    hosted Whisper API — the fallback is what actually runs in production
+    since faster-whisper is too heavy for a free-tier host like Render.
+
+    This is the single shared implementation used by both the glasses
+    pipeline (server/routes/glasses.py) and the browser HUD's transcribe
+    endpoint (server/routes/voice.py) — don't fork a second copy of this
+    "prefer local, fall back to Groq" logic."""
+    from config.settings import IS_RENDER, FASTER_WHISPER_AVAILABLE
+    if IS_RENDER or not FASTER_WHISPER_AVAILABLE:
+        return transcribe_groq(path)
     try:
         from faster_whisper import WhisperModel
         model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
         segments, _ = model.transcribe(path, beam_size=5)
-        return " ".join(s.text.strip() for s in segments)
+        text = " ".join(s.text.strip() for s in segments).strip()
+        return text if text else transcribe_groq(path)
     except Exception as e:
+        print(f"[Voice] Local transcription error: {e}")
+        return transcribe_groq(path)
+
+
+def transcribe_groq(path: str) -> str:
+    """Transcribe using Groq's hosted Whisper API (free tier: 7,200s/day)."""
+    try:
+        from groq import Groq
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        with open(path, "rb") as f:
+            transcription = client.audio.transcriptions.create(
+                file=(os.path.basename(path), f.read()),
+                model="whisper-large-v3-turbo",
+                response_format="text",
+                language="en",
+            )
+        return str(transcription).strip()
+    except Exception as e:
+        print(f"[Voice] Groq transcription error: {e}")
         return f"[Transcribe error: {e}]"
 
 

@@ -37,7 +37,39 @@ def _system_check():
         log.debug("System check failed: %s", e)
 
 
-def _cleanup_old_files():
+# Consecutive-failure counter for _mac_bridge_check — module-level since
+# these are plain functions on a shared BackgroundScheduler, not methods on
+# an instance with somewhere else to keep state between runs.
+_mac_bridge_fail_count = 0
+
+
+def _mac_bridge_check():
+    """Mac Bridge runs on the user's own machine, tunneled in (ngrok etc.),
+    so it can drop off the network without this (Render-hosted) process
+    ever making a request that would surface it. Debounced to 2 consecutive
+    failures before alerting — a single missed health check is more likely
+    a tunnel hiccup than a real outage, and this runs every 30 min so a
+    2-strike debounce is still a max ~1hr detection window."""
+    global _mac_bridge_fail_count
+    url = os.getenv("MAC_BRIDGE_URL", "")
+    if not url:
+        return  # not configured — nothing to monitor
+    try:
+        import httpx
+        r = httpx.get(f"{url}/health", timeout=5)
+        ok = r.status_code < 500
+    except Exception:
+        ok = False
+
+    if ok:
+        _mac_bridge_fail_count = 0
+        return
+
+    _mac_bridge_fail_count += 1
+    if _mac_bridge_fail_count >= 2:
+        from services.notifications import warning
+        warning("Mac Bridge unreachable", f"{_mac_bridge_fail_count} consecutive failed health checks")
+
     """Log rotation + audio cache cleanup — Render's disk is small and
     ephemeral, but logs/*.json and static/*.mp3 (voice responses) still
     grow unbounded between restarts otherwise."""
@@ -321,6 +353,7 @@ def start():
         _scheduler = BackgroundScheduler(daemon=True)
         _scheduler.add_job(_email_check,  "interval", minutes=15, id="email_check")
         _scheduler.add_job(_system_check, "interval", minutes=5,  id="system_check")
+        _scheduler.add_job(_mac_bridge_check, "interval", minutes=30, id="mac_bridge_check")
         _scheduler.add_job(_llm_health_refresh, "interval", minutes=2, id="llm_health_refresh",
                             next_run_time=now + timedelta(seconds=60))
 

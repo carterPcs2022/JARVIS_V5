@@ -689,6 +689,21 @@ async def startup():
             pass
     asyncio.create_task(_ping_friday())
 
+    # ── Config validation — off the event loop entirely (not even a task):
+    # it's synchronous file/env inspection, so a plain background thread
+    # with a short delay keeps it out of the startup critical path without
+    # needing to await anything.
+    def _run_config_validation():
+        import time as _t
+        _t.sleep(5)
+        try:
+            from core.config_validator import validate_and_alert
+            validate_and_alert()
+        except Exception as e:
+            print(f"[JARVIS] Config validation skipped: {e}")
+    import threading
+    threading.Thread(target=_run_config_validation, daemon=True).start()
+
     state.set("status", "online")
     bus.system("JARVIS V5 online. All systems nominal.")
     print("\n╔══════════════════════════════════════╗")

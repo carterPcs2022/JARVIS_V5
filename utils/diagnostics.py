@@ -1,8 +1,55 @@
 """utils/diagnostics.py — System diagnostic utilities."""
+import json
 from core.tools.system import snapshot
 from core.llm.router import check_groq, check_ollama, check_anthropic
 from core.state import state
 from config.settings import GROQ_MODEL, OLLAMA_MODEL
+
+
+def _check_mac_bridge() -> dict:
+    """Live reachability check, not just "is a URL configured" — Mac Bridge
+    runs on the user's own machine (typically tunneled via ngrok), so the
+    URL being set says nothing about whether the tunnel is actually up
+    right now. Short timeout: this runs inline in the diagnostics request
+    path, and services/scheduler.py's _mac_bridge_check() is the one that
+    actually alerts on sustained outages — this is just a point-in-time read."""
+    import os
+    url = os.getenv("MAC_BRIDGE_URL", "")
+    if not url:
+        return {"configured": False, "reachable": False}
+    try:
+        import httpx
+        r = httpx.get(f"{url}/health", timeout=3)
+        return {"configured": True, "reachable": r.status_code < 500}
+    except Exception as e:
+        return {"configured": True, "reachable": False, "error": str(e)}
+
+
+def _check_memory_files() -> dict:
+    """Confirms every memory JSON file this repo relies on (short/long-term
+    memory, conversation log, user profile) actually parses — a truncated
+    write (e.g. a crash mid-save) leaves a file present but unreadable,
+    which core.memory's loaders would otherwise only surface later as a
+    confusing failure deep in an unrelated request."""
+    from config.settings import SHORT_TERM_FILE, LONG_TERM_FILE, CONVERSATIONS_FILE, PROFILE_FILE
+    files = {
+        "short_term":    SHORT_TERM_FILE,
+        "long_term":     LONG_TERM_FILE,
+        "conversations": CONVERSATIONS_FILE,
+        "profile":       PROFILE_FILE,
+    }
+    result = {}
+    for name, path in files.items():
+        if not path.exists():
+            result[name] = {"exists": False, "valid_json": None}
+            continue
+        try:
+            with open(path, "r") as f:
+                json.load(f)
+            result[name] = {"exists": True, "valid_json": True}
+        except Exception as e:
+            result[name] = {"exists": True, "valid_json": False, "error": str(e)}
+    return result
 
 def full_diagnostic() -> dict:
     # check_groq() already treats a 429 as "up" (just rate-limited, not
@@ -60,6 +107,25 @@ def full_diagnostic() -> dict:
     # protocol is active. A CPU spike or a fallback simply not being
     # configured shouldn't flip the whole HUD to DEGRADED — those still
     # show up in `warnings` for detail, they just don't drive the headline.
+    # Config validity, Mac Bridge reachability, memory-file integrity — all
+    # folded into this one combined status rather than a second endpoint,
+    # so /stark/diagnostics stays the single "check everything" call.
+    try:
+        from core.config_validator import validate_config
+        config_result = validate_config()
+    except Exception as e:
+        config_result = {"ok": False, "issues": [f"config_validator crashed: {e}"]}
+    if not config_result.get("ok"):
+        warnings.append("⚠️ Config validation failed — see config_check.issues")
+
+    mac_bridge_result = _check_mac_bridge()
+    if mac_bridge_result.get("configured") and not mac_bridge_result.get("reachable"):
+        warnings.append("⚠️ Mac Bridge unreachable")
+
+    memory_files_result = _check_memory_files()
+    if any(v.get("valid_json") is False for v in memory_files_result.values()):
+        warnings.append("⚠️ Memory file corrupted — see memory_files")
+
     all_llms_down = not groq_ok and not anthropic_ok and not ollama_ok
     status = "DEGRADED" if (all_llms_down or lockdown_active or friday_active) else "NOMINAL"
 
@@ -69,4 +135,7 @@ def full_diagnostic() -> dict:
             "anthropic_available": anthropic_ok,
             "system": sys, "warnings": warnings,
             "jarvis_state": state.snapshot(),
-            "protocols": proto}
+            "protocols": proto,
+            "config_check": config_result,
+            "mac_bridge": mac_bridge_result,
+            "memory_files": memory_files_result}
