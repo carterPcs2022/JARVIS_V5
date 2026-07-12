@@ -371,6 +371,8 @@ body::before {
       <button class="ctrl-btn" id="btn-reflect" onclick="showPanel('reflect')">REFLECTION</button>
       <button class="ctrl-btn" id="btn-voice" onclick="toggleMic()">VOICE INPUT</button>
       <button class="ctrl-btn" id="voice-mode-btn" onclick="toggleWakeWord()">VOICE OFF</button>
+      <button class="ctrl-btn" id="enroll-voice-btn" onclick="enrollVoice()">🎤 ENROLL MY VOICE</button>
+      <button class="ctrl-btn" id="reset-voice-btn" onclick="resetVoiceEnrollment()" title="Wipe the stored voice profile and start over">Reset &amp; Re-enroll</button>
       <button class="ctrl-btn" style="margin-left:auto" onclick="clearChat()">CLEAR</button>
     </div>
 
@@ -848,6 +850,13 @@ async function _sendCommandAudio() {
       body: form,
     });
     const data = await r.json();
+    if (data.rejected) {
+      // Voice mismatch (TV/background audio, not the enrolled speaker) —
+      // silent no-op is the fix: surfacing a system message here is what
+      // made background noise visibly hijack the conversation window.
+      if (voiceModeOn) _startWakeListener();
+      return;
+    }
     if (data.text) {
       inputEl.value = data.text;
       sendMessage();
@@ -867,6 +876,126 @@ function openConversationWindow() {
   if (!voiceModeOn || mediaRecorder) return;
   showListeningIndicator(true, '●');
   _beginCommandCapture(FOLLOWUP_MS);
+}
+
+// ── Voiceprint enrollment ───────────────────────────────────────────────────
+// Five ~3.5s samples give the bridge's verifier enough variance to set a
+// real threshold — one sample would just be exact-match matching, not
+// speaker verification.
+// Enrollment state lives across separate clicks (one click = one sample,
+// no auto-continue) — the previous version looped all 5 samples inside a
+// single call and only disabled the button for that whole loop's
+// duration (and even then re-enabled it unconditionally in `finally`,
+// including after a successful "VOICE ENROLLED"). On FRIDAY's identical
+// pattern that let a mid-loop re-click spawn a second concurrent
+// enrollVoice() run — 28 POSTs in under a minute instead of 5 — capturing
+// partial/garbage audio that polluted the stored profile with degenerate
+// embeddings. Same fix applied here: strict single-shot per click.
+let enrollSampleCount = 0;
+let enrollInFlight = false;
+const ENROLL_TARGET = 5;
+const ENROLL_SAMPLE_MS = 3500;
+
+async function enrollVoice() {
+  const btn = document.getElementById('enroll-voice-btn');
+  if (enrollInFlight || enrollSampleCount >= ENROLL_TARGET) return;
+  enrollInFlight = true;
+  btn.disabled = true;
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    addMessage('system', 'Voice enrollment failed — microphone access denied.');
+    btn.textContent = '⚠ MIC ACCESS DENIED';
+    enrollInFlight = false;
+    btn.disabled = false;
+    return;
+  }
+
+  const chunks = [];
+  const recorder = new MediaRecorder(stream);
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  const recordingDone = new Promise((resolve) => { recorder.onstop = resolve; });
+
+  // Visible countdown — unambiguous "safe to speak now" vs "done, uploading".
+  let remaining = Math.round(ENROLL_SAMPLE_MS / 1000);
+  btn.textContent = `🔴 RECORDING... ${remaining}`;
+  const countdown = setInterval(() => {
+    remaining -= 1;
+    if (remaining > 0) btn.textContent = `🔴 RECORDING... ${remaining}`;
+  }, 1000);
+
+  recorder.start();
+  await new Promise((resolve) => setTimeout(resolve, ENROLL_SAMPLE_MS));
+  recorder.stop();
+  await recordingDone;
+  clearInterval(countdown);
+  stream.getTracks().forEach((t) => t.stop());
+
+  btn.textContent = '⏳ Uploading...';
+  const blob = new Blob(chunks, { type: 'audio/webm' });
+  const form = new FormData();
+  form.append('audio', blob, 'enroll.webm');
+  form.append('profile', 'default');
+
+  try {
+    const r = await fetch(`${API}/stark/voice/enroll`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    if (data.error) {
+      addMessage('system', `Voice enrollment failed: ${data.error}`);
+      btn.textContent = '⚠ ERROR — CLICK TO RETRY';
+      enrollInFlight = false;
+      btn.disabled = false;
+      return;
+    }
+    // Trust the server's real count over a local increment — if a request
+    // genuinely failed to register server-side, the two could otherwise
+    // drift apart silently.
+    enrollSampleCount = data.sample_count || enrollSampleCount + 1;
+  } catch (e) {
+    addMessage('system', 'Voice enrollment failed — request error.');
+    btn.textContent = '⚠ ERROR — CLICK TO RETRY';
+    enrollInFlight = false;
+    btn.disabled = false;
+    return;
+  }
+
+  enrollInFlight = false;
+  if (enrollSampleCount >= ENROLL_TARGET) {
+    btn.textContent = '✓ VOICE ENROLLED';
+    btn.disabled = true; // permanent — no more samples needed
+    addMessage('system', 'Voice enrollment complete.');
+  } else {
+    btn.textContent = `🎤 ENROLL MY VOICE (${enrollSampleCount}/${ENROLL_TARGET}) — CLICK TO CONTINUE`;
+    btn.disabled = false;
+  }
+}
+
+async function resetVoiceEnrollment() {
+  const resetBtn = document.getElementById('reset-voice-btn');
+  const enrollBtn = document.getElementById('enroll-voice-btn');
+  resetBtn.disabled = true;
+  try {
+    await fetch(`${API}/stark/voice/reset`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: 'default' }),
+    });
+  } catch (e) {
+    // Reset local state regardless — worst case re-enrollment appends
+    // onto a profile that didn't actually get wiped server-side, which is
+    // harmless (enroll appends samples, doesn't require a clean slate).
+  }
+  enrollSampleCount = 0;
+  enrollInFlight = false;
+  enrollBtn.disabled = false;
+  enrollBtn.textContent = '🎤 ENROLL MY VOICE';
+  resetBtn.disabled = false;
 }
 
 // ── Status / model badge ──────────────────────────────────────────────────────
