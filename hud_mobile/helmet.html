@@ -100,6 +100,15 @@ body {
   animation: reticle-rotate 4s linear infinite reverse;
 }
 
+/* Aperture tick ring — evenly spaced rangefinder ticks around the reticle */
+.reticle-ticks {
+  position: absolute; inset: -10px; border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255,160,0,0.65) 0deg 1deg, transparent 1deg 5deg);
+  -webkit-mask: radial-gradient(circle, transparent 76%, black 78%, black 90%, transparent 92%);
+          mask: radial-gradient(circle, transparent 76%, black 78%, black 90%, transparent 92%);
+  animation: reticle-rotate 40s linear infinite;
+}
+
 .reticle-crosshair-h, .reticle-crosshair-v { position: absolute; background: rgba(255,140,0,0.4); }
 .reticle-crosshair-h { top: 50%; left: 10%; width: 80%; height: 1px; transform: translateY(-50%); }
 .reticle-crosshair-v { left: 50%; top: 10%; height: 80%; width: 1px; transform: translateX(-50%); }
@@ -135,6 +144,34 @@ body {
 .panel-value.green  { color: rgba(52,199,89,0.9); }
 .panel-value.warn   { color: rgba(255,102,0,0.9); }
 .panel-value.danger { color: rgba(255,59,48,0.9); }
+
+/* ── RADAR SUB-DISPLAY ── */
+.radar-corner {
+  position: absolute; top: 50%; right: 3%; transform: translateY(-50%);
+  width: 64px; height: 64px; border-radius: 50%;
+  border: 1px solid rgba(255,140,0,0.25);
+}
+.radar-corner::before {
+  content: ''; position: absolute; inset: 14px; border-radius: 50%;
+  border: 1px solid rgba(255,140,0,0.2);
+}
+.radar-corner::after {
+  content: ''; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(255,140,0,0.2), rgba(255,140,0,0.2)) center / 1px 100% no-repeat,
+    linear-gradient(90deg, rgba(255,140,0,0.2), rgba(255,140,0,0.2)) center / 100% 1px no-repeat;
+}
+.radar-sweep {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(rgba(255,140,0,0.5), transparent 25%);
+  animation: radar-spin 3s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes radar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.radar-label {
+  position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+  font-size: 7px; letter-spacing: 2px; color: rgba(255,140,0,0.5); white-space: nowrap;
+}
 
 /* ── STATUS BAR ── */
 .status-bar {
@@ -238,6 +275,7 @@ body {
   <div class="eye-right"><div class="eye-glow"></div></div>
 
   <div class="reticle-container">
+    <div class="reticle-ticks"></div>
     <div class="reticle-outer"></div>
     <div class="reticle-inner"></div>
     <div class="reticle-crosshair-h"></div>
@@ -273,6 +311,11 @@ body {
     <div class="panel-label">TEMPORAL</div>
     <div><span class="panel-value" id="h-time">--:--:--</span></div>
     <div><span class="panel-value" id="h-date">---</span></div>
+  </div>
+
+  <div class="radar-corner">
+    <div class="radar-sweep"></div>
+    <div class="radar-label">SENTINEL SCAN</div>
   </div>
 
   <div class="power-bar">
