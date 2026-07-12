@@ -182,6 +182,16 @@ def metrics():
     return _Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+@app.get("/system/doctor")
+def system_doctor_endpoint():
+    """Unnamespaced (not under /stark/) and unauthenticated to match
+    FRIDAY's equivalent /friday/system/doctor — a quick "is everything
+    okay" check meant to be hit casually, same tier as /health and
+    /metrics above rather than the token-gated /stark/diagnostics."""
+    from services.system_doctor import full_check
+    return full_check()
+
+
 HUD_DIR = Path(__file__).parent.parent / "hud_mobile"
 
 # None of these HUD pages register hud_mobile/sw.js (only the mobile PWA
