@@ -236,6 +236,11 @@ async def holographic_hud():
     return FileResponse(HUD_DIR / "holographic.html", headers=_NO_CACHE_HEADERS)
 
 
+@app.get("/hud/ironman")
+async def ironman_hud():
+    return FileResponse(HUD_DIR / "ironman_hud.html", headers=_NO_CACHE_HEADERS)
+
+
 @app.get("/hud/ambient.js")
 async def hud_ambient_js():
     from services.ambient import AMBIENT_HUD_SCRIPT

@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#04080a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>J.A.R.V.I.S — Ironman HUD</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --cyan:    #5fd8ff;
+  --cyan2:   #8ee9ff;
+  --gold:    #d9a441;
+  --gold2:   #f0c674;
+  --warn:    #ff9d3b;
+  --danger:  #ff4d4d;
+  --green:   #34c759;
+}
+
+body {
+  background: #04080a;
+  height: 100vh;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── CAMERA FEED ── */
+#camera {
+  position: fixed; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; z-index: 0; opacity: 0.9; display: none;
+  filter: saturate(1.05) contrast(1.05);
+}
+#camera-placeholder {
+  position: fixed; inset: 0;
+  background: radial-gradient(ellipse at 50% 30%, #12222a 0%, #04080a 75%);
+  z-index: 0;
+}
+
+/* ── VISOR FRAME (the gold/bronze helmet bezel around the viewport) ── */
+.visor-overlay { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
+
+.visor-mask {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse 100% 28% at 50% -4%, rgba(2,4,5,0.96) 0%, transparent 100%),
+    radial-gradient(ellipse 100% 22% at 50% 104%, rgba(2,4,5,0.96) 0%, transparent 100%),
+    radial-gradient(ellipse 22% 100% at -4% 50%, rgba(2,4,5,0.96) 0%, transparent 100%),
+    radial-gradient(ellipse 22% 100% at 104% 50%, rgba(2,4,5,0.96) 0%, transparent 100%);
+}
+
+/* Gold bezel line tracing the inner edge of the visor mask — this is the
+   part that reads as "looking through a physical helmet," not just a
+   vignette. Drawn as an inset rounded-octagon border. */
+.visor-bezel {
+  position: absolute; inset: 3%;
+  border-radius: 38% 38% 30% 30% / 20% 20% 45% 45%;
+  border: 1.5px solid rgba(217,164,65,0.35);
+  box-shadow:
+    inset 0 0 40px rgba(217,164,65,0.06),
+    0 0 24px rgba(217,164,65,0.05);
+}
+.visor-bezel::before {
+  content: '';
+  position: absolute; inset: -6px;
+  border-radius: inherit;
+  border: 1px solid rgba(217,164,65,0.15);
+}
+
+.scan-lines {
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(95,216,255,0.012) 3px, rgba(95,216,255,0.012) 4px);
+}
+
+.scan-sweep {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(95,216,255,0.25), transparent);
+  animation: sweep 4s linear infinite;
+  opacity: 0.4;
+}
+@keyframes sweep { 0% { top: 0%; } 100% { top: 100%; } }
+
+/* ── TARGETING RETICLE ── */
+.reticle-container {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 150px; height: 150px;
+}
+.reticle-outer {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 1px solid rgba(95,216,255,0.3);
+  animation: reticle-rotate 8s linear infinite;
+}
+.reticle-outer::before, .reticle-outer::after {
+  content: ''; position: absolute; top: -2px; width: 12px; height: 12px;
+  border-top: 2px solid rgba(217,164,65,0.8);
+}
+.reticle-outer::before { left: -2px;  border-left: 2px solid rgba(217,164,65,0.8); }
+.reticle-outer::after  { right: -2px; border-right: 2px solid rgba(217,164,65,0.8); }
+@keyframes reticle-rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.reticle-inner {
+  position: absolute; inset: 20px; border-radius: 50%;
+  border: 1px solid rgba(95,216,255,0.45);
+  animation: reticle-rotate 4s linear infinite reverse;
+}
+
+.reticle-ticks {
+  position: absolute; inset: -10px; border-radius: 50%;
+  background: repeating-conic-gradient(rgba(217,164,65,0.55) 0deg 1deg, transparent 1deg 5deg);
+  -webkit-mask: radial-gradient(circle, transparent 76%, black 78%, black 90%, transparent 92%);
+          mask: radial-gradient(circle, transparent 76%, black 78%, black 90%, transparent 92%);
+  animation: reticle-rotate 40s linear infinite;
+}
+
+.reticle-crosshair-h, .reticle-crosshair-v { position: absolute; background: rgba(95,216,255,0.35); }
+.reticle-crosshair-h { top: 50%; left: 10%; width: 80%; height: 1px; transform: translateY(-50%); }
+.reticle-crosshair-v { left: 50%; top: 10%; height: 80%; width: 1px; transform: translateX(-50%); }
+
+.reticle-center {
+  position: absolute; top: 50%; left: 50%; width: 7px; height: 7px;
+  background: rgba(95,216,255,0.9); border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 10px rgba(95,216,255,0.7);
+  animation: center-pulse 1s ease-in-out infinite;
+}
+@keyframes center-pulse {
+  0%, 100% { transform: translate(-50%,-50%) scale(1); opacity: 0.8; }
+  50%       { transform: translate(-50%,-50%) scale(1.4); opacity: 1; }
+}
+
+.target-readout {
+  position: absolute; bottom: -26px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 2px; color: rgba(95,216,255,0.75);
+  white-space: nowrap; animation: blink 2s step-end infinite;
+}
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── CORNER DATA PANELS ── */
+.data-panel { position: absolute; font-size: 10px; letter-spacing: 1px; line-height: 1.8; }
+.panel-tl { top: 8%; left: 4%; color: rgba(95,216,255,0.85); }
+.panel-tr { top: 8%; right: 4%; text-align: right; color: rgba(217,164,65,0.9); }
+.panel-bl { bottom: 16%; left: 4%; color: rgba(95,216,255,0.7); }
+.panel-br { bottom: 16%; right: 4%; text-align: right; color: rgba(95,216,255,0.7); }
+
+.panel-label { font-size: 8px; letter-spacing: 3px; color: rgba(217,164,65,0.6); margin-bottom: 4px; text-transform: uppercase; }
+.panel-value { color: rgba(95,216,255,0.95); font-size: 11px; }
+.panel-value.gold   { color: rgba(240,198,116,0.95); }
+.panel-value.green  { color: rgba(52,199,89,0.9); }
+.panel-value.warn   { color: rgba(255,157,59,0.9); }
+.panel-value.danger { color: rgba(255,77,77,0.9); }
+
+/* ── LOCATION / MINIMAP PANEL (top-right, under SENTINEL) ── */
+.minimap {
+  width: 78px; height: 78px; margin-top: 6px; margin-left: auto;
+  border: 1px solid rgba(217,164,65,0.4); border-radius: 4px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(95,216,255,0.08), transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 9px, rgba(95,216,255,0.08) 9px, rgba(95,216,255,0.08) 10px),
+    repeating-linear-gradient(90deg, transparent, transparent 9px, rgba(95,216,255,0.08) 9px, rgba(95,216,255,0.08) 10px),
+    #061014;
+  position: relative;
+  overflow: hidden;
+}
+.minimap-pin {
+  position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+  background: var(--gold2); border-radius: 1px;
+  transform: translate(-50%,-50%) rotate(45deg);
+  box-shadow: 0 0 8px rgba(240,198,116,0.8);
+}
+
+/* ── ALT / HDG READOUT (bottom-center, above the power bar) ── */
+.flight-readout {
+  position: absolute; bottom: 21%; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 2px; color: rgba(217,164,65,0.75);
+  white-space: nowrap;
+}
+
+/* ── RADAR SUB-DISPLAY ── */
+.radar-corner {
+  position: absolute; top: 50%; right: 3%; transform: translateY(-50%);
+  width: 60px; height: 60px; border-radius: 50%;
+  border: 1px solid rgba(95,216,255,0.25);
+}
+.radar-corner::before {
+  content: ''; position: absolute; inset: 13px; border-radius: 50%;
+  border: 1px solid rgba(95,216,255,0.2);
+}
+.radar-corner::after {
+  content: ''; position: absolute; inset: 0;
+  background:
+    linear-gradient(rgba(95,216,255,0.2), rgba(95,216,255,0.2)) center / 1px 100% no-repeat,
+    linear-gradient(90deg, rgba(95,216,255,0.2), rgba(95,216,255,0.2)) center / 100% 1px no-repeat;
+}
+.radar-sweep {
+  position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(rgba(95,216,255,0.5), transparent 25%);
+  animation: radar-spin 3s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes radar-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.radar-label {
+  position: absolute; bottom: -15px; left: 50%; transform: translateX(-50%);
+  font-size: 7px; letter-spacing: 2px; color: rgba(95,216,255,0.5); white-space: nowrap;
+}
+
+/* ── STATUS BAR ── */
+.status-bar {
+  position: absolute; bottom: 5%; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 20px; align-items: center;
+  font-size: 9px; letter-spacing: 2px; color: rgba(95,216,255,0.65);
+}
+.status-indicator { display: flex; align-items: center; gap: 5px; }
+.s-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(52,199,89,0.8); box-shadow: 0 0 5px rgba(52,199,89,0.5);
+  animation: status-pulse 2s ease-in-out infinite;
+}
+.s-dot.warn   { background: rgba(255,157,59,0.8);  box-shadow: 0 0 5px rgba(255,157,59,0.5); }
+.s-dot.danger { background: rgba(255,77,77,0.8);  box-shadow: 0 0 5px rgba(255,77,77,0.5); }
+@keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* ── ARC REACTOR POWER BAR ── */
+.power-bar { position: absolute; bottom: 8%; left: 50%; transform: translateX(-50%); width: 200px; text-align: center; }
+.power-label { font-size: 8px; letter-spacing: 3px; color: rgba(217,164,65,0.5); margin-bottom: 4px; }
+.power-track { height: 2px; background: rgba(95,216,255,0.1); border-radius: 1px; overflow: hidden; }
+.power-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(95,216,255,0.7), rgba(142,233,255,0.9), rgba(240,198,116,0.9));
+  box-shadow: 0 0 6px rgba(95,216,255,0.5);
+  transition: width 2s ease;
+}
+.power-pct { font-size: 9px; color: rgba(95,216,255,0.65); letter-spacing: 2px; margin-top: 3px; }
+
+/* ── JARVIS RESPONSE ── */
+.jarvis-response {
+  position: absolute; top: 60%; left: 50%; transform: translateX(-50%);
+  width: 60%; max-width: 500px; text-align: center;
+  font-size: 13px; color: rgba(142,233,255,0.9); letter-spacing: 1px; line-height: 1.7;
+  text-shadow: 0 0 20px rgba(95,216,255,0.3);
+  opacity: 0; transition: opacity 0.5s; pointer-events: none;
+}
+.jarvis-response.visible { opacity: 1; }
+
+/* ── VOICE INPUT INDICATOR ── */
+.voice-active {
+  position: absolute; bottom: 18%; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px; letter-spacing: 3px; color: rgba(240,198,116,0.85);
+  opacity: 0; transition: opacity 0.3s;
+}
+.voice-active.visible { opacity: 1; }
+.voice-wave { display: flex; gap: 3px; align-items: center; }
+.wave-bar { width: 3px; background: rgba(240,198,116,0.85); border-radius: 2px; animation: wave 0.8s ease-in-out infinite; }
+.wave-bar:nth-child(1) { height: 8px;  animation-delay: 0s; }
+.wave-bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+.wave-bar:nth-child(3) { height: 20px; animation-delay: 0.2s; }
+.wave-bar:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+.wave-bar:nth-child(5) { height: 8px;  animation-delay: 0.4s; }
+@keyframes wave { 0%, 100% { transform: scaleY(0.5); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
+
+/* ── ALERT FLASH ── */
+.alert-flash { position: absolute; inset: 0; pointer-events: none; border: 3px solid transparent; transition: border-color 0.3s; z-index: 20; }
+.alert-flash.danger {
+  border-color: rgba(255,77,77,0.6);
+  box-shadow: inset 0 0 40px rgba(255,77,77,0.15);
+  animation: danger-flash 0.5s ease-in-out 3;
+}
+@keyframes danger-flash { 0%, 100% { border-color: rgba(255,77,77,0.6); } 50% { border-color: rgba(255,77,77,0.1); } }
+
+/* ── NAV CONTROLS ── */
+.nav-bar { position: absolute; top: 2%; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 100; }
+.nav-btn {
+  padding: 4px 12px; border: 1px solid rgba(217,164,65,0.35); border-radius: 2px;
+  background: rgba(2,4,5,0.5); color: rgba(217,164,65,0.8);
+  font-family: inherit; font-size: 9px; letter-spacing: 2px; cursor: pointer;
+  backdrop-filter: blur(4px); pointer-events: all;
+  text-decoration: none; display: flex; align-items: center;
+}
+.nav-btn:hover { border-color: rgba(217,164,65,0.8); color: rgba(240,198,116,1); background: rgba(217,164,65,0.1); }
+.nav-btn.active { border-color: var(--cyan); color: var(--cyan2); background: rgba(95,216,255,0.12); }
+
+/* ── MOBILE OVERRIDES ── */
+@media (max-width: 768px) {
+  .data-panel { font-size: 9px; }
+  .panel-tl { top: 12%; left: 2%; }
+  .panel-tr { top: 12%; right: 2%; }
+  .panel-bl { bottom: 24%; left: 2%; }
+  .panel-br { bottom: 24%; right: 2%; }
+
+  .reticle-container { width: 110px; height: 110px; }
+
+  .minimap { width: 58px; height: 58px; }
+
+  .flight-readout { bottom: 26%; }
+
+  .radar-corner { width: 42px; height: 42px; right: 2%; }
+  .radar-corner::before { inset: 9px; }
+  .radar-label { font-size: 6px; bottom: -13px; }
+
+  .power-bar { width: 160px; bottom: 10%; }
+
+  .jarvis-response { width: 80%; font-size: 12px; top: 58%; }
+
+  .nav-bar { top: 1%; gap: 6px; }
+
+  .nav-btn { font-size: 8px; padding: 3px 8px; min-height: 36px; }
+}
+
+/* iPhone notch safe areas */
+@supports (padding: max(0px)) {
+  .nav-bar { top: max(2%, env(safe-area-inset-top)); }
+  .power-bar { bottom: max(10%, env(safe-area-inset-bottom)); }
+}
+</style>
+</head>
+<body>
+
+<video id="camera" autoplay muted playsinline></video>
+<div id="camera-placeholder"></div>
+<canvas id="capture-canvas" style="display:none"></canvas>
+
+<div class="alert-flash" id="alert-flash"></div>
+
+<div class="nav-bar">
+  <a href="/hud" class="nav-btn">← HUD</a>
+  <button class="nav-btn" id="camera-btn" onclick="toggleCamera()">📷</button>
+  <button class="nav-btn" id="voice-btn" onclick="startVoice()">🎤</button>
+  <button class="nav-btn" onclick="scanThreat()">🔍</button>
+  <button class="nav-btn" onclick="toggleFullscreen()">⛶</button>
+</div>
+
+<div class="visor-overlay">
+  <div class="visor-mask"></div>
+  <div class="visor-bezel"></div>
+  <div class="scan-lines"></div>
+  <div class="scan-sweep"></div>
+
+  <div class="reticle-container">
+    <div class="reticle-ticks"></div>
+    <div class="reticle-outer"></div>
+    <div class="reticle-inner"></div>
+    <div class="reticle-crosshair-h"></div>
+    <div class="reticle-crosshair-v"></div>
+    <div class="reticle-center"></div>
+    <div class="target-readout" id="target-readout">TAP TO SPEAK</div>
+  </div>
+
+  <div class="data-panel panel-tl">
+    <div class="panel-label">SYSTEM STATUS</div>
+    <div>REPULSORS  <span class="panel-value" id="h-cpu">—%</span></div>
+    <div>STRUCTURAL <span class="panel-value" id="h-ram">—%</span></div>
+    <div>POWER      <span class="panel-value green" id="h-power">—%</span></div>
+    <div>UPTIME     <span class="panel-value" id="h-uptime">—</span></div>
+  </div>
+
+  <div class="data-panel panel-tr">
+    <div class="panel-label">LOCATION</div>
+    <div id="h-location">—</div>
+    <div class="minimap"><div class="minimap-pin"></div></div>
+  </div>
+
+  <div class="data-panel panel-bl">
+    <div class="panel-label">J.A.R.V.I.S</div>
+    <div>STATUS  <span class="panel-value green" id="h-status">—</span></div>
+    <div>MODEL   <span class="panel-value" id="h-model">—</span></div>
+    <div>FRIDAY  <span class="panel-value gold" id="h-friday">—</span></div>
+  </div>
+
+  <div class="data-panel panel-br">
+    <div class="panel-label">TEMPORAL</div>
+    <div><span class="panel-value" id="h-time">--:--:--</span></div>
+    <div><span class="panel-value" id="h-date">---</span></div>
+  </div>
+
+  <div class="flight-readout" id="flight-readout">ALT —M / HDG ---</div>
+
+  <div class="radar-corner">
+    <div class="radar-sweep"></div>
+    <div class="radar-label">SENTINEL SCAN</div>
+  </div>
+
+  <div class="power-bar">
+    <div class="power-label">ARC REACTOR OUTPUT</div>
+    <div class="power-track"><div class="power-fill" id="power-fill" style="width:0%"></div></div>
+    <div class="power-pct" id="power-pct">—%</div>
+  </div>
+
+  <div class="jarvis-response" id="jarvis-response"></div>
+
+  <div class="voice-active" id="voice-active">
+    <div class="voice-wave">
+      <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+      <div class="wave-bar"></div><div class="wave-bar"></div>
+    </div>
+    JARVIS LISTENING
+  </div>
+
+  <div class="status-bar">
+    <div class="status-indicator"><div class="s-dot" id="status-dot"></div><span id="status-txt">CONNECTING</span></div>
+    <span>|</span><span id="mark-txt">MARK —</span>
+  </div>
+</div>
+
+<script>
+const API   = `${location.protocol}//${location.hostname}${location.protocol==='https:'?'':':8000'}`;
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const wsPort  = location.protocol === 'https:' ? '' : ':8000';
+
+function getToken() { return localStorage.getItem('jarvis_token') || ''; }
+function ensureToken() {
+  const urlParams = new URLSearchParams(location.search);
+  const urlToken = urlParams.get('token');
+  if (urlToken) {
+    localStorage.setItem('jarvis_token', urlToken);
+    window.history.replaceState({}, '', location.pathname);
+  }
+  if (!getToken()) {
+    const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
+    if (t) localStorage.setItem('jarvis_token', t);
+  }
+}
+ensureToken();
+
+let cameraOn = false, ws = null, responseTimer = null, cameraStream = null;
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function tick() {
+  const now = new Date();
+  document.getElementById('h-time').textContent = now.toLocaleTimeString('en-US', {hour12:false});
+  document.getElementById('h-date').textContent  = now.toLocaleDateString('en-US', {weekday:'short',month:'short',day:'numeric'});
+}
+setInterval(tick, 1000); tick();
+
+// ── Camera — rear-facing by default on a phone ─────────────────────────────
+async function toggleCamera() {
+  const video = document.getElementById('camera');
+  const placeholder = document.getElementById('camera-placeholder');
+  const btn = document.getElementById('camera-btn');
+
+  if (!cameraOn) {
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 1280, height: 720 } });
+      video.srcObject = cameraStream;
+      video.style.display = 'block';
+      placeholder.style.display = 'none';
+      cameraOn = true;
+      btn.classList.add('active');
+    } catch (e) {
+      showResponse('Camera access denied.');
+    }
+  } else {
+    if (cameraStream) cameraStream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+    video.style.display = 'none';
+    placeholder.style.display = 'block';
+    cameraOn = false;
+    btn.classList.remove('active');
+  }
+}
+
+function captureFrame() {
+  const video = document.getElementById('camera');
+  if (!cameraOn || !video.videoWidth) return null;
+  const canvas = document.getElementById('capture-canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+}
+
+async function scanThreat() {
+  if (!cameraOn) { showResponse('Enable the camera first.'); return; }
+  showResponse('Scanning...');
+  const blob = await captureFrame();
+  if (!blob) { showResponse('Could not capture frame.'); return; }
+
+  const form = new FormData();
+  form.append('image', blob, 'frame.jpg');
+  try {
+    const r = await fetch(`${API}/stark/glasses/threat`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    showResponse(data.assessment || data.error || 'Scan inconclusive.');
+    if (data.threat_level === 'danger') {
+      const flash = document.getElementById('alert-flash');
+      flash.classList.add('danger');
+      setTimeout(() => flash.classList.remove('danger'), 2000);
+    }
+  } catch (e) {
+    showResponse('Threat scan failed.');
+  }
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWs() {
+  ws = new WebSocket(`${wsProto}//${location.hostname}${wsPort}/ws/chat?token=${encodeURIComponent(getToken())}`);
+  ws.onopen  = () => setStatus('online');
+  ws.onclose = () => { setStatus('offline'); setTimeout(connectWs, 3000); };
+  ws.onerror = () => setStatus('degraded');
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'response' || data.type === 'stream_end') {
+        if (data.response) showResponse(data.response);
+        if (data.model) updateModelBadge(data.model);
+      } else if (data.type === 'audio_ready') {
+        playAudioFile(data.audio_file);
+      }
+    } catch (err) {}
+  };
+}
+
+function showResponse(text) {
+  const el = document.getElementById('jarvis-response');
+  el.textContent = text;
+  el.classList.add('visible');
+  clearTimeout(responseTimer);
+  responseTimer = setTimeout(() => el.classList.remove('visible'), 8000);
+}
+
+function playAudioFile(filename) {
+  if (!filename) return;
+  const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+  audio.play().catch(() => {});
+}
+
+// ── Voice input ───────────────────────────────────────────────────────────────
+let mediaRecorder = null, audioChunks = [], voiceActive = false;
+
+async function startVoice() {
+  if (voiceActive) { stopVoice(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+    mediaRecorder.onstop = sendVoice;
+    mediaRecorder.start();
+    voiceActive = true;
+
+    document.getElementById('voice-active').classList.add('visible');
+    document.getElementById('voice-btn').classList.add('active');
+    document.getElementById('target-readout').textContent = 'VOICE ACTIVE';
+
+    if (navigator.vibrate) navigator.vibrate(20);
+    setTimeout(() => { if (voiceActive) stopVoice(); }, 10000);
+  } catch (e) {
+    showResponse('Microphone access denied.');
+  }
+}
+
+function stopVoice() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+  }
+  voiceActive = false;
+  document.getElementById('voice-active').classList.remove('visible');
+  document.getElementById('voice-btn').classList.remove('active');
+  document.getElementById('target-readout').textContent = 'TAP TO SPEAK';
+}
+
+async function sendVoice() {
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  const form = new FormData();
+  form.append('audio', blob, 'voice.webm');
+
+  showResponse('Processing voice input...');
+
+  try {
+    const r = await fetch(`${API}/stark/glasses/listen`, {
+      method:  'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body:    form,
+    });
+    const contentType = r.headers.get('content-type') || '';
+    if (contentType.includes('audio')) {
+      const text = r.headers.get('X-Jarvis-Text') || '(response received)';
+      showResponse(text);
+      const audioBlob = await r.blob();
+      new Audio(URL.createObjectURL(audioBlob)).play().catch(() => {});
+    } else {
+      const data = await r.json();
+      showResponse(data.response || data.error || 'No response.');
+    }
+  } catch (e) {
+    showResponse('Voice processing failed.');
+  }
+}
+
+// Tap anywhere on the overlay (outside the nav bar) to activate voice —
+// the nav mic button still works too, this is just the glanceable/
+// one-handed path while wearing glasses.
+document.body.addEventListener('click', (e) => {
+  if (e.target.closest('.nav-bar')) return;
+  startVoice();
+});
+
+// ── Status poll ───────────────────────────────────────────────────────────────
+function setStatus(s) {
+  const dot = document.getElementById('status-dot');
+  const txt = document.getElementById('status-txt');
+  const map = {
+    online:     ['', 'SYSTEMS ONLINE'],
+    offline:    ['danger', 'OFFLINE'],
+    degraded:   ['warn', 'DEGRADED'],
+    connecting: ['warn', 'CONNECTING'],
+  };
+  const [cls, label] = map[s] || map.connecting;
+  dot.className = 's-dot' + (cls ? ' ' + cls : '');
+  txt.textContent = label;
+}
+
+function updateModelBadge(model) {
+  const m = (model || '').toLowerCase();
+  const label = m.includes('fable') ? '⚡ FABLE 5' : (model || '').toUpperCase().slice(0, 20);
+  document.getElementById('h-model').textContent = label || '—';
+}
+
+// NOTE: location/altitude/heading are placeholder-only for this pass
+// (visual/layout first, per plan — real geolocation + JARVIS/FRIDAY data
+// wiring is a follow-up once the look is confirmed).
+async function pollStatus() {
+  try {
+    const r = await fetch(`${API}/hud/status`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const d = await r.json();
+
+    document.getElementById('h-cpu').textContent = `${Math.round(d.system.cpu)}%`;
+    document.getElementById('h-ram').textContent = `${Math.round(d.system.ram)}%`;
+
+    const up = d.system.uptime_hours || 0;
+    const h = Math.floor(up), m = Math.round((up - h) * 60);
+    document.getElementById('h-uptime').textContent = h ? `${h}h ${m}m` : `${m}m`;
+
+    updateModelBadge(d.model || d.brain.model || '—');
+    document.getElementById('h-friday').textContent = d.friday_online ? 'ONLINE' : 'STANDBY';
+
+    if (d.mark && d.mark.mark) {
+      document.getElementById('mark-txt').textContent = `MARK ${d.mark.mark}`;
+    }
+
+    const power = Math.max(20, Math.round(100 - (d.system.cpu || 0)));
+    document.getElementById('power-fill').style.width = `${power}%`;
+    document.getElementById('power-pct').textContent = `${power}%`;
+    document.getElementById('h-power').textContent = `${power}%`;
+
+    const allProvidersDown = !d.brain.groq && !d.brain.ollama;
+    setStatus(allProvidersDown ? 'degraded' : 'online');
+    document.getElementById('h-status').textContent = allProvidersDown ? 'DEGRADED' : 'ONLINE';
+  } catch (e) {
+    setStatus('offline');
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+connectWs();
+pollStatus();
+setInterval(pollStatus, 5000);
+toggleCamera();
+</script>
+</body>
+</html>
