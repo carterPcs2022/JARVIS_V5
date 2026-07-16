@@ -25,6 +25,7 @@ class CircuitBreaker:
             self._circuits[service] = {
                 "state": "closed", "failures": 0, "successes": 0,
                 "last_failure": None, "opened_at": None, "total_opens": 0,
+                "retry_after": None,
             }
         return self._circuits[service]
 
@@ -34,10 +35,18 @@ class CircuitBreaker:
         circuit = self._get_circuit(service)
 
         if circuit["state"] == "open":
+            # retry_after (from e.g. GroqRateLimitError, set in
+            # _on_failure) overrides the fixed cooldown when the failing
+            # call told us exactly how long to wait — a tokens-per-day
+            # exhaustion (40+ minutes) shouldn't be probed every
+            # RECOVERY_TIMEOUT like a tokens-per-minute one (seconds) would
+            # be; without this, every RECOVERY_TIMEOUT window between now
+            # and the real reset burns a guaranteed-to-fail probe request.
+            effective_timeout = circuit["retry_after"] or self.RECOVERY_TIMEOUT
             elapsed = time.time() - (circuit["opened_at"] or 0)
-            if elapsed < self.RECOVERY_TIMEOUT:
+            if elapsed < effective_timeout:
                 raise CircuitOpenError(
-                    f"{service} circuit is open. Retry in {self.RECOVERY_TIMEOUT - elapsed:.0f}s"
+                    f"{service} circuit is open. Retry in {effective_timeout - elapsed:.0f}s"
                 )
             circuit["state"] = "half"
             print(f"[CircuitBreaker] {service}: open -> half-open")
@@ -47,7 +56,7 @@ class CircuitBreaker:
             self._on_success(service)
             return result
         except Exception as e:
-            self._on_failure(service, str(e))
+            self._on_failure(service, str(e), retry_after=getattr(e, "retry_after", None))
             raise
 
     def _on_success(self, service: str):
@@ -58,25 +67,35 @@ class CircuitBreaker:
                 circuit["state"] = "closed"
                 circuit["failures"] = 0
                 circuit["successes"] = 0
+                circuit["retry_after"] = None
                 print(f"[CircuitBreaker] {service}: half -> CLOSED")
         else:
             circuit["failures"] = max(0, circuit["failures"] - 1)
 
-    def _on_failure(self, service: str, error: str):
+    def _on_failure(self, service: str, error: str, retry_after: float | None = None):
         circuit = self._get_circuit(service)
         circuit["failures"] += 1
         circuit["last_failure"] = datetime.now().isoformat()
+        # Always overwrite, including with None — a failure that doesn't
+        # carry a retry_after (e.g. a plain network error) means the
+        # PREVIOUS failure's retry_after (which could be a 40+ minute TPD
+        # wait) is no longer the relevant one. Without this, a single
+        # unrelated blip during half-open testing would reopen the circuit
+        # for another full TPD-length wait instead of falling back to the
+        # default RECOVERY_TIMEOUT.
+        circuit["retry_after"] = retry_after
 
         if circuit["failures"] >= self.FAILURE_THRESHOLD and circuit["state"] != "open":
             circuit["state"] = "open"
             circuit["opened_at"] = time.time()
             circuit["total_opens"] += 1
-            print(f"[CircuitBreaker] {service}: OPEN ({error[:50]})")
+            wait = circuit["retry_after"] or self.RECOVERY_TIMEOUT
+            print(f"[CircuitBreaker] {service}: OPEN ({error[:50]}) — retry in {wait:.0f}s")
             try:
                 from core.event_bus import bus
                 bus.alert(
                     f"Circuit breaker opened for {service}. Routing around it. "
-                    f"Will retry in {self.RECOVERY_TIMEOUT}s.",
+                    f"Will retry in {wait:.0f}s.",
                     severity="medium", category="CIRCUIT_BREAKER",
                 )
             except Exception:

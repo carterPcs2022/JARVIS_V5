@@ -34,11 +34,11 @@ class StarkIntelligence:
         model_insight = model_result.get("response", "")
 
         # Stage 4: Fable 5 with maximum extended thinking. think() has no
-        # direct thinking_budget passthrough — core/llm/anthropic_client.py's
-        # get_thinking_budget() derives it from the query itself, escalating
-        # to fable's 16,000-token "maximum" tier when it sees phrasing like
-        # "most important"/"critical". This genuinely is that kind of
-        # request, so the prompt says so rather than faking a budget override.
+        # direct effort passthrough — core/llm/anthropic_client.py's
+        # get_effort_level() derives it from the query itself, escalating to
+        # "max" effort when it sees phrasing like "most important"/"critical".
+        # This genuinely is that kind of request, so the prompt says so
+        # rather than faking an effort override.
         deep_response = think(
             f"Query: {query}\n\n"
             f"Context: {context}\n\n"

@@ -269,7 +269,7 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
     context builder itself costs nothing extra in API calls, but adding it
     to every sonnet call would bloat input tokens for a tier meant for
     quick creative asks)."""
-    from core.llm.anthropic_client import call_anthropic, get_thinking_budget
+    from core.llm.anthropic_client import call_anthropic, get_effort_level
 
     config = ANTHROPIC_REGISTRY[tier]
     system = ""
@@ -279,27 +279,34 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
             break
     user_messages = [m for m in messages if m["role"] != "system"]
 
+    volatile_context = ""
     if tier in ("opus", "fable") and query:
-        try:
-            from core.context import build_fable_context
-            rich_context = build_fable_context(query)
-            if rich_context:
-                system = f"{system}\n\n{rich_context}"
-        except Exception as e:
-            print(f"[LLM Router] build_fable_context failed (non-fatal): {e}")
-
         # Enhanced personality depth for opus/fable only — Groq calls keep
-        # the base JARVIS_PERSONALITY for token efficiency.
+        # the base JARVIS_PERSONALITY for token efficiency. Appended to the
+        # stable system string (not the volatile per-query context below) —
+        # it's static text, so it belongs in the cacheable prefix alongside
+        # JARVIS_PERSONALITY rather than after content that changes every call.
         try:
             from config.settings import STARK_INTELLIGENCE_PROTOCOLS
             system = f"{system}\n\n{STARK_INTELLIGENCE_PROTOCOLS}"
         except Exception:
             pass
 
-    budget = get_thinking_budget(tier, query) if query else 0
+        try:
+            from core.context import build_fable_context
+            volatile_context = build_fable_context(query) or ""
+        except Exception as e:
+            print(f"[LLM Router] build_fable_context failed (non-fatal): {e}")
+
+    # `temperature` isn't forwarded — sonnet-5/opus-4-8/fable-5 all 400 on
+    # any explicit temperature/top_p/top_k, so call_anthropic never sends
+    # one. It's still accepted as a param here since chat() passes it
+    # uniformly across the groq/ollama/anthropic dispatch, and Groq/Ollama
+    # calls elsewhere in chat() still use it normally.
+    effort = get_effort_level(query) if query else ""
     result = call_anthropic(user_messages, system, config["id"],
                             max_tokens=min(max_tokens, config["max_tokens"]) if max_tokens else config["max_tokens"],
-                            thinking_budget=budget, temperature=temperature)
+                            effort=effort, volatile_context=volatile_context)
     if not result:
         return None
 
@@ -407,15 +414,23 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 if not GROQ_API_KEY:
                     continue
                 from services.circuit_breaker import cb, CircuitOpenError
-                if not cb.is_available("groq"):
-                    print("[LLM Router] Groq circuit open — skipping straight to next provider")
+                # Keyed per-model, not just "groq" — Groq enforces rate
+                # limits (especially tokens-per-day) per model, so one
+                # model being exhausted (e.g. llama-3.3-70b-versatile at
+                # its daily cap) shouldn't trip the circuit for every other
+                # Groq model too, including ones with plenty of budget left
+                # (e.g. llama-3.1-8b-instant, used by the threat classifier
+                # and simple-query routing).
+                circuit_key = f"groq:{model_id}"
+                if not cb.is_available(circuit_key):
+                    print(f"[LLM Router] Groq circuit open for {model_id} — skipping straight to next provider")
                     continue
                 if not _rate_check():
                     print("[LLM Router] Approaching Groq rate limit — brief backoff before calling")
                     time.sleep(2)
                 _call_times.append(time.time())
                 try:
-                    result = cb.call("groq", groq_chat, messages, max_tokens, temperature, model=model_id)
+                    result = cb.call(circuit_key, groq_chat, messages, max_tokens, temperature, model=model_id)
                 except CircuitOpenError as e:
                     print(f"[LLM Router] {e}")
                     continue
@@ -516,12 +531,21 @@ def warm_cache():
     reach the cache; the rest go through a real (cached) Groq call.
     Called from server/api.py's 30s-post-boot delayed background start,
     not directly at startup, to stay behind the existing Groq-rate-limit
-    stagger rather than adding another cold-boot spike."""
+    stagger rather than adding another cold-boot spike. That same stagger
+    logic previously stopped at the loop's edge: the 4 non-instant queries
+    here (2 of the 6 are answered by _instant_response with no API call)
+    used to fire back-to-back with zero delay, right after _probe()'s own
+    real Groq call in check_groq() — 5 real requests in under a second on
+    every boot, easily enough to trip a free-tier per-second/burst limit
+    even when nothing else is calling Groq. A small sleep between each
+    call costs nothing here (already off the event loop, via
+    run_in_executor) and spreads the burst out."""
     for query in COMMON_QUERIES:
         try:
             think(query, use_cache=True)
         except Exception as e:
             print(f"[Router] warm_cache failed for '{query}': {e}")
+        time.sleep(1)
     print("[Router] Response cache warmed")
 
 
@@ -535,10 +559,12 @@ _HEALTH_TTL = 30  # seconds
 
 def check_groq(force: bool = False) -> bool:
     """True if Groq is usable right now. A 429 counts as usable — it means
-    Groq is up and just rate-limiting us, which is transient and already
-    handled by the retry-after-10s in core/llm/openai.chat(); it is not the
-    same condition as Groq being down, and shouldn't be treated as one for
-    DEGRADED-status purposes."""
+    Groq is up and just rate-limiting us, which is transient (the actual
+    wait — seconds for a per-minute limit, 40+ minutes for a daily one — is
+    carried on GroqRateLimitError.retry_after and honored by
+    services/circuit_breaker.py); it is not the same condition as Groq
+    being down, and shouldn't be treated as one for DEGRADED-status
+    purposes."""
     if not GROQ_API_KEY:
         return False
     ts, cached = _HEALTH_CACHE["groq"]
@@ -546,12 +572,14 @@ def check_groq(force: bool = False) -> bool:
         return cached
     import httpx
     try:
-        from core.llm.openai import chat as groq_chat
+        from core.llm.openai import chat as groq_chat, GroqRateLimitError
         groq_chat([{"role": "user", "content": "ping"}], max_tokens=5)
         _HEALTH_CACHE["groq"] = (time.time(), True)
         return True
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 429:
+    except (httpx.HTTPStatusError, GroqRateLimitError) as e:
+        is_429 = isinstance(e, GroqRateLimitError) or (
+            isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429)
+        if is_429:
             print("[LLM Router] Groq health check hit 429 (rate limited, not down)")
             _HEALTH_CACHE["groq"] = (time.time(), True)
             return True

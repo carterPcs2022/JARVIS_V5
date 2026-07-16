@@ -424,8 +424,10 @@ def start():
         from config.settings import ENVIRONMENT
         if ENVIRONMENT == "local":
             _scheduler.add_job(_proactive_screen_check, "interval", minutes=5, id="proactive_screen_check")
-        _scheduler.add_job(_proactive_research, "interval", hours=2, id="proactive_research",
-                            next_run_time=now + timedelta(seconds=120))
+        # Touches think() (instant-tier relevance check) — routed through
+        # _add_llm_job so it doesn't fire on local dev restarts.
+        _add_llm_job(_proactive_research, "interval", hours=2, id="proactive_research",
+                     next_run_time=now + timedelta(seconds=120))
 
         # Stark Intelligence — background proactive thinking + anticipatory
         # pre-caching of the user's likely next question. Both hit Groq's
@@ -433,17 +435,15 @@ def start():
         # has real turns in it — which on a real deploy means "after the user's
         # actually talked to JARVIS", but locally that file is a persistent
         # dev-machine artifact that never resets between restarts, so these
-        # fire real 70B calls on every single local boot before a single test
-        # message goes out. Skipped under the same local-dev gate as
-        # warm_cache() above — production behavior (ENVIRONMENT != "local",
-        # or DEV_MODE off) is unaffected; these still register and will start
+        # fired real 70B calls on every single local boot before a single test
+        # message went out. Routed through _add_llm_job, same as
+        # proactive_research above — these still register and will start
         # firing on a live Render instance once real conversation history
-        # accumulates.
-        if not (ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true"):
-            _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
-                                next_run_time=now + timedelta(seconds=180))
-            _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
-                                next_run_time=now + timedelta(seconds=240))
+        # accumulates; only local dev is skipped.
+        _add_llm_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
+                     next_run_time=now + timedelta(seconds=180))
+        _add_llm_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
+                     next_run_time=now + timedelta(seconds=240))
 
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
@@ -470,3 +470,35 @@ def stop():
 def add_job(func, trigger: str = "interval", **kwargs):
     if _scheduler:
         _scheduler.add_job(func, trigger, **kwargs)
+
+
+def _is_local_dev() -> bool:
+    from config.settings import ENVIRONMENT
+    return ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true"
+
+
+def _add_llm_job(func, trigger: str = "interval", **kwargs):
+    """Register a scheduler job whose function makes real LLM calls
+    somewhere in its call graph (directly or via core/'s reasoning modules —
+    six_hats, tree_of_thought, socratic, etc., which all default to
+    force_model="standard"/70B unless the caller pins something cheaper).
+
+    Skipped entirely in local dev (ENVIRONMENT=="local" and DEV_MODE=true —
+    the same gate warm_cache() uses in server/api.py). memory/short_term.json
+    and similar dev-machine state files persist across restarts and never
+    reset the way a fresh Render boot's ephemeral disk does, so any
+    unconditional per-boot job here would fire real API calls before a
+    single test message goes out, on every single local restart. In
+    production this is a no-op — the job registers exactly as if
+    _scheduler.add_job() had been called directly.
+
+    Any *new* background job whose function touches think()/router.chat()
+    should register through this instead of _scheduler.add_job() — that's
+    the structural guardrail: forgetting the gate becomes "use the wrong
+    helper" instead of "remember to hand-write the ENVIRONMENT/DEV_MODE
+    check every time."
+    """
+    if _is_local_dev():
+        log.debug("Skipping LLM-touching job '%s' — local dev mode", kwargs.get("id", getattr(func, "__name__", func)))
+        return
+    _scheduler.add_job(func, trigger, **kwargs)

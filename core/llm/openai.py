@@ -2,11 +2,51 @@
 core/llm/openai.py — Groq client (OpenAI-compatible endpoint).
 Named openai.py because Groq uses the OpenAI API format exactly.
 """
+import re
 import httpx
 from typing import AsyncIterator
 from config.settings import GROQ_API_KEY, GROQ_MODEL, GROQ_BASE_URL
 
 TIMEOUT = 30
+
+# Matches Groq's rate-limit error body, e.g. "Please try again in
+# 43m2.847s." or "Please try again in 4.521s." — used when the response
+# doesn't carry a numeric Retry-After header (seen in practice for
+# tokens-per-day limits, unlike the shorter-lived per-minute ones).
+_RETRY_AFTER_BODY_RE = re.compile(
+    r"try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.I
+)
+
+
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+    try:
+        message = response.json().get("error", {}).get("message", "")
+    except Exception:
+        return None
+    m = _RETRY_AFTER_BODY_RE.search(message)
+    if not m or not any(m.groups()):
+        return None
+    hours, minutes, seconds = (float(g) if g else 0.0 for g in m.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
+class GroqRateLimitError(Exception):
+    """429 from Groq. Carries retry_after (seconds, from the Retry-After
+    header, or parsed from Groq's error message body when no header is
+    sent) when available — a TPM (tokens-per-minute) limit resets in
+    single-digit seconds and a TPD (tokens-per-day) limit can reset 40+
+    minutes out; this lets callers (services/circuit_breaker.py) honor the
+    real wait instead of retrying against a fixed cooldown that has no idea
+    which one was hit."""
+    def __init__(self, message: str, retry_after: float | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
 
 # Connect-timeout, not a flat total-request timeout: a fixed few-second cap
 # on the *whole* call would kill the "research" tier's own legitimate
@@ -104,12 +144,20 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     # Fail fast on 429 instead of sleeping through Groq's retry-after
     # (previously up to 30s, twice — a single request could block for
     # a minute before core/llm/router.py's chat() cascade ever got a
-    # chance to fall back to Ollama). Raising immediately here is also
-    # exactly what check_groq() in core/llm/router.py already expects:
-    # it catches httpx.HTTPStatusError and treats a 429 specifically as
-    # "up, just rate limited" rather than down.
+    # chance to fall back to Ollama). Raising GroqRateLimitError (not just
+    # relying on raise_for_status()'s generic httpx.HTTPStatusError) carries
+    # the real Retry-After value through to services/circuit_breaker.py, so
+    # a tokens-per-day exhaustion (resets in 40+ minutes) isn't treated the
+    # same as a tokens-per-minute one (resets in seconds) — check_groq() in
+    # core/llm/router.py catches this specifically alongside
+    # httpx.HTTPStatusError and still treats a 429 as "up, just rate
+    # limited" rather than down.
     if r.status_code == 429:
-        print("[Groq] Rate limited — failing fast so the caller can fall back immediately")
+        retry_after = _parse_retry_after(r)
+        print(f"[Groq] Rate limited — failing fast "
+              f"(retry after {retry_after if retry_after is not None else '?'}s)")
+        raise GroqRateLimitError(
+            f"429 rate limited on model {model or GROQ_MODEL}", retry_after=retry_after)
 
     r.raise_for_status()
     data = r.json()
