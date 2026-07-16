@@ -433,9 +433,24 @@ class Executor:
             response = "I ran into a problem with that. Can you break it into smaller steps?"
             model = provider = "error"
 
-        # Reflection pass
+        # Reflection pass — skip entirely when every LLM provider just
+        # failed. core/llm/router.py's chat() returns the literal string
+        # "[JARVIS OFFLINE] All LLM providers failed." as normal content
+        # rather than raising (same thing core/consciousness.py's
+        # _safe_think() has to guard against). Running reflect() on that
+        # string spends another LLM call on the same outage — it either
+        # fails the same way, or the critic model scores it low and
+        # "rewrites" it into some generic non-answer disconnected from
+        # what the user actually asked, which is worse than just saying
+        # plainly that everything's down.
         was_rewritten = False
-        if plan.mode not in ("voice", "code", "vision", "mac_control"):
+        if "[JARVIS OFFLINE]" in response or "All LLM providers failed" in response:
+            response = (
+                "All my reasoning engines are unreachable right now, sir — "
+                "Groq, Anthropic, and local Ollama all failed. Try again in "
+                "a moment."
+            )
+        elif plan.mode not in ("voice", "code", "vision", "mac_control"):
             from core.reflection import reflect
             ref           = reflect(intent.raw, response)
             response      = ref["final"]

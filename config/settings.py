@@ -315,6 +315,13 @@ ALERT_CPU               = float(os.getenv("ALERT_CPU", 90))
 ALERT_RAM               = float(os.getenv("ALERT_RAM", 90))
 ALERT_DISK              = float(os.getenv("ALERT_DISK", 85))
 
+# ── Combat Mode ───────────────────────────────────────────────────────────────
+# Tunable after real-world use — retune these based on false positive/negative
+# review of logs/immutable_audit.jsonl combat_mode_engage/disengage entries.
+COMBAT_MODE_CONFIDENCE_THRESHOLD = float(os.getenv("COMBAT_MODE_CONFIDENCE_THRESHOLD", 0.75))
+COMBAT_MODE_SOFT_CONFIRM_MIN     = float(os.getenv("COMBAT_MODE_SOFT_CONFIRM_MIN", 0.5))
+COMBAT_MODE_TIMEOUT_MINUTES      = int(os.getenv("COMBAT_MODE_TIMEOUT_MINUTES", 10))
+
 # ── Voice ─────────────────────────────────────────────────────────────────────
 JARVIS_VOICE    = os.getenv("JARVIS_VOICE", "en-US-GuyNeural")
 WHISPER_MODEL   = os.getenv("WHISPER_MODEL", "base")
@@ -364,8 +371,17 @@ IS_RENDER         = bool(os.getenv("RENDER") or RENDER_SERVICE_ID)
 IS_HEADLESS_CLOUD = IS_RAILWAY or IS_RENDER
 
 # On any headless cloud host: disable local-only hardware features unless
-# explicitly overridden via VOICE_ENABLED env var.
-VOICE_ENABLED      = (not IS_HEADLESS_CLOUD) and os.getenv("VOICE_ENABLED", "true").lower() == "true"
+# explicitly overridden via VOICE_ENABLED env var. generate_for_network()
+# (services/elevenlabs_voice.py) only calls the ElevenLabs API and writes a
+# file for /stark/voice/audio to serve — no local mic/speaker needed — so
+# unlike WAKE_WORD_ENABLED/SCREENSHOT_ENABLED (genuinely hardware-bound),
+# voice generation is safe to run on Render/Railway when explicitly asked
+# for. The previous `(not IS_HEADLESS_CLOUD) and <env check>` made the env
+# var override impossible: `False and x` is always False regardless of what
+# VOICE_ENABLED was set to, so cloud deploys silently lost all voice output
+# with no way to turn it back on short of removing the cloud gate entirely.
+_voice_env = os.getenv("VOICE_ENABLED")
+VOICE_ENABLED      = (_voice_env.lower() == "true") if _voice_env is not None else (not IS_HEADLESS_CLOUD)
 WAKE_WORD_ENABLED  = not IS_HEADLESS_CLOUD
 SCREENSHOT_ENABLED = not IS_HEADLESS_CLOUD
 
