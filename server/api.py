@@ -70,6 +70,7 @@ def _include(*routers):
 (stark_extra_router,) = _safe_import("server.routes.stark_extra", "router")
 (final_router, final_protected_router) = _safe_import("server.routes.final_features", "router", "protected")
 (glasses_router,) = _safe_import("server.routes.glasses", "router")
+(vision_identify_router,) = _safe_import("server.routes.vision_identify", "router")
 (protocols_18_35_router,) = _safe_import("server.routes.protocols_18_35", "router")
 (brain_enhancement_router,) = _safe_import("server.routes.brain_enhancement", "router")
 (final_upgrade_router,) = _safe_import("server.routes.final_upgrade", "router")
@@ -85,6 +86,7 @@ def _include(*routers):
 (new_features_router,) = _safe_import("server.routes.new_features", "router")
 (intel_router,) = _safe_import("server.routes.intel", "router")
 (military_router,) = _safe_import("server.routes.military", "router")
+(combat_mode_router,) = _safe_import("server.routes.combat_mode", "router")
 
 # The two newest, least battle-tested subsystems also get an explicit
 # opt-out on top of the same import guard as everything else above.
@@ -100,13 +102,13 @@ _include(
     ws_router, chat_router, telemetry_router, diag_router, memory_router,
     voice_router, mac_router, protocols_router, scatter_router, search_router,
     mark_router, stark_extra_router, final_router, final_protected_router,
-    glasses_router, protocols_18_35_router, brain_enhancement_router,
+    glasses_router, vision_identify_router, protocols_18_35_router, brain_enhancement_router,
     final_upgrade_router, final_completion_router, stark_infra_router,
     stark_phone_router, mythos_router, spotify_router, spotify_auth_router,
     ultimate_brain_router, absolute_final_router, security_max_router,
     security_gov_router, security_firewalls_router, suit_security_router,
     new_features_router, intel_router, model_updater_router, sandbox_router,
-    military_router,
+    military_router, combat_mode_router,
 )
 
 
@@ -391,6 +393,11 @@ async def hud_status():
         model_update_status = model_updater.get_status()
     except Exception:
         model_update_status = {}
+    try:
+        from services.combat_mode import combat_mode
+        combat_status = combat_mode.status()
+    except Exception:
+        combat_status = {"state": "idle", "pending_confirm": False, "engaged_at": None}
 
     return {
         # Top-level, read directly from live state — see core/llm/router.py,
@@ -426,6 +433,7 @@ async def hud_status():
             "anomaly_count": anomaly_count,
         },
         "mark":          mark,
+        "combat_mode":   combat_status,
         "active_models":     model_update_status.get("current_models", {}),
         "last_model_check":  model_update_status.get("last_checked", "never"),
         "friday_online": friday_online,
@@ -570,12 +578,29 @@ async def startup():
 
         # ── Warm the response cache — a handful of real LLM calls for
         # common queries, kept behind this same 30s stagger rather than
-        # firing at raw process startup ─────────────────────────────────────
-        try:
-            from core.llm.router import warm_cache
-            warm_cache()
-        except Exception as e:
-            print(f"[JARVIS] Cache warming skipped: {e}")
+        # firing at raw process startup. Must go through run_in_executor
+        # like _probe()'s check_groq/check_ollama calls just above — warm_cache()
+        # is synchronous and blocking, and calling it directly here would run
+        # it on the event loop itself, freezing every request (sync or async,
+        # on this or any other route) for as long as its serial Groq calls
+        # take. Normally that's under a second; under Groq rate-limiting it
+        # can stretch to several seconds of total server unresponsiveness. ──
+        #
+        # Skipped in local dev (same ENVIRONMENT+DEV_MODE gate as
+        # utils/security.py's auth bypass) — it's a one-time cost meant to
+        # amortize against real production traffic; against a local dev loop
+        # that restarts the process repeatedly while iterating, it's pure
+        # rate-limit tax paid before a single real test message goes out.
+        # Production behavior (ENVIRONMENT != "local") is unaffected.
+        if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
+            print("[JARVIS] Cache warming skipped — local dev mode")
+        else:
+            try:
+                from core.llm.router import warm_cache
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, warm_cache)
+            except Exception as e:
+                print(f"[JARVIS] Cache warming failed: {e}")
 
         # ── Suit assembly sequence — streams to any connected HUD ─────────────
         try:

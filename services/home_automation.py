@@ -44,6 +44,10 @@ SCENES: dict[str, dict] = {
         "temperature": 62,
         "security": "armed",
     },
+    "red_alert": {
+        "lights":      {"brightness": 100, "color": "red"},
+        "security":    "armed",
+    },
     "workout": {
         "lights":      {"brightness": 100, "color": "energizing"},
         "temperature": 65,
