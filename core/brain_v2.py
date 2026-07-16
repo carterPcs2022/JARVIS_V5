@@ -6,6 +6,8 @@ Implements the intended architecture from the original skeleton:
 
 Dependency-injected so every component is swappable/testable.
 """
+import difflib
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -171,7 +173,20 @@ class Reasoner:
     ]
 
     def _is_calendar(self, low: str) -> bool:
-        return any(kw in low for kw in self._CALENDAR_KW)
+        if any(kw in low for kw in self._CALENDAR_KW):
+            return True
+        # Typo tolerance — "calendar" is one of the most commonly misspelled
+        # words in English (calender/calander/calandar all show up in real
+        # usage). An exact-substring miss here doesn't just fail to route
+        # the request; it falls through to generic chat, where the model
+        # confidently claims to have "marked your calendar" with no tool
+        # call behind it at all — a fabricated success is worse than an
+        # honest failure. Catch any word close enough to "calendar" by
+        # edit distance instead of enumerating every misspelling.
+        return any(
+            difflib.get_close_matches(w, ["calendar"], n=1, cutoff=0.75)
+            for w in re.findall(r"[a-z']+", low) if len(w) > 5
+        )
 
     # Mac / system control keywords
     _MAC_KW    = {
