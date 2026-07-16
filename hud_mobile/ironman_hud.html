@@ -263,6 +263,38 @@ body {
 .wave-bar:nth-child(5) { height: 8px;  animation-delay: 0.4s; }
 @keyframes wave { 0%, 100% { transform: scaleY(0.5); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
 
+/* ── LOCK-ON / SCAN OVERLAY (target-acquisition brackets that close in from
+   the corners with a countdown readout, like the reference HUD footage) ── */
+.lockon-overlay {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 220px; height: 220px; pointer-events: none;
+  opacity: 0; transition: opacity 0.2s;
+}
+.lockon-overlay.active { opacity: 1; }
+.lockon-bracket {
+  position: absolute; width: 44px; height: 44px;
+  border: 2px solid var(--danger);
+  filter: drop-shadow(0 0 6px rgba(255,77,77,0.6));
+  transition: transform 0.6s cubic-bezier(.2,.9,.3,1), opacity 0.6s;
+}
+.lockon-bracket.tl { top: 0; left: 0; border-right: none; border-bottom: none; transform: translate(-30px,-30px); }
+.lockon-bracket.tr { top: 0; right: 0; border-left: none; border-bottom: none; transform: translate(30px,-30px); }
+.lockon-bracket.bl { bottom: 0; left: 0; border-right: none; border-top: none; transform: translate(-30px,30px); }
+.lockon-bracket.br { bottom: 0; right: 0; border-left: none; border-top: none; transform: translate(30px,30px); }
+.lockon-overlay.active .lockon-bracket { transform: translate(0,0); }
+.lockon-countdown {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 32px; font-weight: 700; color: var(--danger);
+  text-shadow: 0 0 16px rgba(255,77,77,0.7); letter-spacing: 1px;
+  opacity: 0; transition: opacity 0.2s;
+}
+.lockon-overlay.active .lockon-countdown { opacity: 1; }
+.lockon-status {
+  position: absolute; bottom: -22px; left: 50%; transform: translateX(-50%);
+  font-size: 10px; letter-spacing: 4px; color: var(--danger); white-space: nowrap;
+  animation: blink 0.6s step-end infinite;
+}
+
 /* ── ALERT FLASH ── */
 .alert-flash { position: absolute; inset: 0; pointer-events: none; border: 3px solid transparent; transition: border-color 0.3s; z-index: 20; }
 .alert-flash.danger {
@@ -348,6 +380,15 @@ body {
     <div class="reticle-crosshair-v"></div>
     <div class="reticle-center"></div>
     <div class="target-readout" id="target-readout">TAP TO SPEAK</div>
+  </div>
+
+  <div class="lockon-overlay" id="lockon-overlay">
+    <div class="lockon-bracket tl"></div>
+    <div class="lockon-bracket tr"></div>
+    <div class="lockon-bracket bl"></div>
+    <div class="lockon-bracket br"></div>
+    <div class="lockon-countdown" id="lockon-countdown">3</div>
+    <div class="lockon-status">SCANNING</div>
   </div>
 
   <div class="data-panel panel-tl">
@@ -473,11 +514,36 @@ function captureFrame() {
   return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
 }
 
+// Lock-on brackets + countdown — purely cosmetic (real result timing is
+// driven by the fetch below), gives the "target acquisition" beat seen in
+// the reference HUD footage instead of the scan just silently happening.
+let lockOnTimer = null;
+function startLockOn() {
+  const overlay = document.getElementById('lockon-overlay');
+  const cd = document.getElementById('lockon-countdown');
+  clearInterval(lockOnTimer);
+  overlay.classList.add('active');
+  let n = 3;
+  cd.textContent = n;
+  lockOnTimer = setInterval(() => {
+    n -= 1;
+    cd.textContent = n > 0 ? n : 'LOCKED';
+    if (n <= 0) clearInterval(lockOnTimer);
+  }, 450);
+}
+function stopLockOn(delayMs) {
+  setTimeout(() => {
+    clearInterval(lockOnTimer);
+    document.getElementById('lockon-overlay').classList.remove('active');
+  }, delayMs || 0);
+}
+
 async function scanThreat() {
   if (!cameraOn) { showResponse('Enable the camera first.'); return; }
   showResponse('Scanning...');
+  startLockOn();
   const blob = await captureFrame();
-  if (!blob) { showResponse('Could not capture frame.'); return; }
+  if (!blob) { showResponse('Could not capture frame.'); stopLockOn(); return; }
 
   const form = new FormData();
   form.append('image', blob, 'frame.jpg');
@@ -493,9 +559,13 @@ async function scanThreat() {
       const flash = document.getElementById('alert-flash');
       flash.classList.add('danger');
       setTimeout(() => flash.classList.remove('danger'), 2000);
+      stopLockOn(800); // linger on "LOCKED" briefly for a real threat
+    } else {
+      stopLockOn();
     }
   } catch (e) {
     showResponse('Threat scan failed.');
+    stopLockOn();
   }
 }
 
