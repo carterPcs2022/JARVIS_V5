@@ -101,8 +101,20 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
         return True
 
     # Stream chat, task, and search queries — context already has web results embedded
-    # Only drop to full pipeline for true multi-step complex tasks or mac/voice/vision
-    if intent.complexity == "complex" or intent.action in ("mac_control", "voice", "vision", "code"):
+    # Only drop to full pipeline for true multi-step complex tasks, or actions
+    # that need a real tool call instead of free-text generation. This list
+    # must track core/brain_v2.py's Reasoner action set — an action added
+    # there without being added here still gets classified correctly, but
+    # silently streams a hallucinated chat response instead of ever reaching
+    # the executor that would actually call the tool ("calendar" did exactly
+    # this: intent classification worked, but requests still streamed
+    # through as ordinary chat and fabricated a confident-sounding answer
+    # with no Google Calendar call behind it at all). delete_file/
+    # compress_file had the same gap — Executor's headless-cloud
+    # hallucination guard for those never got a chance to run either.
+    if intent.complexity == "complex" or intent.action in (
+        "mac_control", "voice", "vision", "code", "calendar", "delete_file", "compress_file",
+    ):
         return False
 
     messages = [{"role": "system", "content": intent.system}]
