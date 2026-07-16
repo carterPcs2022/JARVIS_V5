@@ -307,6 +307,15 @@ PROFILE_FILE       = MEMORY_DIR / "profile.json"
 MAX_SHORT_TERM     = 25
 MAX_LONG_TERM      = 2000
 
+# ── Memory persistence (Turso — core/turso_store.py) ──────────────────────────
+# A separate database from FRIDAY's own Turso instance, not shared — see
+# core/turso_store.py's docstring for why. Local JSON files under
+# MEMORY_DIR remain the fallback when these are unset (local dev, or a
+# transient Turso outage), same graceful-degradation pattern as every other
+# optional integration in this codebase.
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL", "")
+TURSO_AUTH_TOKEN    = os.getenv("TURSO_AUTH_TOKEN", "")
+
 # ── Services ──────────────────────────────────────────────────────────────────
 BACKUP_DIR              = BASE_DIR / "backups"
 BACKUP_INTERVAL_HOURS   = int(os.getenv("BACKUP_INTERVAL_HOURS", 6))

@@ -2,7 +2,7 @@
 core/memory.py — JARVIS unified memory system.
 Short-term (recent turns) + Long-term (vector search) + Profile.
 """
-import json, math, re
+import json, logging, math, re
 from datetime import datetime
 from pathlib import Path
 from collections import defaultdict
@@ -10,19 +10,42 @@ from config.settings import (SHORT_TERM_FILE, LONG_TERM_FILE,
                               CONVERSATIONS_FILE, PROFILE_FILE,
                               MAX_SHORT_TERM, MAX_LONG_TERM)
 
+log = logging.getLogger(__name__)
+
+
+def _turso_key(path: Path) -> str:
+    from config.settings import BASE_DIR
+    return str(path.relative_to(BASE_DIR)) if path.is_absolute() else str(path)
+
 
 def _load(path: Path) -> list | dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     default = [] if "profile" not in path.name else {}
+
+    # Turso first — it's the durable copy on Render's ephemeral disk.
+    # Falls through to the local file below on any failure (not
+    # configured, network error, or a malformed row), same as before this
+    # existed; the local file is a working cache/fallback, not just dead
+    # weight kept for compatibility.
+    from core.turso_store import get as turso_get
+    remote = turso_get(_turso_key(path))
+    if remote is not None:
+        return remote
+
     if path.exists() and path.stat().st_size > 0:
         try:
             with open(path) as f:
                 return json.load(f)
-        except Exception:
+        except Exception as e:
             # A truncated/corrupted file (e.g. from a crash mid-write)
             # must not take down every caller of this — this is the
-            # foundational loader for the whole memory system.
+            # foundational loader for the whole memory system. But silently
+            # returning an empty default let a month of wiped-disk data loss
+            # go unnoticed — log loudly so it surfaces instead.
+            log.error("Memory file corrupted, treating as empty: %s (%s)", path, e)
             return default
+    if not path.exists():
+        log.warning("Memory file missing, treating as empty: %s", path)
     return default
 
 
@@ -30,6 +53,13 @@ def _save(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
+
+    # Mirror to Turso so this survives the next Render redeploy — the
+    # local write above still happens unconditionally, so a Turso outage
+    # degrades to "doesn't persist across redeploys right now" rather
+    # than losing the write entirely.
+    from core.turso_store import put as turso_put
+    turso_put(_turso_key(path), data)
 
 
 # ── Short-term memory ─────────────────────────────────────────────────────────
