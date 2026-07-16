@@ -8,6 +8,33 @@ from config.settings import GROQ_API_KEY
 router = APIRouter()
 _clients: dict = {}
 
+# Combat-mode threat classification — was only ever wired into
+# server/routes/chat.py's POST /stark/chat, never into this module, despite
+# this being the endpoint the actual HUD chat uses for every real message.
+# threat_detector.py/combat_mode.py were fully built and correct; they just
+# never had a chance to run for real usage. Mirrors chat.py's pattern
+# exactly: classify concurrently with the main response (never adds
+# latency), capped at its own short timeout, treated as "no threat" on
+# timeout/error for that one message.
+THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
+
+
+async def _apply_threat_classification(loop: asyncio.AbstractEventLoop, msg: str,
+                                        classify_task: "asyncio.Future") -> str | None:
+    """Await the classification kicked off alongside the main response,
+    hand it to combat_mode, and return a soft-confirm prompt to append to
+    the reply if one applies. Never raises — a slow/failed classification
+    degrades to "no threat" for this message only, same as chat.py."""
+    try:
+        classification = await asyncio.wait_for(classify_task, timeout=THREAT_CLASSIFY_TIMEOUT_SECONDS)
+    except Exception:
+        return None
+    if not classification:
+        return None
+    from services.combat_mode import combat_mode
+    outcome = await loop.run_in_executor(None, combat_mode.handle_classification, msg, classification)
+    return outcome.get("soft_confirm_prompt")
+
 
 def _boot_greeting() -> str:
     """JARVIS introduces himself on a brand-new install, or gives a
@@ -54,12 +81,18 @@ async def ws_chat(websocket: WebSocket):
             if not msg:
                 continue
 
+            loop = asyncio.get_event_loop()
+            from services.threat_detector import classify as classify_threat
+            classify_task = loop.run_in_executor(None, classify_threat, msg)
+
             # Try streaming path first (Groq only)
-            streamed = await _try_stream(websocket, msg)
+            streamed = await _try_stream(websocket, msg, loop, classify_task)
             if not streamed:
                 # Fallback: blocking brain call (Ollama or error)
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None, brain.process_dict, msg)
+                result = await loop.run_in_executor(None, brain.process_dict, msg)
+                soft_confirm = await _apply_threat_classification(loop, msg, classify_task)
+                if soft_confirm and isinstance(result.get("response"), str):
+                    result["response"] = f"{result['response']}\n\n{soft_confirm}"
                 await websocket.send_json({"type": "response", **result})
 
     except WebSocketDisconnect:
@@ -72,10 +105,16 @@ async def ws_chat(websocket: WebSocket):
         _clients.pop(cid, None)
 
 
-async def _try_stream(websocket: WebSocket, msg: str) -> bool:
+async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEventLoop,
+                      classify_task: "asyncio.Future") -> bool:
     """
     Attempt Groq streaming. Returns True if streaming succeeded.
     On success, sends token/stream_end events and persists the turn.
+
+    classify_task is the threat-classification future the caller already
+    kicked off — every True-returning branch here must resolve it (apply or
+    explicitly discard) so it's never left dangling; a False return hands
+    it back to the caller for the brain.process_dict() fallback to use.
     """
     if not GROQ_API_KEY:
         return False
@@ -91,6 +130,7 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
     intent     = reasoner.analyze(msg)
     validation = validator.check(intent)
     if not validation.ok:
+        classify_task.cancel()  # invalid/blocked input isn't a realistic threat candidate
         await websocket.send_json({
             "type": "response",
             "response": f"I can't process that: {validation.reason}",
@@ -134,8 +174,11 @@ async def _try_stream(websocket: WebSocket, msg: str) -> bool:
         latency = round((time.time() - start) * 1000, 2)
 
         # Persist turn
-        loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _persist, msg, full_txt)
+
+        soft_confirm = await _apply_threat_classification(loop, msg, classify_task)
+        if soft_confirm:
+            full_txt = f"{full_txt}\n\n{soft_confirm}"
 
         # Render has no speakers, but the browser does — generate audio in
         # the background (never blocks the text response) and tell the
