@@ -83,7 +83,15 @@ async def calendar_callback(request: Request):
                 "redirect_uri":  GOOGLE_CALENDAR_REDIRECT_URI,
                 "grant_type":    "authorization_code",
             })
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            # raise_for_status()'s exception text is just the status code —
+            # Google's actual error/error_description (redirect_uri_mismatch,
+            # invalid_client, invalid_grant, etc.) is in the response body,
+            # which is the only thing that actually tells us what to fix.
+            return HTMLResponse(
+                f"<p>Token exchange failed ({resp.status_code}):</p><pre>{resp.text}</pre>",
+                status_code=502,
+            )
         tokens = resp.json()
     except Exception as e:
         return HTMLResponse(f"<p>Token exchange failed: {e}</p>", status_code=502)
