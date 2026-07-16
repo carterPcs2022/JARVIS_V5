@@ -125,6 +125,9 @@ def full_diagnostic() -> dict:
     memory_files_result = _check_memory_files()
     if any(v.get("valid_json") is False for v in memory_files_result.values()):
         warnings.append("⚠️ Memory file corrupted — see memory_files")
+    missing_memory_files = [name for name, v in memory_files_result.items() if not v.get("exists")]
+    if missing_memory_files:
+        warnings.append(f"⚠️ Memory file(s) missing: {', '.join(missing_memory_files)} — see memory_files")
 
     all_llms_down = not groq_ok and not anthropic_ok and not ollama_ok
     status = "DEGRADED" if (all_llms_down or lockdown_active or friday_active) else "NOMINAL"

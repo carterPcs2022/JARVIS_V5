@@ -43,7 +43,10 @@ def _check_memory_files() -> dict:
     result = _live_check()
     missing = [name for name, v in result.items() if not v.get("exists")]
     corrupt = [name for name, v in result.items() if v.get("exists") and v.get("valid_json") is False]
-    return {"ok": not corrupt, "missing": missing, "corrupt": corrupt}
+    # A missing file is exactly as unhealthy as a corrupt one — both mean the
+    # data isn't there. Previously only `corrupt` fed into `ok`, so a wiped
+    # disk (files simply absent) reported healthy.
+    return {"ok": not missing and not corrupt, "missing": missing, "corrupt": corrupt}
 
 
 def _check_config() -> dict:
