@@ -10,7 +10,7 @@
     {
       "name": "friday",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd /Users/kisha/Downloads/FRIDAY && python3 server.py"],
+      "runtimeArgs": ["-c", "cd /Users/kisha/Downloads/FRIDAY && .venv/bin/python server.py"],
       "port": 8080
     }
   ]
