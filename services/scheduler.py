@@ -70,9 +70,20 @@ def _mac_bridge_check():
         from services.notifications import warning
         warning("Mac Bridge unreachable", f"{_mac_bridge_fail_count} consecutive failed health checks")
 
+
+def _cleanup_old_files():
     """Log rotation + audio cache cleanup — Render's disk is small and
     ephemeral, but logs/*.json and static/*.mp3 (voice responses) still
-    grow unbounded between restarts otherwise."""
+    grow unbounded between restarts otherwise. Used to live inline inside
+    _mac_bridge_check(), gated behind "Mac Bridge configured AND currently
+    unhealthy" — nonsensical for disk hygiene that should run regardless,
+    and it left this function's name referenced by start()'s daily cron
+    registration below with no definition behind it, which raised a bare
+    NameError the instant that add_job() call executed. Since nothing
+    caught it until start()'s outer except (which just logs and gives up),
+    every job registered *after* that line in start() — including the
+    _scheduler.start() call itself — never ran. The whole scheduler has
+    been silently dead on every boot since this got split apart."""
     import glob, time
     from config.settings import BASE_DIR
     try:
