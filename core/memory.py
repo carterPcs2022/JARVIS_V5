@@ -618,8 +618,6 @@ def semantic_compress(memories: list, target_size: int = 10) -> list:
     except Exception:
         return memories[-target_size:]
 
-    return "\n\n".join(parts)
-
 
 # ── Clips ("clip that") ────────────────────────────────────────────────────
 CLIPS_FILE = Path("memory/clips.json")

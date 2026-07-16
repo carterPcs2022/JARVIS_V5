@@ -721,6 +721,7 @@ async def startup():
     async def _ping_friday():
         try:
             from services.automation import check_friday_alive
+            loop = asyncio.get_event_loop()
             ok = await loop.run_in_executor(None, check_friday_alive)
             status = "online" if ok else "offline"
             state.set("friday_online", ok)
