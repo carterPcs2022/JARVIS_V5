@@ -567,7 +567,16 @@ function handleWsMessage(data) {
     if (streamBubble) streamBubble.textContent = cleanText('ai', data.response ?? streamBubble.textContent);
     streamBubble = null;
     updateModel(data.model || '', '');
-    if (data.has_audio !== false) playLatestVoiceFallback();
+    // No fallback here — the server (server/websocket.py's _try_stream())
+    // already dispatched background voice generation before sending this
+    // message, and an 'audio_ready' event always follows once it's done.
+    // Calling playLatestVoiceFallback() here used to fetch-and-play
+    // /stark/voice/audio ~800ms later on a guess, then audio_ready played
+    // the same (by-then-ready) file again moments after — two overlapping
+    // Audio() instances speaking the same line, heard as JARVIS repeating
+    // himself. The 'response' branch below still needs the fallback: it
+    // comes from the blocking brain.process_dict() path, whose voice
+    // thread writes the audio file but never sends audio_ready.
   } else if (data.type === 'response') {
     hideThinking();
     addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
