@@ -87,7 +87,7 @@ class SelfImprovementEngine:
         if deploy.get("success"):
             queue = [i for i in queue if i.get("id") != improvement_id]
             self._save_queue(queue)
-            self._announce_deployment(item["filepath"], item["improvement"])
+            self._announce_deployment(item["filepath"], item["improvement"], deploy.get("hot_reloaded", False))
             self._commit_improvement_to_github(item["filepath"], item["improvement"])
 
         return deploy
@@ -132,14 +132,24 @@ class SelfImprovementEngine:
             f"Awaiting your approval, sir."
         )
 
-    def _announce_deployment(self, filepath: str, improvement: dict):
+    def _announce_deployment(self, filepath: str, improvement: dict, hot_reloaded: bool):
         from services.voice import speak
         from core.event_bus import bus
 
+        # hot_reloaded reflects whether core.protocols.extremis actually
+        # reloaded the changed module in place (core/sandbox.py's deploy())
+        # — "running the updated code now" used to be claimed unconditionally,
+        # which was false whenever the reload failed or the target was
+        # server/api.py itself (Extremis can't hot-reload that; it needs a
+        # real restart).
+        tail = "Running the updated code now." if hot_reloaded else (
+            "It's on disk and will take effect on the next restart, sir "
+            "— hot-reload didn't take for this one."
+        )
         msg = (
             f"Self-improvement deployed, sir. "
             f"{improvement.get('description', 'Optimization')[:60]} "
-            f"in {filepath.split('/')[-1]}. Running the updated code now."
+            f"in {filepath.split('/')[-1]}. {tail}"
         )
         try:
             speak(msg)

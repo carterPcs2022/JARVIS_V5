@@ -214,6 +214,23 @@ print("ALL_TESTS_PASSED")
 
         path.write_text(new_code)
 
+        # Writing the file alone doesn't make it effective — Python doesn't
+        # re-read source files for modules already in sys.modules, so the
+        # running process would keep executing the old in-memory bytecode
+        # until its next restart regardless of what's on disk now. Without
+        # this, _announce_deployment()'s "Running the updated code now, sir"
+        # was false for every deploy (the target file must already exist
+        # per the check above, so it's virtually always already loaded).
+        # Extremis (Protocol 20) can't hot-reload server/api.py itself —
+        # that genuinely needs a real restart — but everything else this
+        # can target (core/services/utils) reloads in place.
+        module_name = filepath[:-3].replace("/", ".") if filepath.endswith(".py") else filepath
+        try:
+            from core.protocols import extremis
+            reload_result = extremis.hot_reload(module_name)
+        except Exception as e:
+            reload_result = {"success": False, "error": str(e)}
+
         audit_log.record(
             "self_modification",
             "jarvis_sandbox",
@@ -224,6 +241,7 @@ print("ALL_TESTS_PASSED")
                 "new_hash":      new_hash,
                 "backup":        str(backup_path),
                 "confidence":    improvement.get("confidence", 0),
+                "hot_reload":    reload_result,
             },
             "deployed",
         )
@@ -236,7 +254,8 @@ print("ALL_TESTS_PASSED")
             "hash":        new_hash,
         })
 
-        return {"success": True, "filepath": filepath, "backup": str(backup_path), "hash": new_hash}
+        return {"success": True, "filepath": filepath, "backup": str(backup_path), "hash": new_hash,
+                "hot_reloaded": reload_result.get("success", False)}
 
     def rollback(self, filepath: str, backup_path: str) -> dict:
         """Roll back a deployment from its backup."""
