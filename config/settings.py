@@ -322,6 +322,16 @@ COMBAT_MODE_CONFIDENCE_THRESHOLD = float(os.getenv("COMBAT_MODE_CONFIDENCE_THRES
 COMBAT_MODE_SOFT_CONFIRM_MIN     = float(os.getenv("COMBAT_MODE_SOFT_CONFIRM_MIN", 0.5))
 COMBAT_MODE_TIMEOUT_MINUTES      = int(os.getenv("COMBAT_MODE_TIMEOUT_MINUTES", 10))
 
+# ── Google Calendar (OAuth2) ──────────────────────────────────────────────────
+# Client ID/secret reused from the FRIDAY project's existing Google Cloud app
+# registration — JARVIS has its own redirect URI + refresh token, not FRIDAY's
+# (see server/routes/calendar_auth.py for the one-time consent flow that mints
+# GOOGLE_CALENDAR_REFRESH_TOKEN).
+GOOGLE_CALENDAR_CLIENT_ID     = os.getenv("GOOGLE_CALENDAR_CLIENT_ID", "")
+GOOGLE_CALENDAR_CLIENT_SECRET = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", "")
+GOOGLE_CALENDAR_REDIRECT_URI  = os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "")
+GOOGLE_CALENDAR_REFRESH_TOKEN = os.getenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "")
+
 # ── Voice ─────────────────────────────────────────────────────────────────────
 JARVIS_VOICE    = os.getenv("JARVIS_VOICE", "en-US-GuyNeural")
 WHISPER_MODEL   = os.getenv("WHISPER_MODEL", "base")

@@ -87,6 +87,7 @@ def _include(*routers):
 (intel_router,) = _safe_import("server.routes.intel", "router")
 (military_router,) = _safe_import("server.routes.military", "router")
 (combat_mode_router,) = _safe_import("server.routes.combat_mode", "router")
+(calendar_auth_router,) = _safe_import("server.routes.calendar_auth", "router")
 
 # The two newest, least battle-tested subsystems also get an explicit
 # opt-out on top of the same import guard as everything else above.
@@ -108,7 +109,7 @@ _include(
     ultimate_brain_router, absolute_final_router, security_max_router,
     security_gov_router, security_firewalls_router, suit_security_router,
     new_features_router, intel_router, model_updater_router, sandbox_router,
-    military_router, combat_mode_router,
+    military_router, combat_mode_router, calendar_auth_router,
 )
 
 

@@ -80,7 +80,8 @@ SANDBOX_TRIGGERS = {
 class Intent:
     """What the user wants — extracted by the Reasoner."""
     raw:          str                    # original user input
-    action:       str = "chat"          # chat | task | search | code | vision | voice
+    action:       str = "chat"          # chat | task | search | code | vision | voice |
+                                         # mac_control | calendar | delete_file | compress_file
     subject:      str = ""              # what the action is about
     needs_web:    bool = False
     needs_agents: bool = False          # complex enough for multi-agent?
@@ -156,6 +157,22 @@ class Reasoner:
         return any(kw in low for kw in self._COMPRESS_FILE_KW) or (
             ("compress" in low or "zip" in low) and "file" in low)
 
+    # Real Google Calendar requests (core/tools/google_calendar.py) — flagged
+    # separately from _is_mac_control so "mark my calendar for Aug 20-27"
+    # routes to an actual event-create call instead of mac_dispatcher's
+    # AppleScript-only get_todays_events tool, which can't create events and
+    # doesn't exist on a headless host anyway. Checked before _is_mac_control,
+    # same precedence as the file-op checks above.
+    _CALENDAR_KW = [
+        "mark my calendar", "add to my calendar", "add an event", "add a calendar event",
+        "schedule an event", "put on my calendar", "block off", "block my calendar",
+        "create an event", "calendar event", "what's on my calendar", "check my calendar",
+        "my calendar", "today's events", "upcoming events", "calendar for",
+    ]
+
+    def _is_calendar(self, low: str) -> bool:
+        return any(kw in low for kw in self._CALENDAR_KW)
+
     # Mac / system control keywords
     _MAC_KW    = {
         "open","launch","start","close","quit","hide","show","focus",
@@ -180,7 +197,7 @@ class Reasoner:
             "send email","open spotify","open safari","open chrome","what apps are",
             "running apps","take a screenshot","current volume","the volume",
             "volume level","how loud","what song","current song","what's on",
-            "my calendar","today's events","my emails","my inbox",
+            "my emails","my inbox",
         ]
         return any(p in low for p in mac_phrases)
 
@@ -196,6 +213,8 @@ class Reasoner:
             action = "delete_file"
         elif self._is_compress_file(low):
             action = "compress_file"
+        elif self._is_calendar(low):
+            action = "calendar"
         elif self._is_mac_control(low, toks):
             action = "mac_control"
         elif toks & self._VOICE_KW:
@@ -350,6 +369,9 @@ class Planner:
         if intent.action == "mac_control":
             mode  = "mac_control"
             steps = [{"tool": "mac_dispatch", "args": {"command": intent.raw}}]
+        elif intent.action == "calendar":
+            mode  = "calendar"
+            steps = [{"tool": "calendar_dispatch", "args": {"text": intent.raw}}]
         elif intent.action == "code":
             mode  = "code"
             steps = [{"tool": "code_generate",
@@ -404,6 +426,8 @@ class Executor:
         try:
             if plan.mode == "mac_control":
                 response, model, provider = self._mac_control(plan)
+            elif plan.mode == "calendar":
+                response, model, provider = self._calendar(intent)
             elif plan.mode == "direct":
                 response, model, provider = self._direct(intent)
             elif plan.mode == "cot":
@@ -450,7 +474,7 @@ class Executor:
                 "Groq, Anthropic, and local Ollama all failed. Try again in "
                 "a moment."
             )
-        elif plan.mode not in ("voice", "code", "vision", "mac_control"):
+        elif plan.mode not in ("voice", "code", "vision", "mac_control", "calendar"):
             from core.reflection import reflect
             ref           = reflect(intent.raw, response)
             response      = ref["final"]
@@ -562,6 +586,42 @@ class Executor:
         from core.mac_dispatcher import dispatch
         result = dispatch(plan.intent.raw)
         return result, "", "mac"
+
+    def _calendar(self, intent: Intent) -> tuple[str, str, str]:
+        from core.tools.google_calendar import (
+            is_configured, create_event, list_events, parse_calendar_request,
+        )
+        if not is_configured():
+            return (
+                "Google Calendar isn't connected yet, sir. Visit "
+                "/stark/calendar/auth once to link it.",
+                "", "calendar",
+            )
+
+        parsed = parse_calendar_request(intent.raw)
+
+        if parsed["action"] == "create":
+            result = create_event(parsed["title"], parsed["start_date"],
+                                  parsed["end_date"], all_day=parsed["all_day"])
+            if "error" in result:
+                return f"Couldn't add that to your calendar, sir: {result['error']}", "", "calendar"
+            span = (parsed["start_date"] if parsed["start_date"] == parsed["end_date"]
+                    else f"{parsed['start_date']} through {parsed['end_date']}")
+            return f"Done, sir — \"{result['summary']}\" added for {span}.", "", "calendar"
+
+        if parsed["action"] == "list":
+            result = list_events(parsed["start_date"], parsed["end_date"])
+            if "error" in result:
+                return f"Couldn't check your calendar, sir: {result['error']}", "", "calendar"
+            events = result["events"]
+            if not events:
+                span = (parsed["start_date"] if parsed["start_date"] == parsed["end_date"]
+                        else f"{parsed['start_date']} through {parsed['end_date']}")
+                return f"Nothing on your calendar for {span}, sir.", "", "calendar"
+            lines = "; ".join(f"{e['summary']} ({e['start']})" for e in events)
+            return f"On your calendar, sir: {lines}.", "", "calendar"
+
+        return "I couldn't tell what you wanted done with your calendar, sir.", "", "calendar"
 
     def _reasoning_engine(self, plan: Plan) -> tuple[str, str, str]:
         """Dispatch to whichever core/*.py reasoning technique Planner
