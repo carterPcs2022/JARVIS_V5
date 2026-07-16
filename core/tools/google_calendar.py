@@ -45,7 +45,7 @@ def _get_service():
         token_uri=_TOKEN_URI,
         scopes=_SCOPES,
     )
-    return build("calendar", "v3", credentials=creds, cacheDiscovery=False)
+    return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
 def create_event(title: str, start_date: str, end_date: str = "",
