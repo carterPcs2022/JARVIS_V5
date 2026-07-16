@@ -15,6 +15,12 @@ router = APIRouter(prefix="/stark", tags=["chat"])
 _executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="chat-task")
 TASK_TIMEOUT_SECONDS = 15
 
+# Combat-mode threat classification runs concurrently with the main brain
+# call in the same executor, capped at its own short timeout so a slow/down
+# Groq call never adds latency to the actual response — on timeout or error
+# it's treated as "no threat detected" for this message only.
+THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
+
 
 @router.post("/chat", dependencies=[Depends(verify_token), Depends(rate_limit)])
 def chat(body: dict, request: Request):
@@ -32,16 +38,19 @@ def chat(body: dict, request: Request):
     except Exception:
         pass  # firewall unavailable — fail open rather than block all chat
 
+    from services.threat_detector import classify as classify_threat
+    threat_future = _executor.submit(classify_threat, msg)
+
     future = _executor.submit(brain.process_dict, msg)
     try:
-        return future.result(timeout=TASK_TIMEOUT_SECONDS)
+        result = future.result(timeout=TASK_TIMEOUT_SECONDS)
     except concurrent.futures.TimeoutError:
         # Python threads can't be forcibly killed — the abandoned task keeps
         # running to completion in the background and its result is simply
         # discarded. This still unblocks the caller immediately.
         from core.llm.router import chat as llm_chat
         r = llm_chat([{"role": "user", "content": msg}], temperature=0.6, query=msg)
-        return {
+        result = {
             "response":   r["content"],
             "model":      r.get("model", ""),
             "provider":   r.get("provider", ""),
@@ -54,3 +63,16 @@ def chat(body: dict, request: Request):
                 "issues":     [f"Task exceeded {TASK_TIMEOUT_SECONDS}s timeout; served direct response instead"],
             },
         }
+
+    try:
+        classification = threat_future.result(timeout=THREAT_CLASSIFY_TIMEOUT_SECONDS)
+    except Exception:
+        classification = None
+
+    if classification:
+        from services.combat_mode import combat_mode
+        outcome = combat_mode.handle_classification(msg, classification)
+        if outcome.get("soft_confirm_prompt") and isinstance(result.get("response"), str):
+            result["response"] = f"{result['response']}\n\n{outcome['soft_confirm_prompt']}"
+
+    return result
