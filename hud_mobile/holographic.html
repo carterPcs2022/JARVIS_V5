@@ -241,9 +241,9 @@
         { id: 'People',   type: 'person' },
         { id: 'Goals',    type: 'goal' },
       ];
-      const colors = { system: 0x5fd8ff, project: 0x8ee9ff, person: 0xd9a441, goal: 0xff6b6b };
-      const glowTex = { system: glowTexCyan, project: glowTexCyan, person: glowTexGold, goal: glowTexCyan };
-      const labelColor = { system: '#5fd8ff', project: '#8ee9ff', person: '#f0c674', goal: '#ff6b6b' };
+      const colors = { system: 0x5fd8ff, project: 0x8ee9ff, person: 0xd9a441, goal: 0xff6b6b, trusted: 0x5fd8ff, unknown: 0xff6b6b };
+      const glowTex = { system: glowTexCyan, project: glowTexCyan, person: glowTexGold, goal: glowTexCyan, trusted: glowTexCyan, unknown: glowTexCyan };
+      const labelColor = { system: '#5fd8ff', project: '#8ee9ff', person: '#f0c674', goal: '#ff6b6b', trusted: '#5fd8ff', unknown: '#ff6b6b' };
 
       const positions = nodes.map((node, i) => {
         const angle  = (i / nodes.length) * Math.PI * 2;
@@ -291,6 +291,40 @@
       scene.add(group);
       currentObjects.push(group);
       document.getElementById('mode-label').textContent = data ? 'NETWORK TOPOLOGY' : 'KNOWLEDGE GRAPH';
+    }
+
+    // Network Map used to just call buildKnowledgeGraph(null) — identical
+    // button, identical scene, as if it were a second Knowledge Graph.
+    // Real device data already exists (services/network_intel.py, the
+    // same /stark/network endpoint Threat Radar's info line already
+    // fetches) — pull it in and render actual devices as the graph nodes
+    // instead of the generic JARVIS/Projects/People/Goals placeholders.
+    async function buildNetworkMap() {
+      try {
+        const token = localStorage.getItem('jarvis_token') || '';
+        const res = await fetch(`${location.protocol}//${location.host}/stark/network`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const d = await res.json();
+        const devices = (d.devices || []).slice(0, 8); // cap so the radial layout stays legible
+        const subnetLine = `Subnet: ${d.subnet || '—'} · ${d.device_count || 0} device(s) · Internet: ${d.internet?.online ? 'online' : 'offline'}`;
+        if (!devices.length) {
+          buildKnowledgeGraph({ nodes: [{ id: 'NO DEVICES FOUND', type: 'unknown' }] });
+          document.getElementById('mode-label').textContent = 'NETWORK TOPOLOGY';
+          document.getElementById('info').textContent = subnetLine;
+          return;
+        }
+        const nodes = devices.map(dev => ({
+          id: (dev.hostname && dev.hostname !== 'unknown') ? dev.hostname : dev.ip,
+          type: dev.trusted ? 'trusted' : 'unknown',
+        }));
+        buildKnowledgeGraph({ nodes });
+        document.getElementById('info').textContent = subnetLine;
+      } catch (e) {
+        buildKnowledgeGraph({ nodes: [{ id: 'SCAN FAILED', type: 'unknown' }] });
+        document.getElementById('mode-label').textContent = 'NETWORK TOPOLOGY';
+        document.getElementById('info').textContent = 'Unable to reach the network scanner.';
+      }
     }
 
     // ── THREAT RADAR MODE ──────────────────────────────────────────────
@@ -358,7 +392,7 @@
       if (m === 'vitals')    buildArcReactor();
       if (m === 'knowledge') buildKnowledgeGraph(null);
       if (m === 'threat')    buildThreatRadar();
-      if (m === 'network')   buildKnowledgeGraph(null);
+      if (m === 'network')   buildNetworkMap();
     }
 
     let t = 0;
