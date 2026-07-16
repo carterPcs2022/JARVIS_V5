@@ -5,177 +5,395 @@
   <title>J.A.R.V.I.S — Holographic Display</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <style>
-    body { background: #040810; margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #overlay { position: absolute; top: 20px; left: 20px;
-                color: #00b4ff; font-family: monospace; }
-    .mode-btn { background: transparent; border: 1px solid #00b4ff;
-                color: #00b4ff; padding: 8px 16px; margin: 4px;
-                cursor: pointer; font-family: monospace; }
-    .mode-btn:active { background: rgba(0,180,255,0.2); }
-    #back-link { position: absolute; top: 20px; right: 20px; z-index: 1000;
-                  color: #00b4ff; font-family: monospace; text-decoration: none;
-                  border: 1px solid #00b4ff; padding: 6px 12px; }
+    :root {
+      --cyan:  #5fd8ff;
+      --cyan2: #8ee9ff;
+      --gold:  #d9a441;
+      --gold2: #f0c674;
+      --danger:#ff4d4d;
+    }
+    * { box-sizing: border-box; }
+    body { background: #04080a; margin: 0; overflow: hidden; font-family: 'SF Mono', 'Courier New', monospace; }
+    canvas.webgl { display: block; }
+
+    body::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+      background: radial-gradient(ellipse 90% 70% at 50% 50%, transparent 55%, rgba(2,4,5,0.9) 100%);
+    }
+
+    #header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 26px; pointer-events: none;
+    }
+    #title { font-size: 15px; letter-spacing: 6px; color: var(--cyan); text-shadow: 0 0 16px rgba(95,216,255,0.4); }
+    #title span { color: var(--gold2); }
+    #back-link {
+      pointer-events: all; color: var(--gold2); font-size: 10px; letter-spacing: 3px;
+      text-decoration: none; border: 1px solid rgba(217,164,65,0.4); padding: 7px 14px;
+      border-radius: 2px; background: rgba(2,4,5,0.5); backdrop-filter: blur(4px);
+    }
+    #back-link:hover { border-color: var(--gold2); background: rgba(217,164,65,0.1); }
+
+    #mode-bar {
+      position: fixed; top: 64px; left: 26px; z-index: 10;
+      display: flex; gap: 8px; flex-wrap: wrap; max-width: 320px;
+    }
+    .mode-btn {
+      background: rgba(2,4,5,0.55); backdrop-filter: blur(4px);
+      border: 1px solid rgba(95,216,255,0.3); color: var(--cyan);
+      padding: 8px 14px; font-family: inherit; font-size: 9px; letter-spacing: 2px;
+      cursor: pointer; border-radius: 2px; transition: all 0.15s;
+    }
+    .mode-btn:hover { border-color: var(--cyan); background: rgba(95,216,255,0.1); }
+    .mode-btn.active { border-color: var(--gold2); color: var(--gold2); background: rgba(217,164,65,0.08); }
+
+    #info {
+      position: fixed; bottom: 26px; left: 26px; right: 26px; z-index: 10;
+      font-size: 11px; letter-spacing: 1px; line-height: 1.8; color: rgba(142,233,255,0.75);
+      max-width: 720px; pointer-events: none; text-shadow: 0 0 3px rgba(95,216,255,0.25);
+    }
+
+    #mode-label {
+      position: fixed; bottom: 70px; left: 26px; z-index: 10;
+      font-size: 9px; letter-spacing: 4px; color: rgba(217,164,65,0.7);
+      text-transform: uppercase;
+    }
+
+    .corner { position: fixed; width: 22px; height: 22px; z-index: 9; pointer-events: none; }
+    .corner-tl { top: 10px; left: 10px; border-top: 2px solid rgba(217,164,65,0.35); border-left: 2px solid rgba(217,164,65,0.35); }
+    .corner-tr { top: 10px; right: 10px; border-top: 2px solid rgba(217,164,65,0.35); border-right: 2px solid rgba(217,164,65,0.35); }
+    .corner-bl { bottom: 10px; left: 10px; border-bottom: 2px solid rgba(217,164,65,0.35); border-left: 2px solid rgba(217,164,65,0.35); }
+    .corner-br { bottom: 10px; right: 10px; border-bottom: 2px solid rgba(217,164,65,0.35); border-right: 2px solid rgba(217,164,65,0.35); }
+
+    .scanlines {
+      position: fixed; inset: 0; z-index: 8; pointer-events: none;
+      background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(95,216,255,0.012) 2px, rgba(95,216,255,0.012) 4px);
+    }
   </style>
 </head>
 <body>
-  <a id="back-link" href="/hud">&larr; HUD</a>
-  <div id="overlay">
-    <div style="font-size:20px;letter-spacing:4px;margin-bottom:16px">
-      J.A.R.V.I.S — HOLOGRAPHIC DISPLAY
-    </div>
-    <button class="mode-btn" onclick="showMode('knowledge')">KNOWLEDGE GRAPH</button>
-    <button class="mode-btn" onclick="showMode('network')">NETWORK MAP</button>
-    <button class="mode-btn" onclick="showMode('vitals')">ARC REACTOR</button>
-    <button class="mode-btn" onclick="showMode('threat')">THREAT RADAR</button>
-    <div id="info" style="margin-top:16px;font-size:12px"></div>
+  <div class="scanlines"></div>
+  <div class="corner corner-tl"></div>
+  <div class="corner corner-tr"></div>
+  <div class="corner corner-bl"></div>
+  <div class="corner corner-br"></div>
+
+  <div id="header">
+    <div id="title">J.A.R.V.I.S — HOLOGRAPHIC <span>DISPLAY</span></div>
+    <a id="back-link" href="/hud">&larr; HUD</a>
   </div>
+
+  <div id="mode-bar">
+    <button class="mode-btn active" data-mode="vitals" onclick="showMode('vitals')">ARC REACTOR</button>
+    <button class="mode-btn" data-mode="knowledge" onclick="showMode('knowledge')">KNOWLEDGE GRAPH</button>
+    <button class="mode-btn" data-mode="network" onclick="showMode('network')">NETWORK MAP</button>
+    <button class="mode-btn" data-mode="threat" onclick="showMode('threat')">THREAT RADAR</button>
+  </div>
+
+  <div id="mode-label">ARC REACTOR TELEMETRY</div>
+  <div id="info"></div>
+
   <script>
     const scene    = new THREE.Scene();
-    const camera   = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+    const camera   = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.domElement.classList.add('webgl');
     document.body.appendChild(renderer.domElement);
-    camera.position.z = 5;
+    camera.position.set(0, 0.6, 6);
+    camera.lookAt(0, 0, 0);
 
-    scene.add(new THREE.AmbientLight(0x00b4ff, 0.3));
-    const pointLight = new THREE.PointLight(0x00b4ff, 1, 100);
-    pointLight.position.set(0, 0, 5);
-    scene.add(pointLight);
+    // Real lighting — the old build used MeshBasicMaterial everywhere,
+    // which ignores lights entirely (the AmbientLight/PointLight below did
+    // nothing). Standard/Phong materials on the objects actually respond
+    // to these now, which is most of why this used to look like flat
+    // colored construction-paper cutouts instead of a hologram.
+    scene.add(new THREE.AmbientLight(0x1a3540, 1.2));
+    const keyLight = new THREE.PointLight(0x5fd8ff, 2.2, 30);
+    keyLight.position.set(3, 3, 4);
+    scene.add(keyLight);
+    const rimLight = new THREE.PointLight(0xd9a441, 1.4, 30);
+    rimLight.position.set(-3, -2, -3);
+    scene.add(rimLight);
+
+    // ── Soft glow sprites (cheap stand-in for bloom postprocessing —
+    // r128 loaded as a single UMD script here, no EffectComposer/
+    // UnrealBloomPass addon available without ES module imports) ──
+    function makeGlowTexture(hex) {
+      const size = 128;
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      const ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+      grad.addColorStop(0, `rgba(${hex}, 0.9)`);
+      grad.addColorStop(0.4, `rgba(${hex}, 0.35)`);
+      grad.addColorStop(1, `rgba(${hex}, 0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+      return new THREE.CanvasTexture(c);
+    }
+    const glowTexCyan = makeGlowTexture('95,216,255');
+    const glowTexGold = makeGlowTexture('217,164,65');
+
+    function addGlow(parent, texture, scale) {
+      const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(scale, scale, 1);
+      parent.add(sprite);
+      return sprite;
+    }
+
+    function makeTextSprite(text, color) {
+      const c = document.createElement('canvas');
+      const ctx = c.getContext('2d');
+      const fontSize = 42;
+      ctx.font = `${fontSize}px 'SF Mono', monospace`;
+      const w = Math.max(ctx.measureText(text).width + 24, 40);
+      c.width = w; c.height = fontSize * 1.6;
+      ctx.font = `${fontSize}px 'SF Mono', monospace`;
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14;
+      ctx.fillText(text, c.width/2, c.height/2);
+      const texture = new THREE.CanvasTexture(c);
+      const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+      const sprite = new THREE.Sprite(mat);
+      // Divisor tuned against the scene's actual scale (nodes are
+      // ~0.16-radius spheres a couple world units from origin) — the
+      // previous /34 produced a label ~2 world units tall, dwarfing and
+      // blurring over the entire graph instead of sitting neatly by its node.
+      const worldScale = 210;
+      sprite.scale.set(w / worldScale, (fontSize * 1.6) / worldScale, 1);
+      return sprite;
+    }
 
     let currentObjects = [];
     let mode = 'vitals';
 
     function clearScene() {
-        currentObjects.forEach(obj => scene.remove(obj));
-        currentObjects = [];
+      currentObjects.forEach(obj => {
+        scene.remove(obj);
+        obj.traverse?.(child => {
+          child.geometry?.dispose?.();
+          child.material?.dispose?.();
+        });
+      });
+      currentObjects = [];
     }
 
-    // ── ARC REACTOR MODE ──────────────────────────────────
+    // ── ARC REACTOR MODE ──────────────────────────────────────────────
     function buildArcReactor() {
-        clearScene();
-        const core = new THREE.Mesh(
-            new THREE.SphereGeometry(0.3, 32, 32),
-            new THREE.MeshBasicMaterial({color: 0x00b4ff})
+      clearScene();
+      const group = new THREE.Group();
+
+      const core = new THREE.Mesh(
+        new THREE.SphereGeometry(0.32, 48, 48),
+        new THREE.MeshStandardMaterial({ color: 0x5fd8ff, emissive: 0x1a5f7a, emissiveIntensity: 1.4, metalness: 0.3, roughness: 0.25 })
+      );
+      group.add(core);
+      addGlow(group, glowTexCyan, 1.8);
+
+      // Three rings at distinct tilts so they actually read as concentric
+      // 3D orbits from this camera angle, instead of the old version's
+      // identical rotation.x on every ring (which made them coplanar and
+      // rendered edge-on as a single flat line).
+      const ringTilts = [
+        { x: Math.PI / 2.4, z: 0.15 },
+        { x: Math.PI / 2,   z: -0.35 },
+        { x: Math.PI / 1.7, z: 0.6 },
+      ];
+      const ringColors = [0x5fd8ff, 0x8ee9ff, 0xd9a441];
+      [0.75, 1.15, 1.55].forEach((r, i) => {
+        const ring = new THREE.Mesh(
+          new THREE.TorusGeometry(r, 0.015, 16, 100),
+          new THREE.MeshStandardMaterial({ color: ringColors[i], emissive: ringColors[i], emissiveIntensity: 0.6, metalness: 0.5, roughness: 0.3 })
         );
-        scene.add(core); currentObjects.push(core);
+        ring.rotation.x = ringTilts[i].x;
+        ring.rotation.z = ringTilts[i].z;
+        ring.userData.spinSpeed = 0.003 * (i + 1) * (i % 2 === 0 ? 1 : -1);
+        group.add(ring);
+      });
 
-        [0.8, 1.2, 1.6].forEach((r) => {
-            const ring = new THREE.Mesh(
-                new THREE.TorusGeometry(r, 0.02, 16, 100),
-                new THREE.MeshBasicMaterial({color: 0x00b4ff, wireframe: true})
-            );
-            ring.rotation.x = Math.PI / 2;
-            scene.add(ring); currentObjects.push(ring);
-        });
+      const particleGeo = new THREE.BufferGeometry();
+      const positions = new Float32Array(360);
+      for (let i = 0; i < 360; i++) positions[i] = (Math.random() - 0.5) * 5;
+      particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const particles = new THREE.Points(particleGeo, new THREE.PointsMaterial({ color: 0x8ee9ff, size: 0.025, transparent: true, opacity: 0.6 }));
+      group.add(particles);
 
-        const particles = new THREE.BufferGeometry();
-        const positions = new Float32Array(300);
-        for(let i = 0; i < 300; i++) {
-            positions[i] = (Math.random() - 0.5) * 4;
-        }
-        particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const pMaterial = new THREE.PointsMaterial({color: 0x00ffcc, size: 0.02});
-        const particleSystem = new THREE.Points(particles, pMaterial);
-        scene.add(particleSystem);
-        currentObjects.push(particleSystem);
-
-        fetchAndShowInfo('/stark/suit/full', d => d.narrative || '');
+      scene.add(group);
+      currentObjects.push(group);
+      document.getElementById('mode-label').textContent = 'ARC REACTOR TELEMETRY';
+      fetchAndShowInfo('/stark/suit/full', d => d.narrative || '');
     }
 
-    // ── KNOWLEDGE GRAPH / NETWORK MODE ────────────────────
+    // ── KNOWLEDGE GRAPH / NETWORK MODE ────────────────────────────────
     function buildKnowledgeGraph(data) {
-        clearScene();
-        const nodes = data?.nodes || [
-            {id: 'JARVIS', type: 'system'},
-            {id: 'Projects', type: 'project'},
-            {id: 'People', type: 'person'},
-            {id: 'Goals', type: 'goal'},
-        ];
-        const colors = {system: 0x00b4ff, project: 0x00ffcc,
-                        person: 0xffaa00, goal: 0xff6666};
-        nodes.forEach((node, i) => {
-            const angle  = (i / nodes.length) * Math.PI * 2;
-            const radius = 2;
-            const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(0.15, 16, 16),
-                new THREE.MeshBasicMaterial({color: colors[node.type] || 0x00b4ff})
-            );
-            sphere.position.set(
-                Math.cos(angle) * radius,
-                Math.sin(angle) * radius * 0.5,
-                (Math.random() - 0.5) * 2
-            );
-            sphere.userData = node;
-            scene.add(sphere);
-            currentObjects.push(sphere);
-        });
+      clearScene();
+      const group = new THREE.Group();
+      const nodes = data?.nodes || [
+        { id: 'JARVIS',   type: 'system' },
+        { id: 'Projects', type: 'project' },
+        { id: 'People',   type: 'person' },
+        { id: 'Goals',    type: 'goal' },
+      ];
+      const colors = { system: 0x5fd8ff, project: 0x8ee9ff, person: 0xd9a441, goal: 0xff6b6b };
+      const glowTex = { system: glowTexCyan, project: glowTexCyan, person: glowTexGold, goal: glowTexCyan };
+      const labelColor = { system: '#5fd8ff', project: '#8ee9ff', person: '#f0c674', goal: '#ff6b6b' };
+
+      const positions = nodes.map((node, i) => {
+        const angle  = (i / nodes.length) * Math.PI * 2;
+        const radius = 2.1;
+        return new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius * 0.55, Math.sin(angle * 1.3) * 0.8);
+      });
+
+      // Connective lines from a central hub node to each — the old version
+      // never drew any edges at all, so a page titled "Knowledge Graph"
+      // showed exactly zero relationships between its nodes.
+      const hub = new THREE.Vector3(0, 0, 0);
+      positions.forEach(pos => {
+        const lineGeo = new THREE.BufferGeometry().setFromPoints([hub, pos]);
+        const line = new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: 0x2a5f70, transparent: true, opacity: 0.5 }));
+        group.add(line);
+      });
+
+      const hubMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.09, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0xd9a441, emissive: 0xd9a441, emissiveIntensity: 0.8 })
+      );
+      group.add(hubMesh);
+      addGlow(hubMesh, glowTexGold, 0.7);
+
+      nodes.forEach((node, i) => {
+        const nodeGroup = new THREE.Group();
+        const color = colors[node.type] || 0x5fd8ff;
+        const sphere = new THREE.Mesh(
+          new THREE.SphereGeometry(0.16, 32, 32),
+          new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.7, metalness: 0.3, roughness: 0.3 })
+        );
+        nodeGroup.add(sphere);
+        addGlow(nodeGroup, glowTex[node.type] || glowTexCyan, 0.9);
+
+        const label = makeTextSprite(node.id, labelColor[node.type] || '#5fd8ff');
+        label.position.set(0, 0.32, 0);
+        nodeGroup.add(label);
+
+        nodeGroup.position.copy(positions[i]);
+        nodeGroup.userData.orbitPhase = (i / nodes.length) * Math.PI * 2;
+        nodeGroup.userData.orbitRadius = positions[i].length();
+        group.add(nodeGroup);
+      });
+
+      scene.add(group);
+      currentObjects.push(group);
+      document.getElementById('mode-label').textContent = data ? 'NETWORK TOPOLOGY' : 'KNOWLEDGE GRAPH';
     }
 
-    // ── THREAT RADAR MODE ─────────────────────────────────
+    // ── THREAT RADAR MODE ──────────────────────────────────────────────
     function buildThreatRadar() {
-        clearScene();
-        [1, 2, 3].forEach(r => {
-            const circle = new THREE.Mesh(
-                new THREE.TorusGeometry(r, 0.01, 16, 100),
-                new THREE.MeshBasicMaterial({color: 0x003344})
-            );
-            scene.add(circle); currentObjects.push(circle);
-        });
-        const sweep = new THREE.Mesh(
-            new THREE.PlaneGeometry(3, 0.02),
-            new THREE.MeshBasicMaterial({color: 0x00ff44, transparent: true, opacity: 0.7})
+      clearScene();
+      const group = new THREE.Group();
+      group.rotation.x = -0.15; // tilt toward camera so it reads as a radar dish, not a flat wall
+
+      [1, 1.6, 2.2].forEach((r, i) => {
+        const circle = new THREE.Mesh(
+          new THREE.TorusGeometry(r, 0.008, 12, 100),
+          new THREE.MeshStandardMaterial({ color: 0x5fd8ff, emissive: 0x5fd8ff, emissiveIntensity: 0.35, transparent: true, opacity: 0.5 - i * 0.1 })
         );
-        sweep.position.x = 1.5;
-        const sweepGroup = new THREE.Group();
-        sweepGroup.add(sweep);
-        scene.add(sweepGroup);
-        currentObjects.push(sweepGroup);
-        sweepGroup._isSweep = true;
+        group.add(circle);
+      });
+
+      const crossGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(-2.2, 0, 0), new THREE.Vector3(2.2, 0, 0),
+        new THREE.Vector3(0, -2.2, 0), new THREE.Vector3(0, 2.2, 0),
+      ]);
+      group.add(new THREE.LineSegments(crossGeo, new THREE.LineBasicMaterial({ color: 0x2a5f70, transparent: true, opacity: 0.5 })));
+
+      const sweepGeo = new THREE.PlaneGeometry(2.2, 0.05, 1, 1);
+      sweepGeo.translate(1.1, 0, 0); // pivot at the radar center, not the plane's own middle
+      const sweep = new THREE.Mesh(sweepGeo, new THREE.MeshBasicMaterial({ color: 0x34ff8a, transparent: true, opacity: 0.75, side: THREE.DoubleSide }));
+      const sweepGroup = new THREE.Group();
+      sweepGroup.add(sweep);
+      sweepGroup.userData.isSweep = true;
+      group.add(sweepGroup);
+
+      // A couple of contact blips so the radar has something to actually
+      // display, not just an empty sweeping grid.
+      [[0.9, 0.4], [-1.3, -0.6], [1.6, -1.1]].forEach(([x, y]) => {
+        const blip = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 12, 12),
+          new THREE.MeshStandardMaterial({ color: 0xff6b6b, emissive: 0xff6b6b, emissiveIntensity: 1 })
+        );
+        blip.position.set(x, y, 0.02);
+        group.add(blip);
+        addGlow(blip, glowTexCyan, 0.35);
+      });
+
+      scene.add(group);
+      currentObjects.push(group);
+      document.getElementById('mode-label').textContent = 'SENTINEL THREAT SCAN';
+      fetchAndShowInfo('/stark/network', d => `Known devices: ${(d.devices||[]).filter(x=>x.trusted).length} · Unknown: ${(d.devices||[]).filter(x=>!x.trusted).length}`);
     }
 
     async function fetchAndShowInfo(path, extract) {
-        try {
-            const token = localStorage.getItem('jarvis_token') || '';
-            const res = await fetch(`${location.protocol}//${location.host}${path}`, {
-                headers: token ? {'Authorization': `Bearer ${token}`} : {}
-            });
-            if (res.ok) {
-                const data = await res.json();
-                document.getElementById('info').textContent = extract(data).slice(0, 300);
-            }
-        } catch (e) { /* holographic display is decorative — fail silently */ }
+      try {
+        const token = localStorage.getItem('jarvis_token') || '';
+        const res = await fetch(`${location.protocol}//${location.host}${path}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        if (res.ok) {
+          const data = await res.json();
+          document.getElementById('info').textContent = extract(data).slice(0, 300);
+        }
+      } catch (e) { document.getElementById('info').textContent = ''; }
     }
 
     function showMode(m) {
-        mode = m;
-        if (m === 'vitals')    buildArcReactor();
-        if (m === 'knowledge') buildKnowledgeGraph(null);
-        if (m === 'threat')    buildThreatRadar();
-        if (m === 'network')   buildKnowledgeGraph(null);
+      mode = m;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+      if (m === 'vitals')    buildArcReactor();
+      if (m === 'knowledge') buildKnowledgeGraph(null);
+      if (m === 'threat')    buildThreatRadar();
+      if (m === 'network')   buildKnowledgeGraph(null);
     }
 
+    let t = 0;
     function animate() {
-        requestAnimationFrame(animate);
-        const t = Date.now() * 0.001;
-        currentObjects.forEach((obj, i) => {
-            if (obj.geometry?.type === 'TorusGeometry') {
-                obj.rotation.z += 0.003 * (i + 1);
-            }
-            if (obj._isSweep) {
-                obj.rotation.z = t * 1.5;
-            }
+      requestAnimationFrame(animate);
+      t = Date.now() * 0.001;
+
+      currentObjects.forEach(group => {
+        group.children.forEach(obj => {
+          if (obj.geometry?.type === 'TorusGeometry' && obj.userData.spinSpeed) {
+            obj.rotation.z += obj.userData.spinSpeed;
+          }
+          if (obj.userData.isSweep) {
+            obj.rotation.z = t * 1.2;
+          }
+          if (obj.userData.orbitPhase !== undefined) {
+            const phase = obj.userData.orbitPhase + t * 0.15;
+            const r = obj.userData.orbitRadius;
+            obj.position.x = Math.cos(phase) * r;
+            obj.position.y = Math.sin(phase) * r * 0.55;
+          }
         });
-        renderer.render(scene, camera);
+        group.rotation.y += mode === 'vitals' ? 0.0015 : 0;
+      });
+
+      renderer.render(scene, camera);
     }
 
     buildArcReactor();
     animate();
 
     window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
     });
   </script>
 </body>
