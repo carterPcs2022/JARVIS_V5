@@ -101,7 +101,7 @@ class MorningRoutine:
     def _push_to_phone(self, message: str):
         import httpx
         user = os.getenv("PUSHOVER_USER_KEY", "")
-        token = os.getenv("PUSHOVER_APP_TOKEN", "")
+        token = os.getenv("PUSHOVER_API_TOKEN", "")
         if user and token:
             httpx.post(
                 "https://api.pushover.net/1/messages.json",

@@ -105,7 +105,7 @@ class DeadMansSwitch:
         if not contact:
             return
         user = os.getenv("PUSHOVER_USER_KEY", "")
-        token = os.getenv("PUSHOVER_APP_TOKEN", "")
+        token = os.getenv("PUSHOVER_API_TOKEN", "")
         if user and token:
             import httpx
             httpx.post(
