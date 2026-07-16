@@ -428,11 +428,22 @@ def start():
                             next_run_time=now + timedelta(seconds=120))
 
         # Stark Intelligence — background proactive thinking + anticipatory
-        # pre-caching of the user's likely next question
-        _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
-                            next_run_time=now + timedelta(seconds=180))
-        _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
-                            next_run_time=now + timedelta(seconds=240))
+        # pre-caching of the user's likely next question. Both hit Groq's
+        # "standard" (70B) tier and only do anything once memory/short_term.json
+        # has real turns in it — which on a real deploy means "after the user's
+        # actually talked to JARVIS", but locally that file is a persistent
+        # dev-machine artifact that never resets between restarts, so these
+        # fire real 70B calls on every single local boot before a single test
+        # message goes out. Skipped under the same local-dev gate as
+        # warm_cache() above — production behavior (ENVIRONMENT != "local",
+        # or DEV_MODE off) is unaffected; these still register and will start
+        # firing on a live Render instance once real conversation history
+        # accumulates.
+        if not (ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true"):
+            _scheduler.add_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
+                                next_run_time=now + timedelta(seconds=180))
+            _scheduler.add_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
+                                next_run_time=now + timedelta(seconds=240))
 
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
