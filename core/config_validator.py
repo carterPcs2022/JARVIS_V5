@@ -118,16 +118,24 @@ def validate_config() -> dict:
 
 
 def validate_and_alert() -> dict:
-    """Runs validate_config() and fires the CRITICAL notification channel
+    """Runs validate_config() and fires a HIGH-priority notification
     (Pushover/macOS/HUD — see services/notifications.py) on a hard fail.
     Intended to be run in a background thread shortly after startup, not
-    inline in the FastAPI startup handler."""
+    inline in the FastAPI startup handler.
+
+    Deliberately HIGH, not CRITICAL: a misconfigured .env is worth knowing
+    about, not a "wake up at 3am" emergency. CRITICAL sets Pushover's
+    retry/expire (see notifications.py's _pushover), which re-delivers the
+    same push every 30s for 5 minutes until acknowledged in the Pushover
+    app — on a crash-restart loop, every restart re-fires this and stacks
+    another 5-minute retry storm on top. HIGH still reaches the phone once,
+    with no retry."""
     result = validate_config()
     if not result["ok"]:
         try:
-            from services.notifications import critical
+            from services.notifications import alert
             summary = "; ".join(result["issues"][:3])
-            critical("Config validation FAILED", summary)
+            alert("Config validation FAILED", summary)
         except Exception:
             pass
     return result
