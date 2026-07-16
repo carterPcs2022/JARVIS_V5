@@ -40,9 +40,9 @@ class EmailIntelligence:
 
     def _connect_imap(self):
         """Connect to IMAP and select INBOX. Returns connection or None."""
-        server   = os.environ.get("IMAP_SERVER",   "imap.gmail.com")
-        username = os.environ.get("IMAP_USERNAME",  "")
-        password = os.environ.get("IMAP_PASSWORD",  "")
+        server   = os.environ.get("EMAIL_IMAP_SERVER", "imap.gmail.com")
+        username = os.environ.get("EMAIL_ADDRESS",  "")
+        password = os.environ.get("EMAIL_PASSWORD",  "")
 
         if not username or not password:
             return None

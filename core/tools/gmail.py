@@ -7,7 +7,9 @@ flow, no credentials JSON file.
 First-time setup:
   1. Enable 2-Step Verification on the Google account, if not already on.
   2. Google Account -> Security -> App Passwords -> generate one for "Mail".
-  3. Set env vars: GMAIL_ADDRESS=you@gmail.com, GMAIL_APP_PASSWORD=<the 16-char password>.
+  3. Set env vars: EMAIL_ADDRESS=you@gmail.com, EMAIL_PASSWORD=<the 16-char password>
+     (same vars services/email_intel.py and the IMAP config use — one Gmail
+     App Password covers both).
 
 Note on message IDs: check_inbox()/search_emails() now return IMAP UIDs
 (strings), not Gmail API message IDs — a different ID space than the old
@@ -21,8 +23,8 @@ import email
 from email.header import decode_header
 from email.mime.text import MIMEText
 
-GMAIL_USER = os.getenv("GMAIL_ADDRESS", "")
-GMAIL_PASS = os.getenv("GMAIL_APP_PASSWORD", "")
+GMAIL_USER = os.getenv("EMAIL_ADDRESS", "")
+GMAIL_PASS = os.getenv("EMAIL_PASSWORD", "")
 
 
 def _connect() -> imaplib.IMAP4_SSL:
