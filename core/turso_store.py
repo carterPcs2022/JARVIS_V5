@@ -42,8 +42,16 @@ def _get_client():
     global _client, _bootstrapped
     if _client is None:
         import libsql_client
+        # A libsql:// URL tells the client to use its WebSocket (Hrana)
+        # transport — Turso's server rejected that handshake outright (400
+        # on the upgrade, "Invalid response status") the one time this got
+        # smoke-tested, so force plain HTTPS instead. That's also the
+        # better fit here regardless: this store does occasional
+        # independent reads/writes, not a rapid sequence of queries that
+        # would benefit from a persistent streaming connection.
+        url = TURSO_DATABASE_URL.replace("libsql://", "https://", 1)
         _client = libsql_client.create_client_sync(
-            url=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN,
+            url=url, auth_token=TURSO_AUTH_TOKEN,
         )
     if not _bootstrapped:
         _client.execute(
