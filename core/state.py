@@ -45,6 +45,31 @@ class JarvisState:
         with self._lock:
             return dict(self._data)
 
+    def set_model_status(self, provider: str, model: str, available: bool):
+        """Per-model live availability, tracked separately from a
+        provider's blanket flag (e.g. "groq_available") — that flag is
+        fed exclusively by real health-check probes (e.g. check_groq()),
+        so per-request results from actual chat calls (which only know
+        about the one model that specific request used) don't clobber it
+        based on whichever model happened to be tried last. Groq has 5
+        distinct tiers/models sharing call volume; a single flat flag
+        for "is Groq available" flickered based on whichever model's
+        request most recently succeeded or failed, regardless of whether
+        that reflects any other model's real status."""
+        with self._lock:
+            self._data.setdefault("model_status", {})[f"{provider}:{model}"] = available
+
+    def any_model_available(self, provider: str) -> bool:
+        """True if at least one tracked model for this provider succeeded
+        on its most recent attempt. False (not True) if no model has been
+        attempted yet — matches this class's existing cold-boot precedent
+        of defaulting availability flags to False until a real check
+        completes, rather than assuming optimistically."""
+        with self._lock:
+            statuses = self._data.get("model_status", {})
+            prefix = f"{provider}:"
+            return any(v for k, v in statuses.items() if k.startswith(prefix))
+
     def add_warning(self, msg: str):
         with self._lock:
             self._data["warnings"].append({

@@ -941,9 +941,15 @@ class Brain:
             pass
 
         # ── Protocol 14: Friday fallback if all LLMs offline ─────────────────
-        from core.llm.router import check_groq, check_ollama
+        # any_model_available("groq") aggregates live per-model status
+        # (see core/state.py) instead of reading the single blanket
+        # "groq_available" flag, which only ever reflected whichever
+        # Groq model's request happened to run most recently — Groq has
+        # 5 distinct tiers, so that flag could flip on an unrelated
+        # model's success or failure. Ollama has no such gap: it only
+        # ever calls one configured model, so its flat flag is accurate.
         from core.state import state as _state
-        if not _state.get("groq_available") and not _state.get("ollama_available"):
+        if not _state.any_model_available("groq") and not _state.get("ollama_available"):
             from core.friday_fallback import respond as friday_respond
             r = friday_respond(user_input)
             return Result(
