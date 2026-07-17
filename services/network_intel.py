@@ -55,7 +55,6 @@ OUI_MAP: dict[str, str] = {
     "00:12:FB": "Samsung",
     "00:15:B9": "Samsung",
     "00:1D:25": "Samsung",
-    "04:18:D6": "Samsung",
     "50:85:69": "Samsung",
     # Google
     "00:1A:11": "Google",
