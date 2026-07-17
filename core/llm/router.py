@@ -424,6 +424,13 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 circuit_key = f"groq:{model_id}"
                 if not cb.is_available(circuit_key):
                     print(f"[LLM Router] Groq circuit open for {model_id} — skipping straight to next provider")
+                    # This continue skips the try/except below entirely, so
+                    # without this, "groq_available" keeps whatever value a
+                    # past successful call last set — stale True while the
+                    # circuit is deliberately being avoided right now, which
+                    # feeds directly into health checks, suit_diagnostics'
+                    # "weapons_online", and the all-LLMs-down degraded check.
+                    state.set("groq_available", False)
                     continue
                 if not _rate_check():
                     print("[LLM Router] Approaching Groq rate limit — brief backoff before calling")
@@ -433,6 +440,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                     result = cb.call(circuit_key, groq_chat, messages, max_tokens, temperature, model=model_id)
                 except CircuitOpenError as e:
                     print(f"[LLM Router] {e}")
+                    state.set("groq_available", False)
                     continue
                 # Reasoning models (Qwen3, DeepSeek-style) emit raw
                 # <think>...</think> chain-of-thought before the real

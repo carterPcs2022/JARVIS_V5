@@ -140,6 +140,13 @@ def call_anthropic(messages: list, system: str, model: str, max_tokens: int = 10
             "usage": {"input": response.usage.input_tokens, "output": response.usage.output_tokens},
         }
 
+    except RecursionError as e:
+        # Never retry a recursion error — whatever exhausted the stack to
+        # raise this in the first place isn't fixed by dropping `effort`,
+        # and retrying immediately re-enters the same call stack shape
+        # with even less headroom left. Fail closed instead.
+        print(f"[LLM] Anthropic recursion error ({model}), failing closed: {e}")
+        return None
     except Exception as e:
         print(f"[LLM] Anthropic error ({model}): {e}")
         # If extended thinking itself caused the failure (e.g. a transient
