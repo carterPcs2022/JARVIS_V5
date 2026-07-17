@@ -38,6 +38,17 @@ def chat(body: dict, request: Request):
     except Exception:
         pass  # firewall unavailable — fail open rather than block all chat
 
+    # Combat-mode Phase 2 fast path — checked before classification/brain
+    # even start, since a hit means skipping both entirely. Cheap in-memory
+    # check (dict lookup + substring match), never worth its own executor
+    # hop. See services/combat_staging.py.
+    from services.combat_mode import combat_mode
+    if combat_mode.is_engaged():
+        from services.combat_staging import try_fast_path
+        staged = try_fast_path(msg)
+        if staged:
+            return staged
+
     from services.threat_detector import classify as classify_threat
     threat_future = _executor.submit(classify_threat, msg)
 

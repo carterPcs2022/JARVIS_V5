@@ -83,6 +83,16 @@ class CombatMode:
             result="alert",
         )
 
+        # Phase 2: pre-stage the next likely action so a follow-up request
+        # gets an instant answer instead of starting from zero. Backgrounded
+        # (see services/combat_staging.py) — never adds latency to engage()
+        # itself, which is on the hot path of every classified message.
+        try:
+            from services.combat_staging import stage_for_category
+            stage_for_category(category)
+        except Exception as e:
+            print(f"[CombatMode] staging failed to start: {e}")
+
         return self.status()
 
     def disengage(self, reason: str = "manual") -> dict:
@@ -97,6 +107,12 @@ class CombatMode:
         state.set("voice_mode", "normal")
         state.set("hud_theme", "idle")
         state.set("hud_poll_rate", "normal")
+
+        try:
+            from services.combat_staging import clear as clear_staged
+            clear_staged()
+        except Exception as e:
+            print(f"[CombatMode] clearing staged actions failed: {e}")
 
         if was_engaged:
             try:

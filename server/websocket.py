@@ -81,6 +81,17 @@ async def ws_chat(websocket: WebSocket):
             if not msg:
                 continue
 
+            # Combat-mode Phase 2 fast path — same check as
+            # server/routes/chat.py, before classification/brain even
+            # start. See services/combat_staging.py.
+            from services.combat_mode import combat_mode
+            if combat_mode.is_engaged():
+                from services.combat_staging import try_fast_path
+                staged = try_fast_path(msg)
+                if staged:
+                    await websocket.send_json({"type": "response", **staged})
+                    continue
+
             loop = asyncio.get_event_loop()
             from services.threat_detector import classify as classify_threat
             classify_task = loop.run_in_executor(None, classify_threat, msg)
