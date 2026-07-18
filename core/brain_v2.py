@@ -484,11 +484,13 @@ class Executor:
         # plainly that everything's down.
         was_rewritten = False
         if "[JARVIS OFFLINE]" in response or "All LLM providers failed" in response:
-            response = (
-                "All my reasoning engines are unreachable right now, sir — "
-                "Groq, Anthropic, and local Ollama all failed. Try again in "
-                "a moment."
-            )
+            # router.py's chat() now names only the providers it actually
+            # attempted (never "Ollama failed" when it was correctly
+            # skipped on headless cloud, or "Anthropic failed" when it was
+            # never configured) and includes the real retry window when
+            # known — extract that detail instead of a hardcoded claim.
+            detail = response.replace("[JARVIS OFFLINE]", "").strip() or "All LLM providers failed."
+            response = f"I'm having trouble reaching my reasoning engines right now, sir — {detail}"
         elif plan.mode not in ("voice", "code", "vision", "mac_control", "calendar"):
             from core.reflection import reflect
             ref           = reflect(intent.raw, response)

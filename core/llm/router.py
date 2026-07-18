@@ -380,9 +380,18 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         if cached and (time.time() - cached[0]) < _CACHE_TTL:
             return {**cached[1], "cached": True}
 
+    # Tracks which providers were genuinely attempted (not skipped for lack
+    # of config/circuit-open/headless-cloud) and the most specific
+    # retry-after seen, so the final all-failed message can name only what
+    # actually ran instead of a hardcoded list that claims Ollama "failed"
+    # even when it was correctly never tried.
+    _attempted: list[str] = []
+    _last_retry_after: float | None = None
+
     _anthropic_start = time.time()
     tier = _resolve_tier(force_model, query)
     if tier in ANTHROPIC_REGISTRY:
+        _attempted.append("anthropic")
         result = _call_anthropic_tier(tier, messages, max_tokens, query, temperature=temperature)
         if result:
             result["latency_ms"] = round((time.time() - _anthropic_start) * 1000, 2)
@@ -444,6 +453,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                     print("[LLM Router] Approaching Groq rate limit — brief backoff before calling")
                     time.sleep(2)
                 _call_times.append(time.time())
+                _attempted.append("groq")
                 try:
                     result = cb.call(circuit_key, groq_chat, messages, max_tokens, temperature, model=model_id)
                 except CircuitOpenError as e:
@@ -456,6 +466,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 if "content" in result:
                     result["content"] = _strip_think_tags(result["content"])
             else:
+                _attempted.append("ollama")
                 result = ollama_chat(messages, max_tokens, temperature)
 
             latency = round((time.time() - start) * 1000, 2)
@@ -477,14 +488,34 @@ def chat(messages: list[dict], max_tokens: int = 1024,
             print(f"[LLM Router] {provider} failed: {e}")
             if provider == "groq":
                 state.set_model_status("groq", model_id, False)
+                retry_after = getattr(e, "retry_after", None)
+                if retry_after:
+                    _last_retry_after = retry_after
             continue
 
+    # Name only what was actually attempted — Ollama being skipped entirely
+    # on headless cloud (see above) or Anthropic never being configured
+    # must not be reported as "failed" alongside a real Groq failure. The
+    # "[JARVIS OFFLINE]" prefix is a stable marker several other modules
+    # check for (core/validator.py, core/brain_v2.py, core/consciousness.py,
+    # services/self_audit.py, core/protocols.py) — keep it exact even
+    # though the rest of the message is now dynamic.
+    if _attempted:
+        detail = f"{' and '.join(p.capitalize() for p in _attempted)} failed."
+    else:
+        detail = "No providers were configured to try."
+    if _last_retry_after:
+        mins = round(_last_retry_after / 60, 1)
+        detail += f" Retry in about {mins:g} min." if mins >= 1 else f" Retry in about {int(_last_retry_after)}s."
+
     return {
-        "content":    "[JARVIS OFFLINE] All LLM providers failed.",
+        "content":    f"[JARVIS OFFLINE] {detail}",
         "model":      "none",
         "provider":   "none",
         "latency_ms": round((time.time() - start) * 1000, 2),
         "error":      "All providers failed",
+        "attempted":  _attempted,
+        "retry_after": _last_retry_after,
     }
 
 
