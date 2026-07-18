@@ -136,10 +136,23 @@ class CombatMode:
         ask a check-in question instead of auto-engaging."""
         category = classification.get("category", "none")
         confidence = classification.get("confidence", 0.0)
+        is_threat = classification.get("is_threat", False)
 
         if category == "stand_down":
             result = self.disengage(reason="stand_down_message")
             return {**result, "soft_confirm_prompt": None}
+
+        # confidence only means something once the classifier has actually
+        # flagged this as a threat — a model that's confidently correct
+        # that something ISN'T a threat still reports high confidence, just
+        # in the opposite direction. Without this gate, a hypothetical
+        # safety question like "is it dangerous to mix bleach and ammonia"
+        # (is_threat=False, confidence=1.0) engaged combat mode purely
+        # because the number was high, despite the classifier itself
+        # correctly saying this wasn't a threat.
+        if not is_threat:
+            self._pending_confirm = False
+            return {**self.status(), "soft_confirm_prompt": None}
 
         if confidence >= COMBAT_MODE_CONFIDENCE_THRESHOLD:
             result = self.engage(message, confidence, category)
