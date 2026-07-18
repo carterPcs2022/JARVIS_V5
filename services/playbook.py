@@ -268,7 +268,7 @@ class ThreatPlaybook:
         formatted = _format_arg(msg, context)
         try:
             notify("JARVIS CRITICAL", formatted, Priority.CRITICAL)
-            bus.alert(formatted, level="critical")
+            bus.alert(formatted, severity="critical")
         except Exception as exc:
             log.error("notify_critical failed: %s", exc)
         return f"CRITICAL notification sent: {formatted}"
@@ -277,7 +277,7 @@ class ThreatPlaybook:
         formatted = _format_arg(msg, context)
         try:
             notify("JARVIS HIGH ALERT", formatted, Priority.HIGH)
-            bus.alert(formatted, level="high")
+            bus.alert(formatted, severity="high")
         except Exception as exc:
             log.error("notify_high failed: %s", exc)
         return f"HIGH notification sent: {formatted}"
@@ -286,7 +286,7 @@ class ThreatPlaybook:
         formatted = _format_arg(msg, context)
         try:
             notify("JARVIS WARNING", formatted, Priority.WARNING)
-            bus.alert(formatted, level="warning")
+            bus.alert(formatted, severity="warning")
         except Exception as exc:
             log.error("notify_warning failed: %s", exc)
         return f"WARNING notification sent: {formatted}"

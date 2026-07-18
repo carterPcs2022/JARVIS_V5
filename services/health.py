@@ -255,7 +255,7 @@ class HealthMonitor:
                     bus.alert(
                         f"HEALTH ANOMALY: Heart rate is {hr:.0f}bpm — significantly elevated. "
                         f"Recorded at {timestamp}.",
-                        level="warning"
+                        severity="warning"
                     )
             except (ValueError, TypeError):
                 pass
@@ -268,7 +268,7 @@ class HealthMonitor:
                         f"HEALTH ANOMALY: Only {sl:.1f} hours of sleep recorded. "
                         f"Cognitive performance may be impaired today. "
                         f"Recorded at {timestamp}.",
-                        level="warning"
+                        severity="warning"
                     )
             except (ValueError, TypeError):
                 pass
