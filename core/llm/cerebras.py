@@ -81,8 +81,25 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     r.raise_for_status()
     data = r.json()
 
+    # gpt-oss-120b (and other reasoning-style Cerebras models) return
+    # internal chain-of-thought under a separate "reasoning" field, distinct
+    # from "content" — not inline <think> tags in "content" the way Groq's
+    # Qwen3 does. If max_tokens runs out mid-reasoning, "content" is absent
+    # entirely (finish_reason "length"), which used to raise a bare
+    # KeyError here — that crashed the whole request instead of letting the
+    # router's normal fallback (this is itself a fallback tier) catch it
+    # and move on to the next provider.
+    message = data["choices"][0]["message"]
+    content = message.get("content")
+    if not content:
+        raise RuntimeError(
+            "Cerebras returned no content — likely ran out of max_tokens "
+            "during internal reasoning before producing a final answer "
+            f"(finish_reason={data['choices'][0].get('finish_reason')!r})"
+        )
+
     return {
-        "content": data["choices"][0]["message"]["content"],
+        "content": content,
         "model":   data.get("model", CEREBRAS_MODEL),
         "usage":   data.get("usage", {}),
     }
