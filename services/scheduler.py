@@ -350,7 +350,7 @@ def start():
     global _scheduler
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
-        from config.settings import LOKI_SURPRISE_HOUR, BENCHMARK_DAY
+        from config.settings import LOKI_SURPRISE_HOUR, BENCHMARK_DAY, USER_TIMEZONE
 
         # "interval" jobs fire immediately once the scheduler starts (their
         # next_run_time defaults to now), so every Groq-calling job here
@@ -361,7 +361,16 @@ def start():
         # immediately since they don't touch Groq.
         now = datetime.now()
 
-        _scheduler = BackgroundScheduler(daemon=True)
+        # Without an explicit timezone, APScheduler falls back to the
+        # container's system tz — UTC on Render, with no TZ env var set
+        # (confirmed live). Every "cron" job below is written as an hour
+        # in the user's local time (morning_routine at 7:30, evening_routine
+        # at 22:00, etc.) — left on UTC, each one fires 4-5 hours off from
+        # when it's actually meant to (a hard-to-notice bug day to day,
+        # since the jobs still run, just at the wrong real-world hour; this
+        # is what an unprompted "morning" message showing up in the middle
+        # of the night traced back to).
+        _scheduler = BackgroundScheduler(daemon=True, timezone=USER_TIMEZONE)
         _scheduler.add_job(_email_check,  "interval", minutes=15, id="email_check")
         _scheduler.add_job(_system_check, "interval", minutes=5,  id="system_check")
         _scheduler.add_job(_mac_bridge_check, "interval", minutes=30, id="mac_bridge_check")
