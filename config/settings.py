@@ -270,6 +270,16 @@ GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3")
 
+# ── LLM: Cerebras (free fallback — separate account/quota from Groq) ──────────
+# OpenAI-compatible endpoint, same shape as Groq. Free tier verified live
+# against Cerebras's own docs (2026-07-18): 5 RPM / 30K TPM / 1M TPD, only
+# gpt-oss-120b / gemma-4-31b / zai-glm-4.7 on the free tier — NOT
+# llama-3.3-70b, despite that claim floating around in third-party blog
+# roundups. Empty key = feature no-ops, same convention as Voyage.
+CEREBRAS_API_KEY  = os.getenv("CEREBRAS_API_KEY", "")
+CEREBRAS_MODEL    = os.getenv("CEREBRAS_MODEL", "gpt-oss-120b")
+CEREBRAS_BASE_URL = "https://api.cerebras.ai/v1"
+
 # ── LLM: Anthropic (top-tier reasoning, paid) ──────────────────────────────────
 # Real, current model IDs — Fable 5: 'claude-fable-5', Opus 4.8:
 # 'claude-opus-4-8', Sonnet 5: 'claude-sonnet-5'. Do not substitute

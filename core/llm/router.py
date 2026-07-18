@@ -417,14 +417,25 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     max_tokens = min(max_tokens, model_config["max_tokens"]) if max_tokens else model_config["max_tokens"]
 
     start = time.time()
+    from services.circuit_breaker import cb, CircuitOpenError
     # Ollama can never be reached from a headless cloud deployment (Render/
     # Railway) — OLLAMA_BASE_URL defaults to localhost, which inside that
     # container is the container itself; no Ollama process runs there. Every
     # attempt in production was a guaranteed "connection refused" burning a
     # slot in the fallback chain. Still fully attempted on local/dev, where
     # it's the intended fallback.
-    from config.settings import IS_HEADLESS_CLOUD
+    from config.settings import IS_HEADLESS_CLOUD, CEREBRAS_API_KEY
     _candidates = ["groq"] if IS_HEADLESS_CLOUD else ["groq", "ollama"]
+    if CEREBRAS_API_KEY:
+        # Cerebras is a separate free account/quota from Groq — normally
+        # tried last among the free options (lowest RPM of the three). But
+        # if server/api.py's 30s post-boot probe just caught Groq
+        # rate-limited, jump Cerebras to the front so the user's first live
+        # message doesn't have to pay to rediscover that same 429 itself.
+        if time.time() < state.get("groq_prefer_alt_until", 0):
+            _candidates.insert(0, "cerebras")
+        else:
+            _candidates.append("cerebras")
     providers = _candidates if prefer == "groq" else list(reversed(_candidates))
 
     for provider in providers:
@@ -432,7 +443,6 @@ def chat(messages: list[dict], max_tokens: int = 1024,
             if provider == "groq":
                 if not GROQ_API_KEY:
                     continue
-                from services.circuit_breaker import cb, CircuitOpenError
                 # Keyed per-model, not just "groq" — Groq enforces rate
                 # limits (especially tokens-per-day) per model, so one
                 # model being exhausted (e.g. llama-3.3-70b-versatile at
@@ -465,6 +475,20 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 # answer — strip it so it never leaks into a response.
                 if "content" in result:
                     result["content"] = _strip_think_tags(result["content"])
+            elif provider == "cerebras":
+                from core.llm.cerebras import chat as cerebras_chat
+                circuit_key = "cerebras"
+                if not cb.is_available(circuit_key):
+                    print("[LLM Router] Cerebras circuit open — skipping straight to next provider")
+                    continue
+                _attempted.append("cerebras")
+                try:
+                    result = cb.call(circuit_key, cerebras_chat, messages, max_tokens, temperature)
+                except CircuitOpenError as e:
+                    print(f"[LLM Router] {e}")
+                    continue
+                if "content" in result:
+                    result["content"] = _strip_think_tags(result["content"])
             else:
                 _attempted.append("ollama")
                 result = ollama_chat(messages, max_tokens, temperature)
@@ -488,6 +512,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
             print(f"[LLM Router] {provider} failed: {e}")
             if provider == "groq":
                 state.set_model_status("groq", model_id, False)
+            if provider in ("groq", "cerebras"):
                 retry_after = getattr(e, "retry_after", None)
                 if retry_after:
                     _last_retry_after = retry_after
@@ -524,7 +549,12 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     # services/self_audit.py, core/protocols.py) — keep it exact even
     # though the rest of the message is now dynamic.
     if _attempted:
-        detail = f"{' and '.join(p.capitalize() for p in _attempted)} failed."
+        names = [p.capitalize() for p in _attempted]
+        joined = names[0] if len(names) == 1 else (
+            f"{names[0]} and {names[1]}" if len(names) == 2
+            else f"{', '.join(names[:-1])}, and {names[-1]}"
+        )
+        detail = f"{joined} failed."
     else:
         detail = "No providers were configured to try."
     if _last_retry_after:
@@ -653,6 +683,21 @@ def check_groq(force: bool = False) -> bool:
         if is_429:
             print("[LLM Router] Groq health check hit 429 (rate limited, not down)")
             _HEALTH_CACHE["groq"] = (time.time(), True)
+            # Proactive switch: this fires from the 30s post-boot probe
+            # (server/api.py) and the 2-min scheduled health refresh
+            # (services/scheduler.py) alike — either way, don't make the
+            # next live chat message pay to rediscover a 429 we already
+            # just saw. chat() checks this to try Cerebras (separate free
+            # account/quota) before Groq for a short window. Capped at 5
+            # min even for a real tokens-per-day retry_after (40+ min) —
+            # Cerebras's own free tier is rate-limited too (5 RPM), so
+            # parking there for the full outage isn't necessarily better;
+            # the next health check simply refreshes this window if Groq
+            # is still down.
+            retry_after = e.retry_after if isinstance(e, GroqRateLimitError) else None
+            cooldown = min(retry_after or 60, 300)
+            from core.state import state
+            state.set("groq_prefer_alt_until", time.time() + cooldown)
             return True
         _HEALTH_CACHE["groq"] = (time.time(), False)
         return False
