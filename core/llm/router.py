@@ -501,6 +501,13 @@ def chat(messages: list[dict], max_tokens: int = 1024,
             })
             if provider == "groq":
                 state.set_model_status("groq", model_id, True)
+            elif provider == "cerebras":
+                # Groq/Anthropic both log something on every path (success
+                # or failure); this branch previously only logged failure,
+                # so a Cerebras save after a real Groq outage was
+                # invisible in the logs — only inferable from a reflection
+                # score existing at all. Log it explicitly instead.
+                print(f"[LLM Router] Cerebras answered ({result.get('model')}) after Groq/Ollama failure")
             final = {**result, "provider": provider, "latency_ms": latency}
 
             if use_cache:
@@ -534,6 +541,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 print(f"[LLM Router] Groq/Ollama exhausted — trying Anthropic ({fallback_tier}) as last resort")
                 result = _call_anthropic_tier(fallback_tier, messages, max_tokens, query, temperature=temperature)
                 if result:
+                    print(f"[LLM Router] Anthropic ({fallback_tier}) last-resort call succeeded")
                     result["latency_ms"] = round((time.time() - start) * 1000, 2)
                     if use_cache:
                         _cache[_cache_key(messages)] = (time.time(), result)
