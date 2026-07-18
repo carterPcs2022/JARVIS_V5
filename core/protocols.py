@@ -1609,7 +1609,6 @@ class SaturdayProtocol:
         if not log:
             return {"needs_rest": False, "reason": "", "suggestion": ""}
 
-        days_worked = len({ts[:10] for ts in log[-500:]})
         recent_days = sorted({ts[:10] for ts in log}, reverse=True)
 
         streak = 0

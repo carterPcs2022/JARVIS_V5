@@ -26,12 +26,8 @@ _DATE_TRIGGERS = ("what day", "what's the date", "today's date", "what date")
 
 
 def _now_local():
-    from datetime import datetime
-    try:
-        import zoneinfo
-        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
-    except Exception:
-        return datetime.now()
+    from config.settings import now_local
+    return now_local()
 
 
 def _instant_response(query: str) -> str | None:
@@ -405,8 +401,15 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     max_tokens = min(max_tokens, model_config["max_tokens"]) if max_tokens else model_config["max_tokens"]
 
     start = time.time()
-    providers = (["groq", "ollama"] if prefer == "groq"
-                 else ["ollama", "groq"])
+    # Ollama can never be reached from a headless cloud deployment (Render/
+    # Railway) — OLLAMA_BASE_URL defaults to localhost, which inside that
+    # container is the container itself; no Ollama process runs there. Every
+    # attempt in production was a guaranteed "connection refused" burning a
+    # slot in the fallback chain. Still fully attempted on local/dev, where
+    # it's the intended fallback.
+    from config.settings import IS_HEADLESS_CLOUD
+    _candidates = ["groq"] if IS_HEADLESS_CLOUD else ["groq", "ollama"]
+    providers = _candidates if prefer == "groq" else list(reversed(_candidates))
 
     for provider in providers:
         try:
@@ -598,6 +601,13 @@ def check_groq(force: bool = False) -> bool:
 
 
 def check_ollama(force: bool = False) -> bool:
+    from config.settings import IS_HEADLESS_CLOUD
+    if IS_HEADLESS_CLOUD:
+        # Same reason chat()'s fallback chain skips Ollama in prod — never
+        # reachable from a headless cloud container, so don't spend a real
+        # (if fast) connection attempt on every /hud/status poll for a
+        # result that can't ever be anything but False.
+        return False
     ts, cached = _HEALTH_CACHE["ollama"]
     if not force and (time.time() - ts) < _HEALTH_TTL:
         return cached

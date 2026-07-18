@@ -23,7 +23,8 @@ def get_voice_mode() -> str:
     mode = state.get("voice_mode")
     if mode:
         return mode
-    hour = datetime.now().hour
+    from config.settings import now_local
+    hour = now_local().hour
     if hour >= 23 or hour < 7:
         return "night"
     return "normal"

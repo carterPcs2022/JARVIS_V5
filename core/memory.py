@@ -114,13 +114,21 @@ def _tokenize(text: str) -> list[str]:
 def store_long_term(user: str, ai: str, tags: list[str] | None = None):
     entries = _load(LONG_TERM_FILE)
     text = f"{user} {ai}"
-    entries.append({
+    entry = {
         "ts":     datetime.now().isoformat(),
         "user":   user,
         "ai":     ai,
         "tags":   tags or [],
         "tokens": _tokenize(text),
-    })
+    }
+    try:
+        from core.llm.embeddings import embed
+        vector = embed(text, input_type="document")
+        if vector:
+            entry["embedding"] = vector
+    except Exception:
+        pass
+    entries.append(entry)
     _save(LONG_TERM_FILE, entries[-MAX_LONG_TERM:])
 
 
@@ -137,7 +145,7 @@ def recall(query: str, k: int = 5) -> list[dict]:
     N = len(entries)
     idf = {t: math.log(N / (v + 1)) for t, v in df.items()}
 
-    def score(e):
+    def tfidf_score(e):
         toks = e.get("tokens", [])
         tf = defaultdict(int)
         for t in toks:
@@ -146,6 +154,23 @@ def recall(query: str, k: int = 5) -> list[dict]:
             (tf[t] / max(len(toks), 1)) * idf.get(t, 0)
             for t in q_tokens
         )
+
+    # Blend in embedding-based cosine similarity when available, rather
+    # than replacing TF-IDF outright — entries stored before embeddings
+    # existed (or during a Voyage outage) have no "embedding" field and
+    # still need to recall via TF-IDF alone.
+    q_vector = None
+    try:
+        from core.llm.embeddings import embed, cosine_similarity
+        q_vector = embed(query, input_type="query")
+    except Exception:
+        pass
+
+    def score(e):
+        s = tfidf_score(e)
+        if q_vector and e.get("embedding"):
+            s += cosine_similarity(q_vector, e["embedding"])
+        return s
 
     ranked = sorted(entries, key=score, reverse=True)
     return ranked[:k]
@@ -160,6 +185,32 @@ def recall_as_context(query: str) -> str:
         lines.append(f"  [{h['ts'][:10]}] User: {h['user'][:100]}")
         lines.append(f"            JARVIS: {h['ai'][:200]}")
     return "\n".join(lines)
+
+
+def backfill_embeddings(batch_size: int = 1000) -> dict:
+    """One-time migration for long_term.json entries stored before Voyage
+    embeddings existed — embeds any entry missing an "embedding" field in
+    place. Safe to re-run (skips entries that already have one). Returns a
+    small report dict rather than raising, since this is meant to be run
+    interactively and inspected."""
+    entries = _load(LONG_TERM_FILE)
+    missing = [e for e in entries if not e.get("embedding")]
+    if not missing:
+        return {"total": len(entries), "backfilled": 0, "skipped": 0}
+
+    from core.llm.embeddings import embed_batch
+    backfilled = 0
+    for i in range(0, len(missing), batch_size):
+        chunk = missing[i:i + batch_size]
+        texts = [f"{e.get('user', '')} {e.get('ai', '')}" for e in chunk]
+        vectors = embed_batch(texts, input_type="document")
+        for e, v in zip(chunk, vectors):
+            if v:
+                e["embedding"] = v
+                backfilled += 1
+
+    _save(LONG_TERM_FILE, entries)
+    return {"total": len(entries), "backfilled": backfilled, "skipped": len(missing) - backfilled}
 
 
 def check_if_repeated(query: str, threshold: float = 0.75) -> dict | None:

@@ -9,7 +9,23 @@ BASE_DIR = Path(__file__).parent.parent
 # JARVIS runs on a server (Render/Railway) whose local clock is UTC, not
 # the user's — set this to the user's IANA timezone name (e.g.
 # "America/New_York") so time-of-day responses aren't server UTC.
-USER_TIMEZONE = os.getenv("USER_TIMEZONE", "America/New_York")
+# `or` (not getenv's default arg) so an accidentally-blank env var on
+# Render still falls back correctly instead of failing ZoneInfo() lookups.
+USER_TIMEZONE = os.getenv("USER_TIMEZONE") or "America/New_York"
+
+
+def now_local():
+    """Current time in USER_TIMEZONE, not the server's local clock — every
+    caller that speaks a time-of-day value to the user should go through
+    this rather than datetime.now(), which is UTC on Render. Falls back to
+    server-local time only if the tz database itself is unavailable (e.g.
+    the `tzdata` package missing on a minimal container)."""
+    from datetime import datetime
+    try:
+        import zoneinfo
+        return datetime.now(zoneinfo.ZoneInfo(USER_TIMEZONE))
+    except Exception:
+        return datetime.now()
 
 # ── Identity ──────────────────────────────────────────────────────────────────
 JARVIS_NAME        = "JARVIS"
@@ -271,6 +287,14 @@ ENABLE_FABLE  = os.getenv("ENABLE_FABLE", "true").lower() == "true"
 # Fable/Opus are real spend, not just rate-limited — hard daily call caps,
 # not just a rate-limit backoff like the free Groq tiers.
 SONNET_DAILY_CALL_LIMIT = int(os.getenv("SONNET_DAILY_CALLS", "100"))
+
+# ── Embeddings: Voyage AI (long-term memory recall) ────────────────────────────
+# Neither Groq nor Anthropic offer a real embeddings endpoint — Voyage is
+# Anthropic's own recommended embeddings partner. Empty key = feature no-ops
+# and long-term recall silently stays TF-IDF-only (see core/memory.py).
+VOYAGE_API_KEY   = os.getenv("VOYAGE_API_KEY", "")
+VOYAGE_MODEL     = os.getenv("VOYAGE_MODEL", "voyage-4-lite")
+VOYAGE_EMBED_DIM = int(os.getenv("VOYAGE_EMBED_DIM", "256"))
 OPUS_DAILY_CALL_LIMIT   = int(os.getenv("OPUS_DAILY_CALLS", "50"))
 FABLE_DAILY_CALL_LIMIT  = int(os.getenv("FABLE_DAILY_CALLS", "20"))
 

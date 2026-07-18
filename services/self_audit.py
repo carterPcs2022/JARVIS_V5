@@ -74,11 +74,22 @@ class SelfAudit:
             force_model="opus",
         )
 
-        try:
-            clean = re.sub(r"```json|```", "", analysis).strip()
-            result = json.loads(clean)
-        except Exception:
-            result = {"findings": [], "raw": analysis, "overall_risk": "unknown"}
+        # A total provider outage returns the literal sentinel string
+        # "[JARVIS OFFLINE] All LLM providers failed." — json.loads() on
+        # that raises, and the old except-block default ({"findings": []})
+        # made an audit that never ran indistinguishable from a genuinely
+        # clean file. Same failure shape as the ThreatDetector bug: a
+        # security tool silently reporting the safe-looking outcome
+        # instead of surfacing that it didn't actually run.
+        if analysis.startswith("[JARVIS OFFLINE]"):
+            result = {"findings": [], "raw": analysis, "overall_risk": "audit_failed",
+                      "error": "LLM provider unavailable — audit did not run"}
+        else:
+            try:
+                clean = re.sub(r"```json|```", "", analysis).strip()
+                result = json.loads(clean)
+            except Exception:
+                result = {"findings": [], "raw": analysis, "overall_risk": "unknown"}
 
         result["file"] = filepath
         result["ts"] = datetime.now().isoformat()
@@ -94,10 +105,14 @@ class SelfAudit:
 
         all_findings = []
         critical_count = 0
+        failed_files = []
 
         for filepath in CRITICAL_FILES:
             print(f"[Audit] Scanning: {filepath}")
             result = self.audit_file(filepath)
+            if result.get("overall_risk") == "audit_failed":
+                failed_files.append(filepath)
+                continue
             findings = result.get("findings", [])
             for f in findings:
                 f["file"] = filepath
@@ -121,7 +136,8 @@ class SelfAudit:
         report = {
             "ts": datetime.now().isoformat(), "total": len(all_findings),
             "critical": critical_count, "findings": all_findings,
-            "summary": summary, "files_scanned": len(CRITICAL_FILES),
+            "summary": summary, "files_scanned": len(CRITICAL_FILES) - len(failed_files),
+            "files_failed": failed_files,
         }
 
         AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)

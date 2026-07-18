@@ -9,18 +9,34 @@ log = logging.getLogger(__name__)
 _PATTERNS_FILE = Path("data/patterns.json")
 
 
+_DEFAULT = {"hourly": {}, "daily": {}, "sequences": [], "topics": {}}
+_TURSO_KEY = "data/patterns.json"
+
+
 def _load() -> dict:
     _PATTERNS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Turso first — same durable-copy pattern as core/memory.py, since this
+    # file used to be plain local JSON and silently wiped on every Render
+    # redeploy along with the rest of the ephemeral disk.
+    from core.turso_store import get as turso_get
+    remote = turso_get(_TURSO_KEY)
+    if remote is not None:
+        return remote
+
     if _PATTERNS_FILE.exists():
         try:
             return json.loads(_PATTERNS_FILE.read_text())
         except Exception:
             pass
-    return {"hourly": {}, "daily": {}, "sequences": [], "topics": {}}
+    return dict(_DEFAULT)
 
 
 def _save(data: dict):
     _PATTERNS_FILE.write_text(json.dumps(data, indent=2))
+
+    from core.turso_store import put as turso_put
+    turso_put(_TURSO_KEY, data)
 
 
 def record_query(query: str):

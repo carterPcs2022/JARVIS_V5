@@ -2,6 +2,7 @@
 import asyncio, base64, tempfile, os
 import httpx
 from fastapi import APIRouter, Depends, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from utils.security import verify_token
 from services.voice import speak, transcribe
 
@@ -24,8 +25,14 @@ async def transcribe_audio(audio: UploadFile = File(...)):
 
     # Speaker verification is a soft gate, not a hard dependency — any bridge
     # hiccup (down, timeout, misconfigured) must fall through to normal
-    # transcription rather than lock a legitimate command out.
-    if MAC_BRIDGE_URL:
+    # transcription rather than lock a legitimate command out. But "soft"
+    # was silently indistinguishable from "not running at all" (no
+    # MAC_BRIDGE_URL, or every call raising) — print loudly in both cases so
+    # that isn't discovered by an unverified command executing instead of
+    # in the logs.
+    if not MAC_BRIDGE_URL:
+        print("[Voice] MAC_BRIDGE_URL not configured — speaker verification is OFF, any voice will execute commands")
+    else:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 resp = await client.post(
@@ -42,8 +49,8 @@ async def transcribe_audio(audio: UploadFile = File(...)):
                     "reason": "voice_mismatch",
                     "score": result.get("score"),
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Voice] Speaker verification unreachable, falling through unverified: {e}")
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(audio_bytes)
@@ -62,12 +69,27 @@ async def transcribe_audio(audio: UploadFile = File(...)):
             pass
 
 
+async def _proxy_to_bridge_response(resp: httpx.Response) -> JSONResponse:
+    """A 4xx/5xx from the bridge (e.g. token mismatch) must not be
+    disguised as a 200 to the browser — that's what let a rejected
+    enrollment show up as a Render-log 200 while the HUD silently failed."""
+    try:
+        resp.raise_for_status()
+        return JSONResponse(status_code=200, content=resp.json())
+    except httpx.HTTPStatusError:
+        try:
+            body = resp.json()
+        except Exception:
+            body = {"error": resp.text}
+        return JSONResponse(status_code=resp.status_code, content=body)
+
+
 @router.post("/enroll", dependencies=[Depends(verify_token)])
 async def enroll_voice(audio: UploadFile = File(...), profile: str = "default"):
     """Thin proxy to the Mac Bridge's voiceprint enrollment — the bridge
     token never reaches the browser, only this server holds it."""
     if not MAC_BRIDGE_URL:
-        return {"error": "Mac bridge not configured"}
+        return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
     audio_bytes = await audio.read()
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -77,16 +99,16 @@ async def enroll_voice(audio: UploadFile = File(...), profile: str = "default"):
                 data={"profile": profile},
                 headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
             )
-            return resp.json()
+            return await _proxy_to_bridge_response(resp)
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(status_code=502, content={"error": str(e)})
 
 
 @router.get("/profile/status", dependencies=[Depends(verify_token)])
 async def voice_profile_status(profile: str = "default"):
     """Thin proxy to the Mac Bridge's enrollment status check."""
     if not MAC_BRIDGE_URL:
-        return {"error": "Mac bridge not configured"}
+        return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -94,9 +116,9 @@ async def voice_profile_status(profile: str = "default"):
                 params={"profile": profile},
                 headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
             )
-            return resp.json()
+            return await _proxy_to_bridge_response(resp)
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(status_code=502, content={"error": str(e)})
 
 
 @router.post("/reset", dependencies=[Depends(verify_token)])
@@ -106,7 +128,7 @@ async def reset_voice_profile(body: dict):
     enrollment-button loop bug) can be wiped and re-enrolled from scratch
     without SSHing in to rm the file by hand."""
     if not MAC_BRIDGE_URL:
-        return {"error": "Mac bridge not configured"}
+        return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
     profile = body.get("profile", "default")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -115,9 +137,9 @@ async def reset_voice_profile(body: dict):
                 data={"profile": profile},
                 headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
             )
-            return resp.json()
+            return await _proxy_to_bridge_response(resp)
     except Exception as e:
-        return {"error": str(e)}
+        return JSONResponse(status_code=502, content={"error": str(e)})
 
 
 @router.post("/speak", dependencies=[Depends(verify_token)])

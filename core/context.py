@@ -172,8 +172,6 @@ def build_fable_context(user_input: str) -> str:
     JARVIS beats a fresh Claude.ai session: he knows more about the user
     than a stateless chat does. Every piece is independently optional
     (try/except) since a missing module shouldn't break a Fable call."""
-    from datetime import datetime
-
     parts = []
 
     try:
@@ -229,7 +227,8 @@ def build_fable_context(user_input: str) -> str:
     except Exception:
         pass
 
-    now = datetime.now()
+    from config.settings import now_local
+    now = now_local()
     parts.append(f"CURRENT TIME: {now.strftime('%I:%M %p, %A %B %d %Y')}")
 
     return "\n\n".join(parts)

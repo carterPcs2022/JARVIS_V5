@@ -56,6 +56,12 @@ python-dotenv>=1.0.0
 pillow>=10.0.0
 psutil>=5.9.0
 
+# zoneinfo (core/llm/router.py's USER_TIMEZONE handling) needs the IANA tz
+# database — present via the OS on macOS/most Linux desktops, but missing
+# on Render's minimal container image, where ZoneInfo() raises and every
+# "current time" fallback silently degrades to raw server UTC.
+tzdata>=2024.1
+
 # Absolute Final batch (optional — investment analysis; both degrade to
 # "data unavailable" rather than crashing if not installed, see
 # services/investment.py)

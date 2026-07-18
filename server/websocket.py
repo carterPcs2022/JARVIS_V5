@@ -48,8 +48,8 @@ def _boot_greeting() -> str:
     if first_time:
         return "J.A.R.V.I.S. online. All systems nominal. I'm ready when you are, sir."
 
-    from datetime import datetime
-    hour = datetime.now().hour
+    from config.settings import now_local
+    hour = now_local().hour
     time_of_day = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
     return f"Good {time_of_day}. Systems online."
 

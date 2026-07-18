@@ -7,10 +7,13 @@
       "say only the word OK"
     ],
     "22": [
-      "hi"
+      "hi",
+      "this deploy is killing me",
+      "this deploy is killing me"
     ],
     "1": [
-      "play spotify"
+      "play spotify",
+      "this deploy is killing me"
     ],
     "19": [
       "what time is it"
@@ -39,7 +42,8 @@
       "PLAY SHOOT TO THRILL!",
       "Skip",
       "search and play shoo to thrill",
-      "PLAY SHOOT TO THRILL!"
+      "PLAY SHOOT TO THRILL!",
+      "this deploy is killing me"
     ],
     "0": [
       "shoot to thrill then press play on spotify",
@@ -47,13 +51,46 @@
       "Play shoot to thrill",
       "yes do that",
       "play shoot to thrill on spotify by AC/DC.",
-      "play shoot to thrill on spotify"
+      "play shoot to thrill on spotify",
+      "pause",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me 2",
+      "this deploy is killing me",
+      "hi",
+      "this deploy is killing me"
+    ],
+    "2": [
+      "this deploy is killing me"
+    ],
+    "20": [
+      "this deploy is killing me",
+      "this deploy is killing me"
+    ],
+    "21": [
+      "this deploy is killing me",
+      "this deploy is killing me"
+    ],
+    "16": [
+      "someone is trying to break into my house right now, I hear them at the door",
+      "help, someone broke into my house",
+      "false alarm, I am safe now, stand down",
+      "I think someone unfamiliar is on my wifi network right now",
+      "stand down, false alarm, everything is fine",
+      "I am okay now, false alarm"
     ]
   },
   "daily": {
     "Wednesday": [
       "Afternoon Jarvis",
-      "say only the word OK"
+      "say only the word OK",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me"
     ],
     "Saturday": [
       "hi"
@@ -92,7 +129,24 @@
       "Play shoot to thrill",
       "yes do that",
       "play shoot to thrill on spotify by AC/DC.",
-      "play shoot to thrill on spotify"
+      "play shoot to thrill on spotify",
+      "pause",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me 2",
+      "this deploy is killing me",
+      "hi",
+      "this deploy is killing me",
+      "this deploy is killing me",
+      "this deploy is killing me"
+    ],
+    "Friday": [
+      "someone is trying to break into my house right now, I hear them at the door",
+      "help, someone broke into my house",
+      "false alarm, I am safe now, stand down",
+      "I think someone unfamiliar is on my wifi network right now",
+      "stand down, false alarm, everything is fine",
+      "I am okay now, false alarm"
     ]
   },
   "sequences": [
@@ -128,7 +182,29 @@
     "Play shoot to thrill",
     "yes do that",
     "play shoot to thrill on spotify by AC/DC.",
-    "play shoot to thrill on spotify"
+    "play shoot to thrill on spotify",
+    "pause",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me 2",
+    "this deploy is killing me",
+    "hi",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "this deploy is killing me",
+    "someone is trying to break into my house right now, I hear them at the door",
+    "help, someone broke into my house",
+    "false alarm, I am safe now, stand down",
+    "I think someone unfamiliar is on my wifi network right now",
+    "stand down, false alarm, everything is fine",
+    "I am okay now, false alarm"
   ],
   "topics": {
     "jarvis": 12,
@@ -153,10 +229,28 @@
     "calander": 1,
     "large": 1,
     "files": 1,
-    "right": 1,
+    "right": 3,
     "thrill!": 2,
     "search": 1,
     "press": 1,
-    "ac/dc.": 1
+    "ac/dc.": 1,
+    "pause": 1,
+    "deploy": 14,
+    "killing": 14,
+    "trying": 1,
+    "someone": 3,
+    "break": 1,
+    "house": 2,
+    "help,": 1,
+    "broke": 1,
+    "false": 3,
+    "stand": 2,
+    "alarm,": 2,
+    "network": 1,
+    "unfamiliar": 1,
+    "think": 1,
+    "everything": 1,
+    "down,": 1,
+    "alarm": 1
   }
 }

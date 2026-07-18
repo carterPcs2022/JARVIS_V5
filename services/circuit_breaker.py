@@ -29,10 +29,30 @@ class CircuitBreaker:
             }
         return self._circuits[service]
 
+    def _maybe_recover(self, service: str) -> dict:
+        """If open and the recovery window (retry_after, or the fixed
+        cooldown) has elapsed, flip to half-open so the next attempt can
+        actually test recovery. Centralized here so is_available() and
+        call() never drift out of sync — previously is_available() only
+        read the stored "open"/"closed" state and never re-checked elapsed
+        time, so router.py's `if not cb.is_available(...): continue` gate
+        skipped straight past Groq forever without ever reaching call()
+        (the only place the elapsed-time check lived), leaving a circuit
+        permanently open until process restart even long after Groq itself
+        had recovered."""
+        circuit = self._get_circuit(service)
+        if circuit["state"] == "open":
+            effective_timeout = circuit["retry_after"] or self.RECOVERY_TIMEOUT
+            elapsed = time.time() - (circuit["opened_at"] or 0)
+            if elapsed >= effective_timeout:
+                circuit["state"] = "half"
+                print(f"[CircuitBreaker] {service}: open -> half-open")
+        return circuit
+
     def call(self, service: str, fn, *args, **kwargs):
         """Execute fn(*args, **kwargs) through the circuit breaker.
         Usage: result = cb.call("groq", groq_function, messages)"""
-        circuit = self._get_circuit(service)
+        circuit = self._maybe_recover(service)
 
         if circuit["state"] == "open":
             # retry_after (from e.g. GroqRateLimitError, set in
@@ -44,12 +64,9 @@ class CircuitBreaker:
             # and the real reset burns a guaranteed-to-fail probe request.
             effective_timeout = circuit["retry_after"] or self.RECOVERY_TIMEOUT
             elapsed = time.time() - (circuit["opened_at"] or 0)
-            if elapsed < effective_timeout:
-                raise CircuitOpenError(
-                    f"{service} circuit is open. Retry in {effective_timeout - elapsed:.0f}s"
-                )
-            circuit["state"] = "half"
-            print(f"[CircuitBreaker] {service}: open -> half-open")
+            raise CircuitOpenError(
+                f"{service} circuit is open. Retry in {effective_timeout - elapsed:.0f}s"
+            )
 
         try:
             result = fn(*args, **kwargs)
@@ -105,7 +122,7 @@ class CircuitBreaker:
         return self._get_circuit(service)["state"]
 
     def is_available(self, service: str) -> bool:
-        return self.get_state(service) != "open"
+        return self._maybe_recover(service)["state"] != "open"
 
     def force_close(self, service: str):
         if service in self._circuits:

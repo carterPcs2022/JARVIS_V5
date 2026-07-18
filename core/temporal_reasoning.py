@@ -7,9 +7,9 @@ class TemporalReasoning:
     def parse_temporal_reference(self, text: str) -> dict:
         """Parse natural language time references into a concrete anchor."""
         from core.llm.router import think
-        from datetime import datetime
+        from config.settings import now_local
         result = think(
-            f"Today is {datetime.now().strftime('%Y-%m-%d')}.\n"
+            f"Today is {now_local().strftime('%Y-%m-%d')}.\n"
             f"Parse the temporal reference in: '{text}'\n"
             f"Reply as JSON only: "
             f'{{"reference": str, "approximate_date": str, "is_relative": bool, "anchor": str}}',

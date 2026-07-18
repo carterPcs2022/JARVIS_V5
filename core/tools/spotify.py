@@ -85,7 +85,6 @@ def set_volume(level: int) -> dict:
 def search_and_play(query: str) -> dict:
     """Search Spotify and play the first result via URI search."""
     if not _ensure_open(): return {"ok": False, "message": "Could not open Spotify"}
-    safe = query.replace('"', '\\"')
     # Open Spotify search URI — Spotify handles the search natively
     import subprocess
     uri = f"spotify:search:{query.replace(' ', '%20')}"

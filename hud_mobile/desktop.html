@@ -1057,6 +1057,22 @@ let enrollInFlight = false;
 const ENROLL_TARGET = 5;
 const ENROLL_SAMPLE_MS = 3500;
 
+async function syncEnrollStatus() {
+  const btn = document.getElementById('enroll-voice-btn');
+  try {
+    const data = await jarvisGet('/stark/voice/profile/status');
+    if (data.error) return; // bridge unreachable/not configured — leave default state
+    enrollSampleCount = data.sample_count || 0;
+    if (data.enrolled && enrollSampleCount >= ENROLL_TARGET) {
+      btn.textContent = '✓ VOICE ENROLLED';
+      btn.disabled = true;
+    } else if (enrollSampleCount > 0) {
+      btn.textContent = `🎤 ENROLL MY VOICE (${enrollSampleCount}/${ENROLL_TARGET}) — CLICK TO CONTINUE`;
+      btn.disabled = false;
+    }
+  } catch (e) {}
+}
+
 async function enrollVoice() {
   const btn = document.getElementById('enroll-voice-btn');
   if (enrollInFlight || enrollSampleCount >= ENROLL_TARGET) return;
@@ -1445,6 +1461,7 @@ async function pollRetinal() {
 connectWs();
 pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
 pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
+syncEnrollStatus(); // one-time — voice enrollment status doesn't change during a session
 
 // pollStatus (/hud/status) never touches Groq — it's local system/security
 // stats only — so 5s is fine. The others are tiered by how fast their data

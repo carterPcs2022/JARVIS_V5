@@ -50,6 +50,18 @@ def classify(message: str) -> dict:
             temperature=0.0,
             force_model="instant",
         )
+        # router_chat() returns a non-JSON sentinel string ("[JARVIS
+        # OFFLINE] All LLM providers failed.") with an "error" key set when
+        # every provider is down — check for that explicitly instead of
+        # letting json.loads() blow up on it. Same behavioral outcome
+        # (default to no-threat) either way, but this distinguishes "total
+        # provider outage" from "model returned malformed JSON" in the log
+        # instead of both looking identical.
+        if result.get("error"):
+            print(f"[ThreatDetector] router reported provider failure, "
+                  f"defaulting to no-threat: {result['error']}")
+            return {**_DEFAULT_RESULT, "reasoning": f"classifier error: {result['error']}"}
+
         # Temporary — measuring this classifier's real per-call token cost
         # against the Groq dashboard, which aggregates every caller on the
         # "instant" tier together and can't isolate this one on its own.
