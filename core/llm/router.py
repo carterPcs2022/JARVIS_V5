@@ -62,7 +62,14 @@ MODEL_REGISTRY = {
         "best_for": ["chat", "analysis", "planning", "general"],
     },
     "reasoning": {
-        "id": "qwen/qwen3-32b", "max_tokens": 4096,
+        # qwen/qwen3-32b was decommissioned; qwen/qwen3.6-27b is its
+        # successor in Groq's live catalog. ModelUpdater's automatic
+        # same-family check missed this one because the version-numbering
+        # format itself changed ("3-32b" -> "3.6-27b") — the extra "."
+        # breaks its digit-stripping family comparison, so this needed a
+        # manual pick. Verified live: 200 OK, still emits <think> tags the
+        # same way (already handled by _strip_think_tags() below).
+        "id": "qwen/qwen3.6-27b", "max_tokens": 4096,
         "best_for": ["complex_reasoning", "math", "logic", "debate"],
     },
     "research": {
