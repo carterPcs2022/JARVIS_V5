@@ -171,6 +171,20 @@ def transcribe(path: str) -> str:
         return transcribe_groq(path)
 
 
+
+# Whisper's `prompt` param biases transcription toward expected vocabulary —
+# it's not a system prompt/instruction, just example text in the style/
+# terms you expect, which measurably cuts mishears on proper nouns a
+# general-purpose model has no reason to prefer over a similar-sounding
+# common word. Real names/terms that actually appear in this assistant's
+# own domain, not invented filler. Zero added latency (same request),
+# no new dependency.
+_TRANSCRIBE_PROMPT_HINT = (
+    "JARVIS, FRIDAY, Groq, Anthropic, Claude, Sentinel, combat mode, "
+    "Mark, Stark, Resemblyzer, Whisper."
+)
+
+
 def transcribe_groq(path: str) -> str:
     """Transcribe using Groq's hosted Whisper API (free tier: 7,200s/day)."""
     try:
@@ -182,6 +196,7 @@ def transcribe_groq(path: str) -> str:
                 model="whisper-large-v3-turbo",
                 response_format="text",
                 language="en",
+                prompt=_TRANSCRIBE_PROMPT_HINT,
             )
         return str(transcription).strip()
     except Exception as e:

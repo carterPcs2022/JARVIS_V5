@@ -234,6 +234,79 @@ body::before {
 @keyframes mic-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(142,233,255,0.4); } 50% { box-shadow: 0 0 0 6px rgba(142,233,255,0); } }
 .mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* ── Voice-primary default view — replaces the always-visible chat log.
+   Driven entirely by state signals that already exist (showListeningIndicator(),
+   showThinking()/hideThinking(), the onJarvisSpeak/onJarvisDone audio hooks) —
+   this just gives them a second, more prominent render target. ── */
+.voice-status-view {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 18px;
+}
+.voice-status-ring {
+  width: 120px; height: 120px; border-radius: 50%;
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; transition: border-color 0.3s;
+}
+.voice-status-ring::before {
+  content: ''; position: absolute; inset: -8px; border-radius: 50%;
+  border: 1px solid var(--border2);
+}
+.voice-status-ring .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); transition: background 0.3s, box-shadow 0.3s; }
+
+.voice-status-view.listening .voice-status-ring { border-color: var(--accent); animation: mic-pulse 1.2s ease-in-out infinite; }
+.voice-status-view.listening .voice-status-ring .dot { background: var(--accent); box-shadow: 0 0 14px var(--accent); }
+
+.voice-status-view.processing .voice-status-ring { border-color: var(--gold2); }
+.voice-status-view.processing .voice-status-ring .dot { background: var(--gold2); box-shadow: 0 0 14px var(--gold2); animation: think-bounce 1.2s ease-in-out infinite; }
+
+.voice-status-view.speaking .voice-status-ring { border-color: var(--accent2); animation: mic-pulse 0.7s ease-in-out infinite; }
+.voice-status-view.speaking .voice-status-ring .dot { background: var(--accent2); box-shadow: 0 0 18px var(--accent2); }
+
+.voice-status-label { font-size: 11px; letter-spacing: 4px; color: var(--muted); text-transform: uppercase; }
+.voice-status-view.listening .voice-status-label { color: var(--accent); }
+.voice-status-view.processing .voice-status-label { color: var(--gold2); }
+.voice-status-view.speaking .voice-status-label { color: var(--accent2); }
+
+.voice-status-hint { font-size: 9px; letter-spacing: 1px; color: var(--muted); text-align: center; max-width: 280px; }
+
+/* ── Chat drawer — the scrollback log, hidden by default ── */
+.chat-toggle-btn { position: relative; }
+.chat-toggle-btn .unread-dot {
+  position: absolute; top: -3px; right: -3px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--gold2); box-shadow: 0 0 6px var(--gold2);
+  display: none;
+}
+.chat-toggle-btn.has-unread .unread-dot { display: block; }
+
+.chat-backdrop {
+  position: fixed; inset: 0; z-index: 199; background: rgba(2,4,5,0.5);
+  backdrop-filter: blur(2px); opacity: 0; pointer-events: none; transition: opacity 0.25s;
+}
+.chat-backdrop.open { opacity: 1; pointer-events: all; }
+
+.chat-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 92vw);
+  z-index: 200; background: rgba(4,8,10,0.97); backdrop-filter: blur(10px);
+  border-left: 1px solid var(--border);
+  box-shadow: -20px 0 40px rgba(0,0,0,0.4);
+  transform: translateX(100%); transition: transform 0.28s cubic-bezier(.2,.8,.3,1);
+  display: flex; flex-direction: column;
+}
+.chat-drawer.open { transform: translateX(0); }
+.chat-drawer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border2); flex-shrink: 0;
+}
+.chat-drawer-title { font-size: 10px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; }
+.chat-drawer-close {
+  background: transparent; border: 1px solid var(--border); color: var(--text2);
+  border-radius: 2px; width: 26px; height: 26px; cursor: pointer; font-size: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.chat-drawer-close:hover { border-color: var(--accent); color: var(--accent); }
+.chat-drawer .messages { padding: 10px; }
+
 /* ── Right column ── */
 .voice-section { padding: 8px 14px 12px; }
 .voice-engine-name { font-size: 14px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin-bottom: 6px; }
@@ -376,7 +449,8 @@ body::before {
     </div>
   </div>
 
-  <!-- CENTER COLUMN -->
+  <!-- CENTER COLUMN — voice-primary by default; the chat log lives in the
+       slide-in drawer below (see .chat-drawer), opened via the CHAT toggle. -->
   <div class="center-col">
     <div class="control-bar">
       <button class="ctrl-btn" id="btn-cot" onclick="showPanel('cot')">CHAIN OF THOUGHT</button>
@@ -385,11 +459,13 @@ body::before {
       <button class="ctrl-btn" id="voice-mode-btn" onclick="toggleWakeWord()">VOICE OFF</button>
       <button class="ctrl-btn" id="enroll-voice-btn" onclick="enrollVoice()">🎤 ENROLL MY VOICE</button>
       <button class="ctrl-btn" id="reset-voice-btn" onclick="resetVoiceEnrollment()" title="Wipe the stored voice profile and start over">Reset &amp; Re-enroll</button>
-      <button class="ctrl-btn" style="margin-left:auto" onclick="clearChat()">CLEAR</button>
+      <button class="ctrl-btn chat-toggle-btn" id="chat-toggle-btn" onclick="toggleChatDrawer()" style="margin-left:auto" title="Show chat history">💬 CHAT<span class="unread-dot"></span></button>
     </div>
 
-    <div class="messages" id="messages">
-      <div class="msg-block system"><div class="msg-label">SYSTEM</div><div class="msg-text">JARVIS V5 online. Awaiting input, sir.</div></div>
+    <div class="voice-status-view" id="voice-status-view">
+      <div class="voice-status-ring"><div class="dot"></div></div>
+      <div class="voice-status-label" id="voice-status-label">READY</div>
+      <div class="voice-status-hint">Say "JARVIS" or use the mic to speak — or open CHAT to type.</div>
     </div>
 
     <div class="input-area">
@@ -450,6 +526,23 @@ body::before {
 
 </div>
 
+<!-- Chat drawer — the actual scrollback log (#messages) lives here now,
+     hidden by default. addMessage()/handleWsMessage() etc. are unchanged;
+     only the container's visibility/position moved. -->
+<div class="chat-backdrop" id="chat-backdrop" onclick="toggleChatDrawer(false)"></div>
+<div class="chat-drawer" id="chat-drawer">
+  <div class="chat-drawer-header">
+    <div class="chat-drawer-title">Chat History</div>
+    <div style="display:flex; gap:8px; align-items:center">
+      <button class="ctrl-btn" style="font-size:8px" onclick="clearChat()">CLEAR</button>
+      <button class="chat-drawer-close" onclick="toggleChatDrawer(false)" title="Close">✕</button>
+    </div>
+  </div>
+  <div class="messages" id="messages" style="flex:1">
+    <div class="msg-block system"><div class="msg-label">SYSTEM</div><div class="msg-text">JARVIS V5 online. Awaiting input, sir.</div></div>
+  </div>
+</div>
+
 <script>
 const HOST       = location.hostname;
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -503,6 +596,35 @@ const messagesEl = document.getElementById('messages');
 const inputEl    = document.getElementById('chat-input');
 let ws = null, streamBubble = null;
 
+// ── Voice-primary status view + chat drawer ──────────────────────────────
+// The status view mirrors state signals that already exist elsewhere in
+// this file (showThinking/hideThinking, showListeningIndicator,
+// _wireVoiceReactivity's audio events) — it doesn't introduce any new
+// state tracking, just a second, more prominent render target for state
+// that was previously only reflected in the (now-hidden-by-default) log.
+const voiceStatusView  = document.getElementById('voice-status-view');
+const voiceStatusLabel = document.getElementById('voice-status-label');
+const VOICE_STATUS_LABELS = { idle: 'READY', listening: 'LISTENING...', processing: 'PROCESSING...', speaking: 'SPEAKING...' };
+function setVoiceStatus(state) {
+  voiceStatusView.className = 'voice-status-view' + (state !== 'idle' ? ' ' + state : '');
+  voiceStatusLabel.textContent = VOICE_STATUS_LABELS[state] || 'READY';
+}
+
+const chatDrawer   = document.getElementById('chat-drawer');
+const chatBackdrop = document.getElementById('chat-backdrop');
+const chatToggleBtn = document.getElementById('chat-toggle-btn');
+let chatDrawerOpen = false;
+
+function toggleChatDrawer(open) {
+  chatDrawerOpen = open === undefined ? !chatDrawerOpen : open;
+  chatDrawer.classList.toggle('open', chatDrawerOpen);
+  chatBackdrop.classList.toggle('open', chatDrawerOpen);
+  if (chatDrawerOpen) {
+    chatToggleBtn.classList.remove('has-unread');
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+
 function cleanText(role, text) {
   if (role !== 'ai') return text;
   return text
@@ -533,10 +655,17 @@ function addMessage(role, text, meta = {}) {
 
   messagesEl.appendChild(block);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  // Voice is the primary output (spoken via TTS); the drawer stays closed
+  // unless the user opens it deliberately. A quiet unread dot on the
+  // toggle is enough to say "something happened" without forcing it open.
+  if (!chatDrawerOpen && role !== 'system') chatToggleBtn.classList.add('has-unread');
+
   return body;
 }
 
 function showThinking(text = 'PROCESSING...') {
+  setVoiceStatus('processing');
   let el = messagesEl.querySelector('.thinking');
   if (!el) {
     el = document.createElement('div');
@@ -549,6 +678,7 @@ function showThinking(text = 'PROCESSING...') {
 function hideThinking() {
   const el = messagesEl.querySelector('.thinking');
   if (el) el.remove();
+  setVoiceStatus('idle');
 }
 
 function clearChat() {
@@ -697,6 +827,15 @@ const WAKE_WORD = 'jarvis';
 const SILENCE_MS = 4000;
 const FOLLOWUP_MS = 6000;
 
+// Explicit rather than relying on getUserMedia({audio:true})'s browser
+// defaults for these — Chrome/Firefox usually enable them anyway, but
+// making the request explicit means voice capture (command audio +
+// enrollment samples) doesn't silently depend on that staying true.
+// Zero added latency, no new dependency.
+const VOICE_CAPTURE_AUDIO_CONSTRAINTS = {
+  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+};
+
 // Floating "listening" pill — distinct from the addMessage() system log
 // lines already used elsewhere in this flow, since a persistent visual
 // state (listening vs. "did you mean me?") reads faster at a glance than
@@ -714,8 +853,9 @@ function showListeningIndicator(active, symbol) {
     `;
     document.body.appendChild(el);
   }
-  if (!active) { el.style.display = 'none'; return; }
+  if (!active) { el.style.display = 'none'; setVoiceStatus('idle'); return; }
   el.style.display = 'block';
+  setVoiceStatus('listening');
   if (symbol === '?') {
     el.style.background = 'rgba(240,198,116,0.15)';
     el.style.border = '1px solid rgba(240,198,116,0.4)';
@@ -820,7 +960,7 @@ async function _beginCommandCapture(timeoutMs) {
 
   addMessage('system', 'Listening for your command...');
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_AUDIO_CONSTRAINTS);
     commandChunks = [];
     mediaRecorder = new MediaRecorder(stream);
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) commandChunks.push(e.data); };
@@ -925,7 +1065,7 @@ async function enrollVoice() {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_AUDIO_CONSTRAINTS);
   } catch (e) {
     addMessage('system', 'Voice enrollment failed — microphone access denied.');
     btn.textContent = '⚠ MIC ACCESS DENIED';
@@ -1087,19 +1227,23 @@ function _wireVoiceReactivity(audio) {
   const notify = (path) => fetch(`${API}${path}`, { method: 'POST', headers: authHeaders() }).catch(() => {});
   audio.addEventListener('play', () => {
     if (window.onJarvisSpeak) window.onJarvisSpeak();
+    setVoiceStatus('speaking');
     notify('/hud/voice_start');
   });
   audio.addEventListener('ended', () => {
     if (window.onJarvisDone) window.onJarvisDone();
+    setVoiceStatus('idle');
     notify('/hud/voice_end');
     openConversationWindow();
   });
   audio.addEventListener('pause', () => {
     if (window.onJarvisDone) window.onJarvisDone();
+    setVoiceStatus('idle');
     notify('/hud/voice_end');
   });
   audio.addEventListener('error', () => {
     if (window.onJarvisDone) window.onJarvisDone();
+    setVoiceStatus('idle');
     notify('/hud/voice_end');
   });
 }
