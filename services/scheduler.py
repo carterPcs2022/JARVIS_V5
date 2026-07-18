@@ -25,14 +25,24 @@ def _email_check():
 def _system_check():
     try:
         from core.tools.system import snapshot
-        from services.notifications import warning
+        # notify()'s Pushover dispatch only fires at priority >= HIGH —
+        # warning() sends Priority.WARNING, one tier below that gate, so
+        # these alerts could never reach Pushover regardless of how real
+        # the breach was (verified: forced a genuine CPU/RAM/disk breach
+        # and confirmed zero Pushover calls occurred). On Render, where
+        # this actually runs, the macOS-notification channel warning()
+        # also triggers is meaningless (no macOS device to receive it) —
+        # so a real resource crisis on the server produced zero real
+        # notification of any kind. alert() sends Priority.HIGH, which
+        # actually reaches Pushover.
+        from services.notifications import alert
         s = snapshot()
         if s.get("cpu_percent", 0) > float(os.getenv("ALERT_CPU", "90")):
-            warning("High CPU", f"CPU at {s['cpu_percent']}%")
+            alert("High CPU", f"CPU at {s['cpu_percent']}%")
         if s.get("ram_used_pct", 0) > float(os.getenv("ALERT_RAM", "90")):
-            warning("High RAM", f"RAM at {s['ram_used_pct']}%")
+            alert("High RAM", f"RAM at {s['ram_used_pct']}%")
         if s.get("disk_used_pct", 0) > float(os.getenv("ALERT_DISK", "85")):
-            warning("Low Disk", f"Disk at {s['disk_used_pct']}%")
+            alert("Low Disk", f"Disk at {s['disk_used_pct']}%")
     except Exception as e:
         log.debug("System check failed: %s", e)
 
