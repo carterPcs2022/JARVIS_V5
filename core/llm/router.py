@@ -493,6 +493,29 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                     _last_retry_after = retry_after
             continue
 
+    # Last resort: every free-tier Groq option (and Ollama, where
+    # applicable) is exhausted. If Anthropic is configured but wasn't
+    # already tried above (that only happens via explicit trigger phrases
+    # — "critical decision", "use fable", etc. — not as a fallback), reach
+    # for the cheapest enabled tier now rather than going fully offline
+    # while a real, working key sits unused. This is genuine spend, so it
+    # only fires here — once Groq has actually failed — never on the
+    # ordinary happy path.
+    if "anthropic" not in _attempted:
+        for fallback_tier in ("sonnet", "opus", "fable"):
+            config = ANTHROPIC_REGISTRY.get(fallback_tier)
+            if config and config["enabled"] and ANTHROPIC_API_KEY and _under_daily_limit(fallback_tier):
+                _attempted.append("anthropic")
+                print(f"[LLM Router] Groq/Ollama exhausted — trying Anthropic ({fallback_tier}) as last resort")
+                result = _call_anthropic_tier(fallback_tier, messages, max_tokens, query, temperature=temperature)
+                if result:
+                    result["latency_ms"] = round((time.time() - start) * 1000, 2)
+                    if use_cache:
+                        _cache[_cache_key(messages)] = (time.time(), result)
+                    return result
+                print(f"[LLM Router] Anthropic ({fallback_tier}) last-resort call also failed")
+                break  # one attempt only — a failing key/service won't succeed on the next tier either
+
     # Name only what was actually attempted — Ollama being skipped entirely
     # on headless cloud (see above) or Anthropic never being configured
     # must not be reported as "failed" alongside a real Groq failure. The
