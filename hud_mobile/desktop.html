@@ -836,6 +836,16 @@ let voiceModeOn = false;
 let mediaRecorder = null;
 let commandChunks = [];
 let silenceTimer = null;
+// wakeListenerActive / commandCaptureInFlight close a race: wakeRecognition.stop()
+// is async, so its onend can fire (and, unguarded, spawn a second recognition
+// instance) during the gap between wake-word detection and _beginCommandCapture's
+// getUserMedia() actually resolving into `mediaRecorder`. Two competing
+// SpeechRecognition/getUserMedia sessions fighting over one mic is what left
+// hands-free voice silently wedged (voiceModeOn still true, nothing responding)
+// after a real-world test — the plain `!mediaRecorder` check wasn't enough
+// because it's false for the whole span of that async gap, not just before it.
+let wakeListenerActive = false;
+let commandCaptureInFlight = false;
 const WAKE_WORD = 'jarvis';
 const SILENCE_MS = 4000;
 const FOLLOWUP_MS = 6000;
@@ -921,13 +931,18 @@ function stopWakeWord() {
   voiceModeBtn.classList.remove('active');
   voiceHintEl.style.display = 'none';
   if (wakeRecognition) { try { wakeRecognition.stop(); } catch (e) {} }
+  wakeListenerActive = false;
   _stopCommandCapture(false);
 }
 
 function _startWakeListener() {
-  if (!voiceModeOn) return;
+  // The mediaRecorder/commandCaptureInFlight checks close the race described
+  // above; wakeListenerActive stops a second recognition instance stacking on
+  // top of one that's still running (e.g. onend firing twice in a row).
+  if (!voiceModeOn || wakeListenerActive || mediaRecorder || commandCaptureInFlight) return;
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   wakeRecognition = new SR();
+  wakeListenerActive = true;
   wakeRecognition.continuous = true;
   wakeRecognition.interimResults = true;
   wakeRecognition.onresult = (e) => {
@@ -954,14 +969,21 @@ function _startWakeListener() {
   // Browsers auto-end continuous recognition after a while — just restart
   // it while voice mode is still on, so listening stays "continuous" in effect.
   wakeRecognition.onend = () => {
-    if (voiceModeOn && !mediaRecorder) _startWakeListener();
+    wakeListenerActive = false;
+    if (voiceModeOn && !mediaRecorder && !commandCaptureInFlight) _startWakeListener();
   };
-  wakeRecognition.onerror = () => { /* mic glitches shouldn't kill hands-free mode */ };
-  try { wakeRecognition.start(); } catch (e) {}
+  wakeRecognition.onerror = () => {
+    // mic glitches shouldn't kill hands-free mode — but the flag must clear
+    // here too, or an error-without-a-following-onend leaves it stuck true
+    // and hands-free mode can never restart itself again.
+    wakeListenerActive = false;
+  };
+  try { wakeRecognition.start(); } catch (e) { wakeListenerActive = false; }
 }
 
 async function _beginCommandCapture(timeoutMs) {
-  if (!voiceModeOn || mediaRecorder) return;
+  if (!voiceModeOn || mediaRecorder || commandCaptureInFlight) return;
+  commandCaptureInFlight = true;
   // Interrupt: a wake word heard mid-response means "stop talking and
   // listen to me now" — same as a real conversation. Harmless to call
   // when nothing is playing.
@@ -976,6 +998,10 @@ async function _beginCommandCapture(timeoutMs) {
     const stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_AUDIO_CONSTRAINTS);
     commandChunks = [];
     mediaRecorder = new MediaRecorder(stream);
+    // Race window closes here: mediaRecorder is now non-null, so the
+    // !mediaRecorder checks elsewhere take over — this flag only needed to
+    // cover the async gap between entry and this line.
+    commandCaptureInFlight = false;
     mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) commandChunks.push(e.data); };
     mediaRecorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
@@ -985,6 +1011,7 @@ async function _beginCommandCapture(timeoutMs) {
     mediaRecorder.start();
     _resetSilenceTimer(timeoutMs || SILENCE_MS);
   } catch (e) {
+    commandCaptureInFlight = false;
     addMessage('system', 'Microphone access denied — cannot capture command.');
     showListeningIndicator(false);
     mediaRecorder = null;
@@ -1001,6 +1028,7 @@ function _resetSilenceTimer(timeoutMs) {
 
 function _stopCommandCapture(shouldSend) {
   if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  commandCaptureInFlight = false;
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     if (!shouldSend) mediaRecorder.onstop = () => mediaRecorder.stream?.getTracks().forEach((t) => t.stop());
     mediaRecorder.stop();
