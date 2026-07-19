@@ -53,8 +53,10 @@ class PackageTracker:
             if "delivered" in status["status"].lower():
                 pkg["delivered"] = True
                 from core.event_bus import bus
+                # "info" doesn't reach the critical/high Pushover fan-out —
+                # same tier bug as tonight's other fixes.
                 bus.alert(f"Package delivered: {pkg['description'] or pkg['tracking_number']}",
-                         severity="info", category="PACKAGE")
+                         severity="high", category="PACKAGE")
             updates.append(pkg)
         self._save(packages)
         return updates

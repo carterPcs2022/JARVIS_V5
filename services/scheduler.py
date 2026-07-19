@@ -14,8 +14,10 @@ def _email_check():
             return
         count = get_unread_count()
         if count > 0:
-            from services.notifications import info
-            info("Gmail", f"You have {count} unread emails")
+            # info() sits below notify()'s Pushover gate (>= HIGH) — same
+            # tier bug as tonight's other fixes.
+            from services.notifications import alert
+            alert("Gmail", f"You have {count} unread emails")
             from core.event_bus import bus
             bus.publish("alert", {"title": "Gmail", "message": f"{count} unread emails"})
     except Exception as e:
@@ -77,8 +79,10 @@ def _mac_bridge_check():
 
     _mac_bridge_fail_count += 1
     if _mac_bridge_fail_count >= 2:
-        from services.notifications import warning
-        warning("Mac Bridge unreachable", f"{_mac_bridge_fail_count} consecutive failed health checks")
+        # warning() sits below notify()'s Pushover gate (>= HIGH) — same
+        # tier bug as tonight's other fixes.
+        from services.notifications import alert
+        alert("Mac Bridge unreachable", f"{_mac_bridge_fail_count} consecutive failed health checks")
 
 
 def _cleanup_old_files():
@@ -190,8 +194,10 @@ def _p31_saturday_check():
         from core.protocols import saturday
         result = saturday.check_work_life_balance()
         if result.get("needs_rest") and result.get("suggestion"):
-            from services.notifications import info
-            info("JARVIS", result["suggestion"])
+            # info() sits below notify()'s Pushover gate (>= HIGH) — same
+            # tier bug as tonight's other fixes.
+            from services.notifications import alert
+            alert("JARVIS", result["suggestion"])
     except Exception as e:
         log.debug("Saturday balance check failed: %s", e)
 

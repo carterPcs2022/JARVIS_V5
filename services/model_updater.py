@@ -228,8 +228,10 @@ class ModelUpdater:
             from core.event_bus import bus
             bus.system(message)
             for u in updates:
+                # "info" doesn't reach the critical/high Pushover fan-out —
+                # same tier bug as tonight's other fixes.
                 bus.alert(f"Model upgraded: {u['provider']}/{u['tier']} -> {u['new_model']}",
-                          severity="info", category="MODEL_UPDATE")
+                          severity="high", category="MODEL_UPDATE")
         except Exception:
             pass
 
