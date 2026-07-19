@@ -87,6 +87,27 @@ class EventBus:
         }, severity=severity)
         print(f"[JARVIS][{severity.upper()}] {message}")
 
+        # Pushover — this is the single highest-leverage fix from the
+        # scheduler audit: every one of this method's 17+ call sites across
+        # the codebase (lockdown, snap mode, canary/honeypot hits, dead
+        # man's switch, sentinel threat scores, daily secret scan, DEFCON
+        # changes, SIEM matches, etc.) relied on voice/Telegram/phone below,
+        # none of which are configured on Render — so a "critical" alert
+        # reached zero real-world channels in production, only an internal
+        # HUD publish visible if a browser tab happened to be open. Routing
+        # through services/notifications.py's existing Pushover-aware
+        # functions (rather than duplicating that HTTP call here) fixes all
+        # of those call sites at once instead of patching each individually.
+        if severity in ("critical", "high"):
+            try:
+                from services.notifications import critical as _po_critical, alert as _po_alert
+                if severity == "critical":
+                    _po_critical(category, message)
+                else:
+                    _po_alert(category, message)
+            except Exception:
+                pass
+
         # Speak critical and high alerts immediately
         if severity in ("critical", "high"):
             try:
