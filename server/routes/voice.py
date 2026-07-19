@@ -1,15 +1,71 @@
 """server/routes/voice.py — REST TTS + WebSocket voice pipeline."""
 import asyncio, base64, tempfile, os
 import httpx
-from fastapi import APIRouter, Depends, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from utils.security import verify_token
 from services.voice import speak, transcribe
+from config.settings import AVENGERS_PASSPHRASE
 
 router = APIRouter(prefix="/stark/voice", tags=["voice"])
 
 MAC_BRIDGE_URL = os.getenv("MAC_BRIDGE_URL", "")
 MAC_BRIDGE_TOKEN = os.getenv("MAC_BRIDGE_TOKEN", "")
+
+# Anyone with a valid API token could otherwise wipe or overwrite the
+# enrolled voiceprint outright — the token gates access to the app, not
+# specifically to this identity-critical, hard-to-notice action. Reuses
+# AVENGERS_PASSPHRASE (already the codebase's standing secondary-auth
+# secret for other sensitive/destructive actions — see
+# core/protocols.py's Protocol 24 restore(), core/privacy_mode.py) rather
+# than inventing a new secret. Same convention as those: if the env var
+# isn't set at all, this gate doesn't apply (matches every other passphrase
+# check in this codebase — an intentionally unset secret means "not opted
+# into this gate", not "broken").
+#
+# "Already enrolled" is defined as a COMPLETE profile (sample_count >=
+# ENROLL_TARGET), not just "a profile file exists" — enrollment happens as
+# ENROLL_TARGET separate POST /enroll calls, and gating on mere existence
+# would demand a passphrase midway through a brand-new, still-in-progress
+# enrollment (the file exists after sample 1) as if it were tampering with
+# someone else's already-established identity. A partial profile is still
+# just first-time setup in progress.
+ENROLL_TARGET = 5
+
+
+def _passphrase_ok(body: dict) -> bool:
+    if not AVENGERS_PASSPHRASE:
+        return True
+    return body.get("passphrase", "") == AVENGERS_PASSPHRASE
+
+
+async def _profile_fully_enrolled(profile: str) -> bool:
+    """Fails CLOSED (treats an unreachable bridge as "fully enrolled," i.e.
+    keeps the gate up) — the opposite of /transcribe's speaker-verification
+    fail-open. That asymmetry is deliberate: fail-open there protects
+    against a bridge hiccup locking out a legitimate command; fail-closed
+    here protects against a bridge hiccup being used as an excuse to skip
+    re-auth before destroying or overwriting the stored voiceprint."""
+    if not MAC_BRIDGE_URL:
+        return True
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{MAC_BRIDGE_URL}/voice/profile/status",
+                params={"profile": profile},
+                headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
+            )
+            data = resp.json()
+            return bool(data.get("enrolled")) and data.get("sample_count", 0) >= ENROLL_TARGET
+    except Exception:
+        return True
+
+
+def _reauth_required_response() -> JSONResponse:
+    return JSONResponse(status_code=403, content={
+        "error": "Re-authentication required — a voice profile is already enrolled.",
+        "reauth_required": True,
+    })
 
 
 @router.post("/transcribe", dependencies=[Depends(verify_token)])
@@ -85,11 +141,26 @@ async def _proxy_to_bridge_response(resp: httpx.Response) -> JSONResponse:
 
 
 @router.post("/enroll", dependencies=[Depends(verify_token)])
-async def enroll_voice(audio: UploadFile = File(...), profile: str = "default"):
+async def enroll_voice(audio: UploadFile = File(...), profile: str = Form("default"), passphrase: str = Form("")):
     """Thin proxy to the Mac Bridge's voiceprint enrollment — the bridge
-    token never reaches the browser, only this server holds it."""
+    token never reaches the browser, only this server holds it.
+
+    Gated behind AVENGERS_PASSPHRASE once a profile is already fully
+    enrolled — see _profile_fully_enrolled()'s docstring for why "fully"
+    and not merely "exists". A fresh, in-progress enrollment (samples
+    1..ENROLL_TARGET-1 of a brand-new profile) is never gated.
+
+    `profile` and `passphrase` must be declared as Form(...), not plain
+    str defaults — FastAPI silently ignores non-Form-annotated params when
+    an UploadFile/File is also present in the same endpoint, so without
+    this both fields would always read as their Python default regardless
+    of what was actually submitted (found while testing this gate: a
+    correct passphrase was still rejected because it was never actually
+    being read from the multipart body)."""
     if not MAC_BRIDGE_URL:
         return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
+    if await _profile_fully_enrolled(profile) and not _passphrase_ok({"passphrase": passphrase}):
+        return _reauth_required_response()
     audio_bytes = await audio.read()
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -126,10 +197,19 @@ async def reset_voice_profile(body: dict):
     """Thin proxy to the Mac Bridge's /voice/reset — deletes the stored
     profile so a polluted enrollment (partial/garbage samples from the
     enrollment-button loop bug) can be wiped and re-enrolled from scratch
-    without SSHing in to rm the file by hand."""
+    without SSHing in to rm the file by hand.
+
+    Gated behind AVENGERS_PASSPHRASE once a profile is already fully
+    enrolled (see _profile_fully_enrolled()) — resetting is what actually
+    destroys an established voiceprint, so this is the more important of
+    the two gates. A still-in-progress partial enrollment isn't gated,
+    since reset is also the documented recovery path for cleaning up a
+    botched first-time setup."""
     if not MAC_BRIDGE_URL:
         return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
     profile = body.get("profile", "default")
+    if await _profile_fully_enrolled(profile) and not _passphrase_ok(body):
+        return _reauth_required_response()
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(

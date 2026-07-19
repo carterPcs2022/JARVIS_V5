@@ -1098,6 +1098,41 @@ let enrollInFlight = false;
 const ENROLL_TARGET = 5;
 const ENROLL_SAMPLE_MS = 3500;
 
+// Resetting or re-enrolling over an already-established voice profile now
+// requires re-auth (server-enforced in server/routes/voice.py, gated on
+// AVENGERS_PASSPHRASE). Deliberately NOT using window.prompt() for this —
+// that's the exact call that was just fixed elsewhere in this file because
+// it throws instead of returning a value in some browser contexts; reusing
+// it here for a security-relevant confirmation would reintroduce the same
+// failure mode for a more sensitive action. This is a small inline overlay
+// instead, built the same way showListeningIndicator() builds its pill:
+// a plain fixed-position DOM element, no native browser dialog involved.
+function askPassphrase(promptText) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(2,4,5,0.6);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;';
+    backdrop.innerHTML = `
+      <div style="background:rgba(4,8,10,0.98);border:1px solid var(--border);border-radius:4px;padding:20px;min-width:280px;max-width:90vw;">
+        <div style="font-size:11px;letter-spacing:1px;color:var(--text2);margin-bottom:10px;">${promptText}</div>
+        <input type="password" autocomplete="off" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid var(--border);color:var(--accent);padding:8px;font-family:inherit;font-size:12px;border-radius:2px;box-sizing:border-box;" />
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+          <button class="reauth-cancel" style="padding:6px 14px;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:2px;font-family:inherit;font-size:10px;cursor:pointer;">CANCEL</button>
+          <button class="reauth-confirm" style="padding:6px 14px;border:1px solid var(--accent);background:rgba(95,216,255,0.1);color:var(--accent);border-radius:2px;font-family:inherit;font-size:10px;cursor:pointer;">CONFIRM</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    const input = backdrop.querySelector('input');
+    const finish = (result) => { backdrop.remove(); resolve(result); };
+    backdrop.querySelector('.reauth-cancel').onclick = () => finish(null);
+    backdrop.querySelector('.reauth-confirm').onclick = () => finish(input.value);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') finish(input.value);
+      if (e.key === 'Escape') finish(null);
+    });
+    input.focus();
+  });
+}
+
 async function syncEnrollStatus() {
   const btn = document.getElementById('enroll-voice-btn');
   try {
@@ -1158,12 +1193,32 @@ async function enrollVoice() {
   form.append('profile', 'default');
 
   try {
-    const r = await fetch(`${API}/stark/voice/enroll`, {
+    let r = await fetch(`${API}/stark/voice/enroll`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}` },
       body: form,
     });
-    const data = await r.json();
+    let data = await r.json();
+    if (r.status === 403 && data.reauth_required) {
+      // Only reachable via a stale button state or a direct API call — the
+      // button itself is disabled once a profile is fully enrolled — but
+      // the server enforces this regardless of what the UI shows.
+      const passphrase = await askPassphrase('Re-authentication required — a voice profile is already enrolled. Enter passphrase to continue:');
+      if (passphrase === null) {
+        addMessage('system', 'Voice enrollment cancelled.');
+        btn.textContent = '🎤 ENROLL MY VOICE';
+        enrollInFlight = false;
+        btn.disabled = false;
+        return;
+      }
+      form.append('passphrase', passphrase);
+      r = await fetch(`${API}/stark/voice/enroll`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}` },
+        body: form,
+      });
+      data = await r.json();
+    }
     if (data.error) {
       addMessage('system', `Voice enrollment failed: ${data.error}`);
       btn.textContent = '⚠ ERROR — CLICK TO RETRY';
@@ -1203,12 +1258,26 @@ async function resetVoiceEnrollment() {
   // was indistinguishable from "worked, nothing to reset". Now reads the
   // actual result and says so, same pattern enrollVoice() already uses.
   try {
-    const r = await fetch(`${API}/stark/voice/reset`, {
+    let r = await fetch(`${API}/stark/voice/reset`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile: 'default' }),
     });
-    const data = await r.json();
+    let data = await r.json();
+    if (r.status === 403 && data.reauth_required) {
+      const passphrase = await askPassphrase('Re-authentication required — a voice profile is already enrolled. Enter passphrase to reset it:');
+      if (passphrase === null) {
+        addMessage('system', 'Voice profile reset cancelled.');
+        resetBtn.disabled = false;
+        return; // nothing happened server-side — leave enroll state untouched
+      }
+      r = await fetch(`${API}/stark/voice/reset`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: 'default', passphrase }),
+      });
+      data = await r.json();
+    }
     if (data.error) {
       addMessage('system', `Voice profile reset failed: ${data.error}`);
     } else if (data.reset === false) {
