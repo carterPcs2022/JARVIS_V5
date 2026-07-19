@@ -562,8 +562,21 @@ function ensureToken() {
     window.history.replaceState({}, '', location.pathname);
   }
   if (!getToken() && !DEV_MODE) {
-    const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
-    if (t) localStorage.setItem('jarvis_token', t);
+    // prompt() can throw in some embedded/automated browser contexts
+    // (sandboxed webviews, certain in-app browsers) instead of just
+    // returning a value — uncaught, that exception halted this entire
+    // inline script right here, so nothing after this call ever ran:
+    // no WebSocket connection, no button handlers, no mic/wake-word
+    // setup. A page that loses its saved token (cache clear, private
+    // window, different device) shouldn't come back completely dead
+    // with zero indication why — worst case now is "no token", not
+    // "no page".
+    try {
+      const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
+      if (t) localStorage.setItem('jarvis_token', t);
+    } catch (e) {
+      console.error('Token prompt failed — continuing without one:', e);
+    }
   }
 }
 
@@ -1157,16 +1170,31 @@ async function resetVoiceEnrollment() {
   const resetBtn = document.getElementById('reset-voice-btn');
   const enrollBtn = document.getElementById('enroll-voice-btn');
   resetBtn.disabled = true;
+  // Previously fired this and never looked at the response — success or
+  // failure looked identical (button just re-enabled), so a real failure
+  // was indistinguishable from "worked, nothing to reset". Now reads the
+  // actual result and says so, same pattern enrollVoice() already uses.
   try {
-    await fetch(`${API}/stark/voice/reset`, {
+    const r = await fetch(`${API}/stark/voice/reset`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ profile: 'default' }),
     });
+    const data = await r.json();
+    if (data.error) {
+      addMessage('system', `Voice profile reset failed: ${data.error}`);
+    } else if (data.reset === false) {
+      addMessage('system', data.reason === 'no profile to reset'
+        ? 'No voice profile to reset — enroll to create one.'
+        : 'Voice profile reset did not complete — try again.');
+    } else {
+      addMessage('system', 'Voice profile reset. Ready to re-enroll.');
+    }
   } catch (e) {
-    // Reset local state regardless — worst case re-enrollment appends
-    // onto a profile that didn't actually get wiped server-side, which is
-    // harmless (enroll appends samples, doesn't require a clean slate).
+    // A genuine network-level failure (bridge unreachable, etc.) — still
+    // reset local UI state below so the user isn't stuck, but say so
+    // instead of pretending it worked.
+    addMessage('system', 'Voice profile reset failed — could not reach the server.');
   }
   enrollSampleCount = 0;
   enrollInFlight = false;
