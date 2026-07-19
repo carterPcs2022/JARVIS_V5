@@ -45,7 +45,13 @@ TOOLS = {
     # Gmail
     "gmail_inbox":      {"desc": "Check Gmail inbox (unread emails)", "args": []},
     "gmail_search":     {"desc": "Search Gmail", "args": ["query"]},
-    "gmail_send":       {"desc": "Send an email", "args": ["to", "subject", "body"]},
+    "gmail_send":       {"desc": "Draft an email for review — NEVER sends immediately, "
+                                  "only creates a pending draft the user must separately confirm",
+                          "args": ["to", "subject", "body"]},
+    "gmail_confirm_send": {"desc": "Confirm and actually send the currently pending email draft",
+                            "args": []},
+    "gmail_discard_draft": {"desc": "Cancel/discard the currently pending email draft without sending",
+                             "args": []},
     "gmail_unread_count":{"desc":"Get number of unread Gmail messages", "args": []},
 
     # Fallback
@@ -72,6 +78,8 @@ _EXAMPLE = """Examples:
   "set volume to 40"       → {"tool":"set_volume","args":{"level":40}}
   "what's playing"         → {"tool":"spotify_current","args":{}}
   "send an email to bob@x.com saying hello" → {"tool":"gmail_send","args":{"to":"bob@x.com","subject":"Hello","body":"Hello"}}
+  "send it" / "yes send it" / "confirm" (referring to a just-drafted email) → {"tool":"gmail_confirm_send","args":{}}
+  "cancel that email" / "don't send it" / "discard the draft" → {"tool":"gmail_discard_draft","args":{}}
   "remind me to call mom in 30 minutes" → {"tool":"create_reminder","args":{"title":"Call mom","due_in_minutes":30}}
   "take a screenshot"      → {"tool":"take_screenshot","args":{}}
 """
@@ -276,10 +284,27 @@ def _execute_tool(tool: str, args: dict) -> str:
             return "\n".join(lines)
 
         elif tool == "gmail_send":
-            if not gm.is_configured():
-                return "Gmail not configured. See core/tools/gmail.py for setup."
-            r = gm.send_email(args.get("to",""), args.get("subject",""), args.get("body",""))
+            # Draft-then-confirm only, non-negotiable — this used to call
+            # gm.send_email() immediately, meaning "send an email to X
+            # saying Y" sent for real with zero confirmation the instant
+            # the LLM parser matched this tool. Creates a pending draft
+            # and reads it back instead; nothing here ever sends.
+            from core.tools import gmail_send
+            if not gmail_send.is_configured():
+                return "Gmail sending isn't set up yet — needs gmail.send added to the Google OAuth consent (see server/routes/calendar_auth.py)."
+            draft = gmail_send.draft_email(args.get("to", ""), args.get("subject", ""), args.get("body", ""))
+            return (f"Here's the draft, sir — to {draft['to']}, subject \"{draft['subject']}\": "
+                    f"\"{draft['body']}\". Say \"send it\" to send, or \"cancel\" to discard.")
+
+        elif tool == "gmail_confirm_send":
+            from core.tools import gmail_send
+            r = gmail_send.send_pending_draft()
             return r["message"]
+
+        elif tool == "gmail_discard_draft":
+            from core.tools import gmail_send
+            discarded = gmail_send.discard_pending_draft()
+            return "Draft discarded." if discarded else "There's no pending draft to discard."
 
         elif tool == "gmail_unread_count":
             if not gm.is_configured():

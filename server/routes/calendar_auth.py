@@ -25,7 +25,15 @@ router = APIRouter(prefix="/stark/calendar", tags=["calendar-auth"])
 
 _AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
 _TOKEN_URL = "https://oauth2.googleapis.com/token"
-_SCOPE     = "https://www.googleapis.com/auth/calendar"
+# gmail.send added for core/tools/gmail_send.py's draft-then-confirm email
+# flow — the minimum scope for sending only (not gmail.compose, which also
+# manages Gmail's own Drafts resource; the "draft" here is JARVIS's own
+# pending-confirmation object, not a real Gmail draft). Requesting both
+# scopes in one consent screen means one refresh token covers both — a
+# fresh consent click-through is unavoidable either way, since a refresh
+# token is bound to whatever scopes were actually granted when issued and
+# the existing one only ever covered calendar.
+_SCOPE = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/gmail.send"
 
 # Single-process, single-user setup flow — an in-memory nonce is enough;
 # no need for persistence across restarts for a flow that completes in the

@@ -104,12 +104,29 @@ def gmail_search(q: str, limit: int = 5):
     return {"emails": search_emails(q, limit)}
 
 
-@router.post("/gmail/send")
-def gmail_send(body: dict):
-    from core.tools.gmail import send_email, is_configured
+@router.post("/gmail/draft")
+def gmail_draft(body: dict):
+    """Draft-then-confirm only — this endpoint used to send immediately
+    (POST /gmail/send calling core.tools.gmail.send_email() with zero
+    confirmation step). Creates a pending draft for review; nothing here
+    sends anything. See POST /gmail/confirm_send."""
+    from core.tools.gmail_send import draft_email, is_configured
     if not is_configured():
-        return {"error": "Gmail not configured"}
-    return send_email(body.get("to",""), body.get("subject",""), body.get("body",""))
+        return {"error": "Gmail OAuth sending isn't configured"}
+    return draft_email(body.get("to", ""), body.get("subject", ""), body.get("body", ""))
+
+
+@router.post("/gmail/confirm_send")
+def gmail_confirm_send(body: dict):
+    from core.tools.gmail_send import send_pending_draft
+    return send_pending_draft(body.get("draft_id"))
+
+
+@router.post("/gmail/discard_draft")
+def gmail_discard_draft():
+    from core.tools.gmail_send import discard_pending_draft
+    discarded = discard_pending_draft()
+    return {"discarded": discarded}
 
 
 @router.post("/command")
