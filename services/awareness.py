@@ -221,7 +221,11 @@ class SituationalAwareness:
                 self._cpu_high_since = time.time()
             elif time.time() - self._cpu_high_since > 120:
                 self.narrate("high_cpu", {"cpu_pct": round(cpu, 1)})
-                notify("CPU Warning", f"CPU at {cpu:.0f}% for >2 min", Priority.WARNING)
+                # Priority.WARNING never reaches Pushover (notify() only
+                # dispatches there at >= HIGH) — same bug as
+                # services/scheduler.py's _system_check() had. RAM/disk
+                # below are already correctly at HIGH; this one was missed.
+                notify("CPU Warning", f"CPU at {cpu:.0f}% for >2 min", Priority.HIGH)
                 self._cpu_high_since = None  # reset to avoid spam
         else:
             self._cpu_high_since = None
