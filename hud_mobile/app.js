@@ -6,7 +6,36 @@
   const wsPort     = location.protocol === 'https:' ? '' : ':8000';
   const API    = `${location.protocol}//${HOST}${wsPort}`;
   const WS_URL = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
-  const TOKEN  = localStorage.getItem('jarvis_token') || '';
+  const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+
+  function getToken() { return localStorage.getItem('jarvis_token') || ''; }
+
+  // Mirrors hud_mobile/desktop.html's ensureToken() exactly — this file
+  // (the /hud/mobile frontend) had no equivalent at all: no ?token= URL
+  // bootstrap, no prompt fallback, just a TOKEN constant read once from
+  // localStorage. Since /ws/chat now requires a token (previously had
+  // none), a page that never had one saved would silently retry-connect
+  // forever with no token to send and no way to get one.
+  function ensureToken() {
+    const urlParams = new URLSearchParams(location.search);
+    const urlToken = urlParams.get('token');
+    if (urlToken) {
+      localStorage.setItem('jarvis_token', urlToken);
+      window.history.replaceState({}, '', location.pathname);
+    }
+    if (!getToken() && !DEV_MODE) {
+      // See desktop.html's identical comment: prompt() can throw instead
+      // of returning a value in some embedded/automated browser contexts —
+      // uncaught, that would halt this entire IIFE right here.
+      try {
+        const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
+        if (t) localStorage.setItem('jarvis_token', t);
+      } catch (e) {
+        console.error('Token prompt failed — continuing without one:', e);
+      }
+    }
+  }
+  ensureToken();
 
   // ── Suit assembly boot tones (Web Audio, no audio files needed) ─────────────
   let _assemblyIndex = 0;
@@ -146,7 +175,7 @@
     clearTimeout(reconnectTimer);
     setStatus('offline');
     addEvent('system', 'Connecting…');
-    ws = new WebSocket(WS_URL);
+    ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(getToken())}`);
 
     ws.onopen = () => { setStatus('online'); addEvent('ok', 'WebSocket connected'); };
 
@@ -238,7 +267,7 @@
   // ── Voice ──────────────────────────────────────────────────────────────────
   function connectVoiceWs() {
     if (voiceWs && voiceWs.readyState === WebSocket.OPEN) return;
-    voiceWs = new WebSocket(`${wsProtocol}//${HOST}${wsPort}/stark/voice/ws`);
+    voiceWs = new WebSocket(`${wsProtocol}//${HOST}${wsPort}/stark/voice/ws?token=${encodeURIComponent(getToken())}`);
     voiceWs.onmessage = ({data}) => {
       let msg; try { msg = JSON.parse(data); } catch { return; }
       if (msg.type === 'transcript') { addBubble('transcript', `🎙 "${msg.text}"`); addEvent('system', `Heard: ${msg.text}`); }
@@ -309,7 +338,7 @@
     protoList.innerHTML = '<div class="proto-item"><span class="proto-name">Loading…</span></div>';
     try {
       const r = await fetch(`${API}/stark/protocols`, {
-        headers: TOKEN ? {Authorization: `Bearer ${TOKEN}`} : {}
+        headers: getToken() ? {Authorization: `Bearer ${getToken()}`} : {}
       });
       const d = await r.json();
       const ap = d.active_protocols || {};

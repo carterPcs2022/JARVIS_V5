@@ -334,6 +334,19 @@ async def voice_ws(websocket: WebSocket):
                    {"type": "audio",      "data": "<base64 mp3>"}
                    {"type": "error",      "message": "..."}
     """
+    from server.websocket import _ws_token_ok
+    if not _ws_token_ok(websocket):
+        # This endpoint had the exact same gap /ws/chat had before last
+        # night's fix — no token check at all, unlike every REST route
+        # in this same file. It went unaudited then because the audit
+        # only covered /ws/chat; hud_mobile/app.js (the /hud/mobile
+        # frontend, the only client of this endpoint) connects here for
+        # its full voice pipeline (audio transcription + streamed text
+        # replies), so this was reachable by anyone with zero
+        # credentials, same severity as the original finding.
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     await websocket.send_json({"type": "system", "message": "Voice pipeline ready."})
 
