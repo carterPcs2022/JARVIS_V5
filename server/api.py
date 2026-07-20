@@ -399,6 +399,21 @@ async def hud_status():
         combat_status = combat_mode.status()
     except Exception:
         combat_status = {"state": "idle", "pending_confirm": False, "engaged_at": None}
+    try:
+        # Real, independently observable state — set by
+        # core.self_improvement.run_improvement_cycle() itself while it's
+        # actually running, not something inferred from a chat response.
+        # A hallucinated "self-improvement cycle" (the streaming bug fixed
+        # tonight) would show current_task: null here even while claiming
+        # otherwise in the chat window — that mismatch is the whole point.
+        from core.state import state
+        from core.self_improvement import self_improvement
+        sandbox_status = {
+            "current_task":      state.get("current_task"),
+            "pending_approvals": len(self_improvement.get_pending_approvals()),
+        }
+    except Exception:
+        sandbox_status = {"current_task": None, "pending_approvals": 0}
 
     return {
         # Top-level, read directly from live state — see core/llm/router.py,
@@ -435,6 +450,7 @@ async def hud_status():
         },
         "mark":          mark,
         "combat_mode":   combat_status,
+        "sandbox":       sandbox_status,
         "active_models":     model_update_status.get("current_models", {}),
         "last_model_check":  model_update_status.get("last_checked", "never"),
         "friday_online": friday_online,

@@ -447,6 +447,22 @@ body::before {
       <div class="panel-title">WORKSHOP<a href="/hud/intel" style="font-size:8px;color:var(--accent);text-decoration:none;letter-spacing:1px">INTEL MAP →</a></div>
       <div id="workshop-list"><div class="no-data">No active projects.</div></div>
     </div>
+
+    <div class="panel">
+      <div class="panel-title">SELF-IMPROVEMENT</div>
+      <!-- Reflects core.state's real current_task, polled from /hud/status —
+           not the chat response. A hallucinated "cycle running" claim (the
+           streaming bug fixed tonight) shows IDLE here regardless of what
+           the chat window says, since nothing here depends on that text. -->
+      <div class="stat-row">
+        <span class="stat-row-label">STATUS</span>
+        <span class="stat-row-val" id="sandbox-task">IDLE</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-row-label">AWAITING APPROVAL</span>
+        <span class="stat-row-val accent" id="sandbox-pending">0</span>
+      </div>
+    </div>
   </div>
 
   <!-- CENTER COLUMN — voice-primary by default; the chat log lives in the
@@ -1499,6 +1515,17 @@ async function pollStatus() {
 
     const fd = document.getElementById('footer-friday-dot');
     if (fd) fd.className = `footer-dot ${d.friday_online ? 'green' : 'yellow'}`;
+
+    const sandbox = d.sandbox || {};
+    const taskEl = document.getElementById('sandbox-task');
+    if (sandbox.current_task) {
+      taskEl.textContent = sandbox.current_task.replace(/^self_improvement_cycle:\s*/, '').toUpperCase();
+      taskEl.className = 'stat-row-val warn';
+    } else {
+      taskEl.textContent = 'IDLE';
+      taskEl.className = 'stat-row-val';
+    }
+    document.getElementById('sandbox-pending').textContent = sandbox.pending_approvals ?? 0;
 
     const allProvidersDown = !d.brain.groq && !d.brain.ollama;
     setStatus(allProvidersDown ? 'degraded' : 'online');

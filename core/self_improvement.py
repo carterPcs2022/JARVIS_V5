@@ -25,52 +25,68 @@ class SelfImprovementEngine:
     def run_improvement_cycle(self) -> dict:
         """1. Analyze code. 2. Write candidate improvements. 3. Test each
         in the sandbox. 4. Queue every one that passes for human approval
-        — nothing is ever deployed from this method."""
+        — nothing is ever deployed from this method.
+
+        Sets core.state's "current_task" at each step so a real cycle in
+        progress is independently observable (GET /hud/status) rather
+        than something only knowable by trusting whatever the chat
+        response claims — this is exactly the gap that let tonight's
+        streaming bug fabricate a fake cycle report with nothing to
+        contradict it. Always cleared in `finally`, including on an
+        unhandled exception, so a crash mid-cycle can't leave a stale
+        "still running" status behind forever."""
         from core.self_analysis import self_analysis
         from core.sandbox import jarvis_sandbox
+        from core.state import state
 
         results = {
             "analyzed": 0, "written": 0, "tested": 0,
             "queued": 0, "failed": 0, "improvements": [],
         }
 
-        analysis = self_analysis.analyze_self()
-        improvements = analysis.get("improvements", [])
-        results["analyzed"] = len(improvements)
+        try:
+            state.set("current_task", "self_improvement_cycle: analyzing core files")
+            analysis = self_analysis.analyze_self()
+            improvements = analysis.get("improvements", [])
+            results["analyzed"] = len(improvements)
 
-        if not improvements:
-            return {**results, "message": "No improvements identified."}
+            if not improvements:
+                return {**results, "message": "No improvements identified."}
 
-        for improvement in improvements[:3]:  # Max 3 per cycle
-            filepath = improvement.get("file", "")
-            if not filepath or not (BASE_DIR / filepath).exists():
-                continue
-
-            try:
-                written = jarvis_sandbox.write_improvement(filepath, improvement)
-                new_code = written.get("new_code", "")
-                if not new_code:
-                    results["failed"] += 1
+            for improvement in improvements[:3]:  # Max 3 per cycle
+                filepath = improvement.get("file", "")
+                if not filepath or not (BASE_DIR / filepath).exists():
                     continue
-                results["written"] += 1
 
-                test_result = jarvis_sandbox.run_in_sandbox(new_code, filepath)
-                if not test_result.get("success"):
+                try:
+                    state.set("current_task", f"self_improvement_cycle: writing candidate for {filepath}")
+                    written = jarvis_sandbox.write_improvement(filepath, improvement)
+                    new_code = written.get("new_code", "")
+                    if not new_code:
+                        results["failed"] += 1
+                        continue
+                    results["written"] += 1
+
+                    state.set("current_task", f"self_improvement_cycle: sandbox-testing {filepath}")
+                    test_result = jarvis_sandbox.run_in_sandbox(new_code, filepath)
+                    if not test_result.get("success"):
+                        results["failed"] += 1
+                        improvement["test_failure"] = test_result.get("error") or test_result.get("stderr", "")
+                        continue
+                    results["tested"] += 1
+
+                    self._queue_for_approval(filepath, new_code, improvement)
+                    results["queued"] += 1
+                    results["improvements"].append(improvement)
+
+                except Exception as e:
                     results["failed"] += 1
-                    improvement["test_failure"] = test_result.get("error") or test_result.get("stderr", "")
-                    continue
-                results["tested"] += 1
+                    print(f"[SelfImprovement] Error: {e}")
 
-                self._queue_for_approval(filepath, new_code, improvement)
-                results["queued"] += 1
-                results["improvements"].append(improvement)
-
-            except Exception as e:
-                results["failed"] += 1
-                print(f"[SelfImprovement] Error: {e}")
-
-        results["message"] = self._generate_summary(results)
-        return results
+            results["message"] = self._generate_summary(results)
+            return results
+        finally:
+            state.set("current_task", None)
 
     def approve_improvement(self, improvement_id: str) -> dict:
         """Human approves a queued improvement — the only path that ever
