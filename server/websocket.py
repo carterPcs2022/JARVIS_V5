@@ -256,8 +256,8 @@ def _persist(user_msg: str, response: str):
 
 
 def _generate_voice_background(text: str, websocket: WebSocket, loop: asyncio.AbstractEventLoop):
-    """Writes a uniquely-named file under static/ (served at GET
-    /stark/voice/audio?file=...) — never called on the event loop
+    """Writes one or more uniquely-named files under static/ (served at
+    GET /stark/voice/audio?file=...) — never called on the event loop
     directly, always via run_in_executor.
 
     Generation itself can take several seconds (a real ElevenLabs API
@@ -265,21 +265,33 @@ def _generate_voice_background(text: str, websocket: WebSocket, loop: asyncio.Ab
     that mismatch, not browser caching, was the actual cause of "playing
     old audio": the client fetched a fixed filename before this finished
     writing it, or while a previous request was still writing over it.
-    Pushing the exact filename back once writing is done removes the
-    guesswork entirely."""
+    Pushing the exact filename(s) back once writing is done removes the
+    guesswork entirely.
+
+    Uses generate_chunks_for_network() rather than the old single-file
+    generate_for_network() — a response over ~800 characters used to be
+    silently truncated mid-sentence in speech (while the full text still
+    reached the chat window). Chunking speaks all of it across multiple
+    files instead of cutting it off; a normal-length response still comes
+    back as a single chunk, so this is a superset of the old behavior,
+    not a change for typical responses."""
     try:
-        from services.elevenlabs_voice import generate_for_network
-        filename = generate_for_network(text)
-        if filename:
+        from services.elevenlabs_voice import generate_chunks_for_network
+        filenames = generate_chunks_for_network(text)
+        if filenames:
             asyncio.run_coroutine_threadsafe(
-                _send_audio_ready(websocket, filename), loop,
+                _send_audio_ready(websocket, filenames), loop,
             )
     except Exception as e:
         print(f"[WebSocket] Background voice generation failed: {e}")
 
 
-async def _send_audio_ready(websocket: WebSocket, filename: str):
+async def _send_audio_ready(websocket: WebSocket, filenames: list[str]):
     try:
-        await websocket.send_json({"type": "audio_ready", "audio_file": filename})
+        await websocket.send_json({
+            "type": "audio_ready",
+            "audio_file": filenames[0],     # back-compat: older HUD builds only read this
+            "audio_files": filenames,       # full ordered list — play these in sequence
+        })
     except Exception:
         pass  # client may have disconnected between the request and generation finishing

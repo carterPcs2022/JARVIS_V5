@@ -43,8 +43,12 @@ def _get_client():
 
 # ── Text cleaning for voice ─────────────────────────────────────────────────────
 
-def clean_for_voice(text: str, max_chars: int = 500) -> str:
-    """Clean text for natural spoken output. Remove markdown, truncate, fix punctuation."""
+def _strip_markup_and_expand(text: str) -> str:
+    """Shared first half of clean_for_voice()/split_for_speech(): strip
+    markdown, normalize whitespace, expand abbreviations for natural
+    speech. No length limit applied here — callers decide whether to
+    truncate (clean_for_voice) or split into multiple chunks
+    (split_for_speech)."""
     if not text:
         return ""
 
@@ -64,6 +68,19 @@ def clean_for_voice(text: str, max_chars: int = 500) -> str:
     ]:
         text = text.replace(abbr, spoken)
 
+    return text.strip()
+
+
+def clean_for_voice(text: str, max_chars: int = 500) -> str:
+    """Clean text for natural spoken output. Remove markdown, truncate, fix
+    punctuation. Truncating silently drops anything past max_chars — for
+    a response long enough that this matters, prefer split_for_speech()
+    plus generate_chunks_for_network(), which speaks all of it across
+    multiple audio files instead of cutting it off."""
+    text = _strip_markup_and_expand(text)
+    if not text:
+        return ""
+
     if len(text) > max_chars:
         truncated = text[:max_chars]
         last_end = max(truncated.rfind("."), truncated.rfind("!"), truncated.rfind("?"))
@@ -73,6 +90,37 @@ def clean_for_voice(text: str, max_chars: int = 500) -> str:
             text = truncated.rstrip() + "..."
 
     return text.strip()
+
+
+def split_for_speech(text: str, max_chars: int = 800) -> list[str]:
+    """Same cleaning as clean_for_voice(), but splits long text into
+    multiple chunks instead of truncating — nothing is silently dropped.
+    Prefers to break at a sentence boundary; falls back to the last word
+    boundary within the window if no sentence end is found, so a chunk
+    never ends mid-word."""
+    cleaned = _strip_markup_and_expand(text)
+    if not cleaned:
+        return []
+    if len(cleaned) <= max_chars:
+        return [cleaned]
+
+    chunks = []
+    remaining = cleaned
+    while remaining:
+        if len(remaining) <= max_chars:
+            chunks.append(remaining.strip())
+            break
+        window = remaining[:max_chars]
+        last_end = max(window.rfind("."), window.rfind("!"), window.rfind("?"))
+        if last_end > max_chars * 0.3:
+            split_at = last_end + 1
+        else:
+            last_space = window.rfind(" ")
+            split_at = last_space if last_space > 0 else max_chars
+        chunks.append(remaining[:split_at].strip())
+        remaining = remaining[split_at:].strip()
+
+    return [c for c in chunks if c]
 
 
 # ── Character budget tracking ───────────────────────────────────────────────────
@@ -267,6 +315,53 @@ def generate_for_network(text: str, output_path: str | None = None) -> str:
     except Exception as e:
         print(f"[ElevenLabs Network] Failed: {e}")
         return ""
+
+
+def generate_chunks_for_network(text: str, max_chars: int = 800) -> list[str]:
+    """Same purpose as generate_for_network(), but for text that would
+    otherwise be silently truncated: splits into sentence-boundary chunks
+    (split_for_speech()) and generates one audio file per chunk, so a
+    long response gets spoken in full across several files instead of
+    cutting off partway. Returns filenames in playback order — empty if
+    voice is disabled/unavailable, or shorter than the full chunk list if
+    the daily character budget runs out partway through (whatever
+    generated successfully before that point still plays; the rest is
+    silently skipped exactly the way a single too-long response already
+    would be under the budget check)."""
+    import time as _time
+    from core.state import state
+
+    chunks = split_for_speech(text, max_chars=max_chars)
+    if not chunks or not VOICE_ENABLED or IS_RAILWAY:
+        return []
+
+    static_dir = BASE_DIR / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    filenames: list[str] = []
+
+    for i, chunk in enumerate(chunks):
+        if not _check_budget(chunk):
+            break
+        try:
+            client = _get_client()
+            audio_bytes = b"".join(
+                client.text_to_speech.convert(
+                    voice_id=JARVIS_VOICE_ID,
+                    text=chunk,
+                    model_id=ELEVENLABS_MODEL,
+                )
+            )
+            filename = f"voice_{int(_time.time() * 1000)}_{i}.mp3"
+            (static_dir / filename).write_bytes(audio_bytes)
+            _track_chars(len(chunk))
+            filenames.append(filename)
+        except Exception as e:
+            print(f"[ElevenLabs Network] Chunk {i} generation failed: {e}")
+            break
+
+    if filenames:
+        state.set("latest_audio_file", filenames[-1])
+    return filenames
 
 
 # ── Voice modes ──────────────────────────────────────────────────────────────────
