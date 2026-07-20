@@ -67,6 +67,8 @@
         <div class="info-row"><span class="info-key">MODE</span><span class="info-val" id="val-mode">—</span></div>
         <div class="info-row"><span class="info-key">UPTIME</span><span class="info-val ok" id="val-uptime">—</span>
         </div>
+        <div class="info-row"><span class="info-key">RETINAL</span><span class="info-val" id="val-retinal">—</span>
+        </div>
       </div>
     </div>
 
@@ -79,7 +81,7 @@
       <button class="quick-btn" onclick="quickSend(\" what's playing\")">🎵</button>
       <button class="quick-btn" onclick="quickSend('check my email')">📧</button>
       <button class="quick-btn" onclick="quickSend('take a screenshot')">📸</button>
-      <button class="quick-btn" onclick="quickSend('mute')">🔇</button>
+      <button class="quick-btn" id="mute-btn" onclick="toggleMute()">🔇</button>
     </div>
 
     <!-- ── Input ────────────────────────────────────────────────── -->

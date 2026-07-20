@@ -71,6 +71,7 @@
   const valLatency  = document.getElementById('val-latency');
   const valMode     = document.getElementById('val-mode');
   const valUptime   = document.getElementById('val-uptime');
+  const valRetinal  = document.getElementById('val-retinal');
 
   const arcCpu  = document.getElementById('arc-cpu');
   const arcRam  = document.getElementById('arc-ram');
@@ -148,9 +149,24 @@
     if (meta) updatePanels(meta);
     sendBtn.disabled = false;
     input.focus();
-    playLatestVoice();
+    // No playLatestVoice() call here — matches desktop.html's rule: the
+    // streaming path (server/websocket.py's _try_stream()) already kicks
+    // off background voice generation before sending stream_end, and a
+    // real audio_ready event (with the exact filename(s)) always follows
+    // once it's ready. This used to call playLatestVoice() unconditionally
+    // on every stream_end/response — a "guess the latest file" fallback
+    // that predates last night's chunked-speech fix, and would only ever
+    // fetch the LAST chunk of a multi-chunk response, silently dropping
+    // everything before it. See playAudioQueue() below, which is what
+    // audio_ready now drives instead.
   }
 
+  // Fallback ONLY for the non-streaming 'response' path (brain.process_dict(),
+  // which doesn't consistently emit audio_ready the way the streaming path
+  // does) — same "guess and fetch latest" approach as before, same
+  // limitation (only correct for a single-chunk response), kept only where
+  // there's no better signal available. Mirrors desktop.html's
+  // playLatestVoiceFallback() exactly.
   let lastVoicePlay = 0;
   function playLatestVoice() {
     if (localStorage.getItem('jarvis_voice_muted') === 'true') return;
@@ -161,6 +177,28 @@
       const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
       audio.play().catch(() => {});
     }, 400);
+  }
+
+  // Plays one or more audio_ready filenames back-to-back, in order — the
+  // real fix for #3 (regular chat responses never played audio on mobile
+  // at all, even though the voice-conversation path's playback machinery
+  // already existed). Mirrors desktop.html's playAudioQueue(), minus the
+  // wake-word-specific hooks (openConversationWindow, onJarvisSpeak/Done)
+  // that don't apply here since mobile intentionally has no always-
+  // listening mode (see Stage 1 audit, item #5 — left as-is on purpose).
+  function playAudioQueue(filenames) {
+    if (localStorage.getItem('jarvis_voice_muted') === 'true') return;
+    if (!filenames || !filenames.length) return;
+    let idx = 0;
+    function playNext() {
+      if (idx >= filenames.length) return;
+      const filename = filenames[idx++];
+      const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
+      audio.addEventListener('ended', playNext);
+      audio.addEventListener('error', playNext);
+      audio.play().catch(playNext);
+    }
+    playNext();
   }
 
   function updatePanels(d) {
@@ -195,6 +233,15 @@
           updatePanels(msg);
           sendBtn.disabled = false; input.focus();
           addEvent('ok', `Response · ${msg.latency_ms||0} ms`);
+          // Only the non-streaming fallback path lacks a reliable
+          // audio_ready event — see playLatestVoice()'s comment.
+          if (msg.has_audio !== false) playLatestVoice();
+          break;
+        case 'audio_ready':
+          // Exact filename(s) from the background TTS generation — no
+          // guessing, and (unlike playLatestVoice()) correctly plays every
+          // chunk of a long response in order, not just the last one.
+          playAudioQueue(msg.audio_files || [msg.audio_file]);
           break;
         case 'protocol':
           addBubble('protocol', `🛡 ${msg.data?.protocol}: ${msg.data?.detail || msg.data?.message || ''}`);
@@ -289,6 +336,45 @@
       a.play().catch(() => {});
       a.onended = () => URL.revokeObjectURL(url);
     } catch (e) { addEvent('error', `Audio: ${e.message}`); }
+  }
+
+  // Fix #4 (Stage 1 audit): the 🔇 button used to call quickSend('mute'),
+  // which just sent the literal text "mute" as a chat message — it never
+  // touched the jarvis_voice_muted flag playLatestVoice()/playAudioQueue()
+  // both already check. Mirrors desktop.html's toggleMute(): a real
+  // client-side toggle, no round trip to the server needed.
+  window.toggleMute = () => {
+    const muted = localStorage.getItem('jarvis_voice_muted') === 'true';
+    const next = !muted;
+    localStorage.setItem('jarvis_voice_muted', next);
+    _applyMuteButtonState(next);
+  };
+
+  function _applyMuteButtonState(muted) {
+    const btn = document.getElementById('mute-btn');
+    if (!btn) return;
+    btn.textContent = muted ? '🔈' : '🔇';
+    btn.style.opacity = muted ? '0.5' : '1';
+    btn.title = muted ? 'Unmute JARVIS voice' : 'Mute JARVIS voice';
+  }
+  _applyMuteButtonState(localStorage.getItem('jarvis_voice_muted') === 'true');
+
+  // Stage 1 audit item #11 — the only one of the five desktop-only info
+  // panels the user wants mirrored on mobile. Same one-time fetch as
+  // desktop.html's pollRetinal() (enrollment status doesn't change during
+  // a session, so no polling interval needed) — just rendered as a text
+  // value here instead of a footer dot, to match mobile's existing
+  // info-row style.
+  async function pollRetinal() {
+    if (!valRetinal) return;
+    try {
+      const r = await fetch(`${API}/stark/auth/retinal/status`, {
+        headers: getToken() ? {Authorization: `Bearer ${getToken()}`} : {}
+      });
+      const d = await r.json();
+      valRetinal.textContent = d.enrolled ? 'ENROLLED' : 'NOT ENROLLED';
+      valRetinal.className = `info-val ${d.enrolled ? 'ok' : ''}`;
+    } catch (e) { /* leave as — */ }
   }
 
   async function toggleVoice() {
@@ -388,6 +474,7 @@
 
   pollMetrics();
   setInterval(pollMetrics, 30000);
+  pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
 
   // ── URL shortcut handling (manifest shortcuts) ─────────────────────────────
   const urlParams = new URLSearchParams(location.search);
