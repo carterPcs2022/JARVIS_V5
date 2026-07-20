@@ -305,3 +305,5 @@ def _format_play_response(result: dict) -> str:
     if "No active Spotify device" in error:
         return "No active Spotify device found. Open Spotify on your phone or Mac first, sir."
     return f"Couldn't play that: {error}" if error else "Couldn't play that, sir."
+
+# sandbox-approval-gate test marker (approve path) — will be rolled back immediately after verification
