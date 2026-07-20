@@ -75,10 +75,23 @@ def lockdown(body: dict):
     Activate lockdown. Requires Avengers Protocol (passphrase in body).
     POST {"passphrase": "...", "confirm_token": "..."} — or first call
     returns a token, second call with that token + passphrase confirms.
+
+    confirm_avengers() is a GENERIC two-step timing confirmation shared
+    by multiple protocols (lockdown here, coldfire below) — it only
+    proves the same string was submitted twice within the 60s window,
+    never that it's any particular real secret. Coldfire is safe because
+    core.protocols.coldfire() independently re-checks the passphrase
+    against COLDFIRE_PASSPHRASE before doing anything destructive.
+    activate_lockdown() had no equivalent check of its own — confirmed
+    live, lockdown activated with the arbitrary passphrase "banana123".
+    The check below closes that gap the same way coldfire already closes
+    it: validate against the real secret here, in addition to (not
+    instead of) the generic two-step confirmation.
     """
+    import hmac
+    from config.settings import AVENGERS_PASSPHRASE
     from core.protocols import (
-        activate_lockdown, request_avengers_confirmation,
-        confirm_avengers, COLDFIRE_PASSPHRASE_ENV
+        activate_lockdown, request_avengers_confirmation, confirm_avengers,
     )
     passphrase = body.get("passphrase", "")
     token      = body.get("confirm_token", "")
@@ -99,6 +112,9 @@ def lockdown(body: dict):
     # Second call — confirm and execute
     if not confirm_avengers(token, passphrase):
         raise HTTPException(403, "Confirmation failed or expired")
+
+    if not AVENGERS_PASSPHRASE or not hmac.compare_digest(passphrase, AVENGERS_PASSPHRASE):
+        raise HTTPException(403, "Invalid passphrase")
 
     return activate_lockdown(body.get("reason", "Manual lockdown"))
 

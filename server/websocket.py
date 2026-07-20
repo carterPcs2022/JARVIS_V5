@@ -181,7 +181,22 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
     reasoner  = Reasoner()
     validator = Validator()
 
-    intent     = reasoner.analyze(msg)
+    intent = reasoner.analyze(msg)
+
+    from core.protocols import is_lockdown
+    if is_lockdown() and intent.action != "chat":
+        # Mirrors core.protocols's own protocol-engine check (Protocol 3:
+        # only "chat" actions are permitted during lockdown) — that check
+        # lives inside Brain.process(), which this function bypasses
+        # around for most actions. Confirmed live: with lockdown
+        # genuinely active, a real "task"-classified message got a full,
+        # completely unblocked answer, because it never reached
+        # process() at all. Falling through to the real pipeline here
+        # lets the actual lockdown check apply instead of silently
+        # streaming past it.
+        classify_task.cancel()
+        return False
+
     validation = validator.check(intent)
     if not validation.ok:
         classify_task.cancel()  # invalid/blocked input isn't a realistic threat candidate
