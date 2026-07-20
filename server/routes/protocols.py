@@ -70,7 +70,7 @@ def update_baseline():
 # ── Protocol 3: Lockdown ──────────────────────────────────────────────────────
 
 @router.post("/lockdown", dependencies=[Depends(verify_master_only)])
-def lockdown(body: dict):
+async def lockdown(body: dict):
     """
     Activate lockdown. Requires Avengers Protocol (passphrase in body).
     POST {"passphrase": "...", "confirm_token": "..."} — or first call
@@ -87,12 +87,23 @@ def lockdown(body: dict):
     The check below closes that gap the same way coldfire already closes
     it: validate against the real secret here, in addition to (not
     instead of) the generic two-step confirmation.
+
+    Iris AND-gate: if an iris profile is actually enrolled (checked live
+    against the Mac Bridge, not a static flag), the second call must also
+    include a fresh "iris_token" obtained from a successful
+    POST /stark/iris/verify — alongside, never instead of, the passphrase
+    above. If nothing is enrolled, this leg doesn't apply (same "unset
+    secret = gate doesn't apply" convention used everywhere else in this
+    file), so lockdown never becomes unreachable for anyone who hasn't
+    opted into iris.
     """
     import hmac
     from config.settings import AVENGERS_PASSPHRASE
     from core.protocols import (
         activate_lockdown, request_avengers_confirmation, confirm_avengers,
+        consume_iris_confirmation,
     )
+    from server.routes.iris import iris_profile_enrolled
     passphrase = body.get("passphrase", "")
     token      = body.get("confirm_token", "")
 
@@ -115,6 +126,12 @@ def lockdown(body: dict):
 
     if not AVENGERS_PASSPHRASE or not hmac.compare_digest(passphrase, AVENGERS_PASSPHRASE):
         raise HTTPException(403, "Invalid passphrase")
+
+    if await iris_profile_enrolled():
+        iris_token = body.get("iris_token", "")
+        if not iris_token or not consume_iris_confirmation(iris_token):
+            raise HTTPException(403, "Iris verification required — call POST /stark/iris/verify "
+                                      "and pass the returned iris_confirm_token as iris_token.")
 
     return activate_lockdown(body.get("reason", "Manual lockdown"))
 

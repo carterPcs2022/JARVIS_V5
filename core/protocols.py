@@ -139,6 +139,37 @@ def confirm_avengers(token: str, passphrase: str) -> bool:
     return entry["passphrase"] == passphrase
 
 
+# ── Pending iris confirmations (AND-gate for lockdown / sandbox) ─────────────
+# Separate from _pending_confirmations above: that one binds a token to a
+# specific passphrase string (two-step timing confirmation for a single
+# action). This one just proves "a real /stark/iris/verify call matched
+# the enrolled profile within the last IRIS_CONFIRM_WINDOW seconds" — the
+# iris leg of the AND-gate, checked ALONGSIDE (never instead of) the
+# existing passphrase/approval-token checks on lockdown and sandbox
+# approve/persist.
+
+_iris_confirmations: dict[str, dict] = {}
+IRIS_CONFIRM_WINDOW = 120  # seconds — enough time to verify, then act
+
+
+def issue_iris_confirmation() -> str:
+    """Called only after a genuine iris match (server/routes/iris.py)."""
+    import secrets
+    token = secrets.token_hex(8)
+    with _pending_lock:
+        _iris_confirmations[token] = {"created": time.time()}
+    return token
+
+
+def consume_iris_confirmation(token: str) -> bool:
+    """One-time use — pops the token so it can't be replayed."""
+    with _pending_lock:
+        entry = _iris_confirmations.pop(token, None)
+    if not entry:
+        return False
+    return time.time() - entry["created"] <= IRIS_CONFIRM_WINDOW
+
+
 # ── JARVIS state (lockdown, friday) ──────────────────────────────────────────
 
 _lockdown_active   = False

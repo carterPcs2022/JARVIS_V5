@@ -62,6 +62,7 @@ def _include(*routers):
 (diag_router,) = _safe_import("server.routes.diagnostics", "router")
 (memory_router,) = _safe_import("server.routes.memory", "router")
 (voice_router,) = _safe_import("server.routes.voice", "router")
+(iris_router,) = _safe_import("server.routes.iris", "router")
 (mac_router,) = _safe_import("server.routes.mac", "router")
 (protocols_router,) = _safe_import("server.routes.protocols", "router")
 (scatter_router,) = _safe_import("server.routes.scatter", "router")
@@ -101,7 +102,7 @@ if os.getenv("DISABLE_SANDBOX", "").lower() != "true":
 
 _include(
     ws_router, chat_router, telemetry_router, diag_router, memory_router,
-    voice_router, mac_router, protocols_router, scatter_router, search_router,
+    voice_router, iris_router, mac_router, protocols_router, scatter_router, search_router,
     mark_router, stark_extra_router, final_router, final_protected_router,
     glasses_router, vision_identify_router, protocols_18_35_router, brain_enhancement_router,
     final_upgrade_router, final_completion_router, stark_infra_router,

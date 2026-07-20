@@ -142,40 +142,33 @@ def code_explain(body: dict):
     return {"explanation": dev_intel.explain_file(body.get("file", ""))}
 
 
-# ── Retinal scan authentication ───────────────────────────────────────────────
-# Always explicit, user-initiated requests — never scheduled on a timer.
-
-@router.post("/auth/retinal/enroll")
-async def retinal_enroll(file: UploadFile = File(...)):
-    from services.retinal_scan import retinal
-
-    suffix = Path(file.filename or "eye.jpg").suffix or ".jpg"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        return retinal.enroll_from_image(tmp_path)
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
-
-@router.post("/auth/retinal/verify")
-async def retinal_verify(file: UploadFile = File(...)):
-    from services.retinal_scan import retinal
-
-    suffix = Path(file.filename or "eye.jpg").suffix or ".jpg"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        return retinal.capture_and_scan(tmp_path)
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-
+# ── Retinal/iris status (legacy path, kept for the HUD) ──────────────────────
+# services/retinal_scan.py has been replaced entirely, not patched — it
+# SHA256-hashed the derived iris pattern before storage/comparison, which
+# destroys the similarity structure needed for real matching, and its
+# verify-with-nothing-enrolled path silently auto-enrolled whoever
+# submitted first (confirmed by direct execution). The real replacement —
+# MediaPipe landmark detection + Daugman/Gabor iris coding, fail-closed,
+# AND-gated onto Suit Lockdown + sandbox approve/persist — lives in
+# server/routes/iris.py (proxying to ~/mac_bridge/bridge.py). This path is
+# kept alive only because hud_mobile/app.js and desktop.html already poll
+# it for the enrollment indicator; both only read `.enrolled`, so proxying
+# to the new system's status keeps them working unchanged. New
+# integrations should call GET /stark/iris/profile/status directly.
 
 @router.get("/auth/retinal/status")
-def retinal_status():
-    from services.retinal_scan import retinal
-    return retinal.status()
+async def retinal_status():
+    from server.routes.iris import MAC_BRIDGE_URL, MAC_BRIDGE_TOKEN
+    import httpx
+    if not MAC_BRIDGE_URL:
+        return {"enrolled": False, "sample_count": 0}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{MAC_BRIDGE_URL}/iris/profile/status",
+                params={"profile": "default"},
+                headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
+            )
+            return resp.json()
+    except Exception:
+        return {"enrolled": False, "sample_count": 0}

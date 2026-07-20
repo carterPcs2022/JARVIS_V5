@@ -35,6 +35,25 @@ def verify_sandbox_approval(x_sandbox_approval_token: str = Header(default="")):
     return True
 
 
+async def verify_iris_confirmation(x_iris_confirm_token: str = Header(default="")):
+    """Iris AND-gate for approve/persist, alongside (never instead of)
+    verify_sandbox_approval above. Only applies when an iris profile is
+    actually enrolled (checked live against the Mac Bridge) — same
+    "unset/not-opted-in = gate doesn't apply" convention as
+    SANDBOX_APPROVAL_TOKEN's sibling checks elsewhere in this codebase,
+    just evaluated dynamically instead of via a static env var, since
+    enrollment is itself dynamic state."""
+    from core.protocols import consume_iris_confirmation
+    from server.routes.iris import iris_profile_enrolled
+    if not await iris_profile_enrolled():
+        return True
+    if not x_iris_confirm_token or not consume_iris_confirmation(x_iris_confirm_token):
+        raise HTTPException(403, "Iris verification required — call POST /stark/iris/verify "
+                                  "and pass the returned iris_confirm_token as "
+                                  "X-Iris-Confirm-Token header.")
+    return True
+
+
 @router.get("/analyze", dependencies=[Depends(verify_token)])
 def sandbox_analyze():
     """JARVIS analyzes his own code. Read-only."""
@@ -75,7 +94,8 @@ def sandbox_pending():
 
 
 @router.post("/approve/{improvement_id}",
-             dependencies=[Depends(verify_master_only), Depends(verify_sandbox_approval)])
+             dependencies=[Depends(verify_master_only), Depends(verify_sandbox_approval),
+                           Depends(verify_iris_confirmation)])
 def sandbox_approve(improvement_id: str):
     """Approve and deploy a queued improvement — locally only, not pushed
     to GitHub. The only path that writes a real file. See
@@ -85,7 +105,8 @@ def sandbox_approve(improvement_id: str):
 
 
 @router.post("/persist/{deployment_id}",
-             dependencies=[Depends(verify_master_only), Depends(verify_sandbox_approval)])
+             dependencies=[Depends(verify_master_only), Depends(verify_sandbox_approval),
+                           Depends(verify_iris_confirmation)])
 def sandbox_persist(deployment_id: str):
     """Second, explicit step after approve: commit and push an
     already-deployed change to GitHub so it survives a redeploy. Requires

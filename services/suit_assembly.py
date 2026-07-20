@@ -72,9 +72,21 @@ class SuitAssembly:
         return checks.get(system, lambda: "online")()
 
     def _retinal_status(self) -> str:
+        """services/retinal_scan.py has been replaced entirely by the real
+        iris system (see server/routes/iris.py, ~/mac_bridge/bridge.py) —
+        this queries the Mac Bridge directly since suit assembly is a sync
+        boot-sequence check, not an async request handler."""
+        import os
         try:
-            from services.retinal_scan import retinal
-            return "online" if retinal.status().get("enrolled") else "standby"
+            import httpx
+            url, token = os.getenv("MAC_BRIDGE_URL", ""), os.getenv("MAC_BRIDGE_TOKEN", "")
+            if not url:
+                return "standby"
+            resp = httpx.get(
+                f"{url}/iris/profile/status", params={"profile": "default"},
+                headers={"Authorization": f"Bearer {token}"}, timeout=3,
+            )
+            return "online" if resp.json().get("enrolled") else "standby"
         except Exception:
             return "standby"
 
