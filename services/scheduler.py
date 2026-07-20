@@ -435,7 +435,17 @@ def start():
         # Self-programming sandbox — analyzes/writes/tests candidate
         # improvements and queues them for approval (Sunday 4am). No
         # autonomous deploy job exists — see core/self_improvement.py.
-        if os.getenv("DISABLE_SANDBOX", "").lower() != "true":
+        #
+        # DISABLE_AUTONOMOUS_SELF_IMPROVEMENT is deliberately separate from
+        # DISABLE_SANDBOX: the latter also unmounts the entire
+        # /stark/sandbox/* router (server/api.py), which would make
+        # approve/reject/persist unreachable too — exactly the capability
+        # someone traveling might still want if they get signal and want
+        # to review something already queued. This flag only skips
+        # scheduling the autonomous weekly cron job; the REST API for
+        # analyzing/reviewing/approving/rejecting/persisting stays live.
+        if (os.getenv("DISABLE_SANDBOX", "").lower() != "true"
+                and os.getenv("DISABLE_AUTONOMOUS_SELF_IMPROVEMENT", "").lower() != "true"):
             _scheduler.add_job(_weekly_self_improvement_cycle, "cron", day_of_week="sun", hour=4, minute=0,
                                 id="weekly_self_improvement_cycle")
 
