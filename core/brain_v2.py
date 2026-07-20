@@ -76,6 +76,69 @@ SANDBOX_TRIGGERS = {
 }
 
 
+def has_early_exit_trigger(user_input: str) -> bool:
+    """True if `user_input` would be caught by one of Brain.process()'s
+    early-exit trigger blocks (Mayday, clip, Mac app triggers, model
+    update, sandbox, Spotify quick commands, smart-home scenes) before
+    ever reaching the Reasoner/Planner/Executor pipeline.
+
+    Exists for server/websocket.py's _try_stream(), which decides whether
+    to bypass the fast Groq-streaming path based on Reasoner.analyze()'s
+    action label alone. That label has no idea any of these early exits
+    exist — a message matching one of them but landing on an
+    unclassified/generic action (usually "chat") streamed straight
+    through as ordinary conversation, and Groq — primed by JARVIS's own
+    personality prompt to know these features exist — fabricated a
+    plausible-sounding response for a real action that never actually
+    ran. Confirmed empirically: of ~35 trigger phrases across these
+    categories, roughly 30 classified as an action _try_stream never
+    bypassed. Self-improvement was the first instance found and fixed
+    directly; this generalizes that fix to every category at once instead
+    of requiring a new one-off check each time a new trigger set is added.
+
+    Deliberately mirrors process()'s own checks rather than replacing
+    them — this only answers "would something else handle this," it
+    never executes anything itself. Spotify's check goes through
+    is_spotify_command() specifically because handle_spotify_command()
+    matches AND executes in one call; calling that here to "just check"
+    would have double-fired next_track()/play() when process() ran its
+    own check right after.
+
+    NOTE FOR FUTURE MAINTAINERS: any new early-exit trigger block added to
+    Brain.process() needs a matching check added here too, or it inherits
+    this same gap on day one."""
+    from config.settings import JARVIS_MAYDAY_PHRASE
+
+    low = user_input.lower()
+
+    if JARVIS_MAYDAY_PHRASE in low:
+        return True
+    if any(t in low for t in CLIP_TRIGGERS):
+        return True
+    if any(t in low for t in MAC_APP_TRIGGERS):
+        return True
+    if any(t in low for t in MODEL_UPDATE_TRIGGERS):
+        return True
+    if any(t in low for t in SANDBOX_TRIGGERS):
+        return True
+
+    try:
+        from services.home_automation import _VOICE_TRIGGERS
+        if any(phrase in low for phrase, _scene in _VOICE_TRIGGERS):
+            return True
+    except Exception:
+        pass
+
+    try:
+        from services.spotify import is_spotify_command
+        if is_spotify_command(user_input):
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 # ── Data models ───────────────────────────────────────────────────────────────
 
 @dataclass

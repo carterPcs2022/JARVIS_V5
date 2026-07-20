@@ -130,24 +130,21 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
     if not GROQ_API_KEY:
         return False
 
-    from core.brain_v2 import SANDBOX_TRIGGERS
-    if any(trigger in msg.lower() for trigger in SANDBOX_TRIGGERS):
-        # core.brain_v2.Brain.process()'s SANDBOX_TRIGGERS check (analyze/
-        # improve/pending) is a plain substring match near the top of
-        # process(), independent of Reasoner.analyze()'s action label —
-        # there's no "sandbox" action category for it to hide behind, so
-        # nothing about intent classification would ever route it past
-        # this function on its own. Without this check, a message like
-        # "improve yourself" streamed through as ordinary chat and Groq
-        # fabricated a confident, detailed "self-improvement cycle" report
-        # — invented improvements, a fake completion count, "testing and
-        # implementation will begin immediately, sir" — without the real
-        # analyze/write/sandbox-test/queue pipeline ever running. Same bug
-        # class already fixed here for calendar/delete_file/compress_file
-        # (see the comment below); self-improvement was the one action
-        # left exposed, and it's the one place JARVIS can modify his own
-        # code, so a hallucinated "it's done" here is the worst place for
-        # this gap to exist.
+    from core.brain_v2 import has_early_exit_trigger
+    if has_early_exit_trigger(msg):
+        # Generalizes what used to be a self-improvement-only special
+        # case here: Brain.process() has several early-exit trigger
+        # blocks (Mayday, clip, Mac app triggers, model update, sandbox,
+        # Spotify quick commands, smart-home scenes) that are plain
+        # substring/state checks, entirely independent of
+        # Reasoner.analyze()'s action label. Auditing them individually
+        # found ~30 of ~35 trigger phrases across these categories
+        # classified into an action this function never bypassed for —
+        # meaning most of them streamed a hallucinated chat completion
+        # instead of ever reaching the real handler. See
+        # core.brain_v2.has_early_exit_trigger()'s docstring for the
+        # full reasoning and the self-improvement incident that
+        # surfaced this.
         return False
 
     from core.llm.openai import stream_chat

@@ -252,35 +252,72 @@ def parse_spotify_command(text: str) -> dict | None:
     return None
 
 
-def handle_spotify_command(text: str) -> str | None:
-    """Returns a response string if `text` is a Spotify command, else None."""
+def detect_spotify_command(text: str) -> dict | None:
+    """Side-effect-free: returns what handle_spotify_command() *would* do
+    without doing it, or None if `text` isn't a Spotify command. Exists so
+    callers that only need to know "is this a Spotify command" (e.g.
+    server/websocket.py's streaming-bypass check) can ask without risking
+    a double next_track()/play() if handle_spotify_command() were called
+    twice for the same message."""
     t = text.lower()
 
     if not spotify.is_connected():
         return None  # let the LLM handle it normally rather than claim music control that isn't set up
 
     if any(w in t for w in ("next", "skip")):
-        spotify.next_track()
-        return "Skipping to next track."
+        return {"kind": "next"}
 
     if any(w in t for w in ("previous", "last song", "go back")):
-        spotify.previous_track()
-        return "Back to the previous track."
+        return {"kind": "previous"}
 
     if "louder" in t or "turn it up" in t:
-        spotify.set_volume(80)
-        return "Volume up."
+        return {"kind": "volume_up"}
 
     if "quieter" in t or "turn it down" in t:
-        spotify.set_volume(30)
-        return "Volume down."
+        return {"kind": "volume_down"}
 
     for mood in _MOOD_QUERIES:
         if mood in t and "music" in t:
-            return _format_play_response(spotify.play_mood(mood))
+            return {"kind": "mood", "mood": mood}
 
     command = parse_spotify_command(text)
     if command:
+        return {"kind": "play_or_pause", "command": command}
+
+    return None
+
+
+def is_spotify_command(text: str) -> bool:
+    return detect_spotify_command(text) is not None
+
+
+def handle_spotify_command(text: str) -> str | None:
+    """Returns a response string if `text` is a Spotify command, else None.
+    Detection and execution are split (see detect_spotify_command()) so the
+    "is this a match" question can be answered without side effects; this
+    function is still the only place that actually calls the mutating
+    spotify.* methods."""
+    detected = detect_spotify_command(text)
+    if not detected:
+        return None
+
+    kind = detected["kind"]
+    if kind == "next":
+        spotify.next_track()
+        return "Skipping to next track."
+    if kind == "previous":
+        spotify.previous_track()
+        return "Back to the previous track."
+    if kind == "volume_up":
+        spotify.set_volume(80)
+        return "Volume up."
+    if kind == "volume_down":
+        spotify.set_volume(30)
+        return "Volume down."
+    if kind == "mood":
+        return _format_play_response(spotify.play_mood(detected["mood"]))
+    if kind == "play_or_pause":
+        command = detected["command"]
         if command["action"] == "pause":
             spotify.pause()
             return "Music paused."
