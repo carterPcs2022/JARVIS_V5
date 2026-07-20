@@ -3,7 +3,7 @@
 // what actually forces phones to stop serving a stale cached HUD — without
 // this bump, a cache-first strategy under a static name would keep serving
 // the same snapshot forever, even after server-side fixes.
-const CACHE = 'jarvis-v6';
+const CACHE = 'jarvis-v7';
 const ASSETS = ['/hud', '/hud/static/style.css', '/hud/static/app.js', '/hud/static/manifest.json'];
 
 self.addEventListener('install', e => {
