@@ -1,12 +1,32 @@
 """server/websocket.py — WebSocket using Brain V2 pipeline with token streaming."""
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import asyncio, json, time
+import asyncio, hmac, json, os, time
 from core.brain_v2 import brain
 from core.event_bus import bus
-from config.settings import GROQ_API_KEY
+from config.settings import GROQ_API_KEY, API_TOKEN, ENVIRONMENT
 
 router = APIRouter()
 _clients: dict = {}
+
+
+def _ws_token_ok(websocket: WebSocket) -> bool:
+    """Same semantics as utils.security.verify_token (open access if
+    API_TOKEN is unset, DEV_MODE bypass on local) — this endpoint never
+    had any check at all, unlike every REST route, which all reject an
+    unauthenticated request with 401. Confirmed live: a bare websockets
+    client with no token, no headers, no prior session connected,
+    received the real boot greeting, and got a genuine LLM response back
+    ("CONFIRMED" on request) — full command execution, zero credentials,
+    reachable by anyone on the internet. The HUD already sends
+    ?token=... on this exact URL (hud_mobile/desktop.html), so checking
+    it here needed no frontend change at all — the server just never
+    read it."""
+    if not API_TOKEN:
+        return True
+    if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
+        return True
+    token = websocket.query_params.get("token", "")
+    return bool(token) and hmac.compare_digest(token, API_TOKEN)
 
 # Combat-mode threat classification — was only ever wired into
 # server/routes/chat.py's POST /stark/chat, never into this module, despite
@@ -56,6 +76,12 @@ def _boot_greeting() -> str:
 
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket):
+    if not _ws_token_ok(websocket):
+        # Reject before accept() — no boot greeting, no connection, no
+        # partial handshake for an unauthenticated caller to learn from.
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     cid = str(id(websocket))
     q: asyncio.Queue = asyncio.Queue(maxsize=50)

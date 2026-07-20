@@ -321,9 +321,15 @@ async def hud_service_worker():
                         headers={"Service-Worker-Allowed": "/hud/", "Cache-Control": "no-cache"})
 
 
-@app.get("/hud/status")
+@app.get("/hud/status", dependencies=[Depends(verify_token)])
 async def hud_status():
-    """Single combined endpoint both HUDs poll every few seconds."""
+    """Single combined endpoint both HUDs poll every few seconds.
+
+    Was public — confirmed live (unauthenticated GET returned a full 200
+    with memory stats, conversation counts, security posture, model info)
+    before this fix. The HUD already sends its token on every jarvisGet()
+    call (see hud_mobile/desktop.html), so gating this needed no frontend
+    change."""
     from core.tools.system import snapshot
     from utils.diagnostics import full_diagnostic
     from core.memory import memory_stats
