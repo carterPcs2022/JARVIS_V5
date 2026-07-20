@@ -111,6 +111,20 @@ def _handle_threats() -> str:
 
 
 def _handle_mac(user_input: str) -> str:
+    # Friday Protocol's respond() is Brain.process()'s early-return path
+    # for "no LLM available" — it returns before the protocol engine
+    # (core.protocols's check(), which normally enforces "only chat
+    # during lockdown") ever runs. Confirmed live: with Groq down (a
+    # real, recurring condition tonight) and lockdown genuinely active,
+    # a Mac-control-shaped message reached this function and would have
+    # dispatched for real, completely unblocked. Checked here, at the
+    # actual dispatch point, rather than trying to duplicate this
+    # pattern match earlier in Brain.process() and risk the two
+    # checks drifting apart.
+    from core.protocols import is_lockdown
+    if is_lockdown():
+        return ("Lockdown is active. Only read-only queries are permitted "
+                "until the threat is resolved and lockdown is lifted.")
     try:
         from core.mac_dispatcher import dispatch
         return dispatch(user_input)
