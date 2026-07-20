@@ -74,7 +74,12 @@ class SelfImprovementEngine:
 
     def approve_improvement(self, improvement_id: str) -> dict:
         """Human approves a queued improvement — the only path that ever
-        calls jarvis_sandbox.deploy()."""
+        calls jarvis_sandbox.deploy(). Deploys and hot-reloads locally
+        ONLY — does not commit or push to GitHub. That used to happen
+        automatically in this same call; it's now a deliberate, separate
+        persist_deployment() action (see below) so approving a change
+        that turns out to be wrong in production never has to be undone
+        on the shared repo — it just wasn't pushed there yet."""
         from core.sandbox import jarvis_sandbox
 
         queue = self._load_queue()
@@ -88,15 +93,34 @@ class SelfImprovementEngine:
             queue = [i for i in queue if i.get("id") != improvement_id]
             self._save_queue(queue)
             self._announce_deployment(item["filepath"], item["improvement"], deploy.get("hot_reloaded", False))
-            self._commit_improvement_to_github(item["filepath"], item["improvement"])
 
         return deploy
 
+    def persist_deployment(self, deployment_id: str) -> dict:
+        """Second, explicit step after approve_improvement(): commit and
+        push an already-deployed change to GitHub so it survives Render's
+        ephemeral filesystem across a redeploy. Until this is called, the
+        change is live in the running process but exists nowhere else —
+        a redeploy (or a rollback) would erase it with no trace on the
+        shared repo, which is the point: approval alone commits to
+        nothing beyond 'try this for real right now.'"""
+        from core.sandbox import jarvis_sandbox
+
+        deployment = jarvis_sandbox.get_deployment(deployment_id)
+        if not deployment:
+            return {"success": False, "error": "Deployment not found"}
+        if deployment.get("persisted"):
+            return {"success": False, "error": "Already persisted", "deployment_id": deployment_id}
+
+        self._commit_improvement_to_github(deployment["filepath"], deployment["improvement"])
+        jarvis_sandbox.mark_persisted(deployment_id)
+        return {"success": True, "filepath": deployment["filepath"], "deployment_id": deployment_id}
+
     def _commit_improvement_to_github(self, filepath: str, improvement: dict):
-        """Persist an already human-approved deployment past the next
-        Render redeploy. This only ever runs after approve_improvement()
-        succeeds — the human approval gate on the deploy itself is
-        unaffected; this just makes that already-approved change durable."""
+        """Persist an already human-approved, already-deployed change past
+        the next Render redeploy. Only ever called from
+        persist_deployment() — a separate, explicit action from approval
+        itself (see approve_improvement()'s docstring for why)."""
         from utils.git_ops import commit_and_push
         desc = improvement.get("description", "optimization")[:50]
         commit_and_push(

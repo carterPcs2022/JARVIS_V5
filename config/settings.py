@@ -332,6 +332,18 @@ PEPPER_TOKEN        = os.getenv("PEPPER_TOKEN", "")
 # wouldn't say in ordinary conversation.
 JARVIS_MAYDAY_PHRASE = os.getenv("JARVIS_MAYDAY_PHRASE", "code red")
 
+# Self-programming sandbox approval (core/sandbox.py, core/self_improvement.py)
+# — a genuinely distinct secret from API_TOKEN, required in addition to it
+# (not instead of it) for POST /stark/sandbox/approve and /persist. Before
+# this, "master token" and "approval token" were the same credential, so
+# anyone with everyday API access could also deploy a self-modification —
+# the one action in this whole system that writes to JARVIS's own code.
+# Deliberately fails CLOSED if unset (unlike every other optional passphrase
+# in this codebase): the entire point is that approval must require
+# something beyond API_TOKEN, so an unconfigured secret must not silently
+# make API_TOKEN sufficient on its own again.
+SANDBOX_APPROVAL_TOKEN = os.getenv("SANDBOX_APPROVAL_TOKEN", "")
+
 # ── Memory ────────────────────────────────────────────────────────────────────
 MEMORY_DIR         = BASE_DIR / "memory"
 SHORT_TERM_FILE    = MEMORY_DIR / "short_term.json"

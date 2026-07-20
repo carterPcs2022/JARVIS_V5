@@ -17,7 +17,7 @@ containment. That's why deployment always still requires human approval
 regardless of how cleanly a candidate passes here.
 """
 from __future__ import annotations
-import ast, hashlib, json, os, sys, subprocess, tempfile, time
+import ast, hashlib, json, os, secrets, sys, subprocess, tempfile, time
 from pathlib import Path
 from datetime import datetime
 from config.settings import BASE_DIR
@@ -211,6 +211,7 @@ print("ALL_TESTS_PASSED")
 
         original_hash = hashlib.sha256(path.read_bytes()).hexdigest()
         new_hash = hashlib.sha256(new_code.encode()).hexdigest()
+        deployment_id = secrets.token_hex(8)
 
         path.write_text(new_code)
 
@@ -242,20 +243,29 @@ print("ALL_TESTS_PASSED")
                 "backup":        str(backup_path),
                 "confidence":    improvement.get("confidence", 0),
                 "hot_reload":    reload_result,
+                "deployment_id": deployment_id,
             },
             "deployed",
         )
 
+        # persisted starts False: writing this file is a LOCAL change only
+        # (this process, this container) until a separate, explicit
+        # persist_deployment() call (core/self_improvement.py) commits and
+        # pushes it to GitHub. Approving a change no longer does that
+        # automatically — see that function's docstring for why.
         self._log_deployment({
+            "id":          deployment_id,
             "filepath":    filepath,
             "improvement": improvement,
             "backup":      str(backup_path),
             "deployed_at": datetime.now().isoformat(),
             "hash":        new_hash,
+            "persisted":   False,
         })
 
         return {"success": True, "filepath": filepath, "backup": str(backup_path), "hash": new_hash,
-                "hot_reloaded": reload_result.get("success", False)}
+                "hot_reloaded": reload_result.get("success", False), "deployment_id": deployment_id,
+                "persisted": False}
 
     def rollback(self, filepath: str, backup_path: str) -> dict:
         """Roll back a deployment from its backup."""
@@ -311,6 +321,21 @@ print("ALL_TESTS_PASSED")
             except Exception:
                 return []
         return []
+
+    def get_deployment(self, deployment_id: str) -> dict | None:
+        return next((d for d in self.get_deployment_history() if d.get("id") == deployment_id), None)
+
+    def mark_persisted(self, deployment_id: str) -> dict:
+        """Flip a deployment's persisted flag once core.self_improvement's
+        persist_deployment() has actually pushed it to GitHub. Idempotent
+        by design — calling this twice for the same id is harmless."""
+        log = self.get_deployment_history()
+        entry = next((d for d in log if d.get("id") == deployment_id), None)
+        if not entry:
+            return {"success": False, "error": "Deployment not found"}
+        entry["persisted"] = True
+        DEPLOY_LOG.write_text(json.dumps(log, indent=2))
+        return {"success": True, "deployment_id": deployment_id}
 
 
 jarvis_sandbox = JarvisSandbox()
