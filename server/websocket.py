@@ -194,7 +194,17 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
         # process() at all. Falling through to the real pipeline here
         # lets the actual lockdown check apply instead of silently
         # streaming past it.
-        classify_task.cancel()
+        #
+        # Do NOT cancel classify_task here (unlike the validation-failure
+        # branch below, which owns it exclusively because it returns True
+        # and fully handles the response itself). Returning False hands
+        # control back to ws_chat()'s fallback branch, which still awaits
+        # this same classify_task via _apply_threat_classification() —
+        # cancelling it here first raises an uncaught CancelledError
+        # there instead (confirmed live: the connection went completely
+        # silent, no response, no error event, because CancelledError
+        # subclasses BaseException and isn't caught by the handler's
+        # `except Exception`).
         return False
 
     validation = validator.check(intent)
