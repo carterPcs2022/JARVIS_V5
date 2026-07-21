@@ -945,13 +945,32 @@ class Brain:
                         from core.self_analysis import self_analysis, ALLOWED_FILES
                         result = self_analysis.analyze_self()
                         count = result.get("safe", 0)
-                        response = (
-                            f"Self-analysis complete, sir. Found {count} potential improvements "
-                            f"across {len(ALLOWED_FILES)} core files. "
-                            f"Say 'JARVIS improve yourself' to write and test them."
-                            if count > 0 else
-                            "All code is optimal, sir. No improvements identified."
-                        )
+                        failed = result.get("failed_files", [])
+                        if count > 0:
+                            response = (
+                                f"Self-analysis complete, sir. Found {count} potential improvements "
+                                f"across {len(ALLOWED_FILES)} core files. "
+                                f"Say 'JARVIS improve yourself' to write and test them."
+                            )
+                        elif failed and result.get("analyzed", 0) == 0:
+                            # Every file that was attempted failed to
+                            # actually get analyzed (LLM providers down) —
+                            # "No improvements identified" would falsely
+                            # claim a clean bill of health for code that
+                            # was never really checked.
+                            response = (
+                                f"Self-analysis couldn't complete, sir — all {len(failed)} "
+                                f"file(s) attempted failed to analyze (LLM providers "
+                                f"unavailable). Nothing was actually checked."
+                            )
+                        elif failed:
+                            response = (
+                                f"Self-analysis partially complete, sir. No improvements found in "
+                                f"the {result.get('analyzed', 0)} file(s) that analyzed successfully; "
+                                f"{len(failed)} file(s) failed to analyze and weren't checked."
+                            )
+                        else:
+                            response = "All code is optimal, sir. No improvements identified."
                     elif action == "improve":
                         from core.self_improvement import self_improvement
                         result = self_improvement.run_improvement_cycle()
@@ -970,8 +989,28 @@ class Brain:
                     from core.memory import save_turn
                     save_turn(user_input, response)
                     return Result(response=response, ok=True, provider="sandbox")
-                except Exception:
-                    pass
+                except Exception as e:
+                    # This used to `pass` and fall through to the general
+                    # reasoning/LLM pipeline below — meaning a real failure
+                    # here (e.g. analyze_self()'s sequential LLM calls
+                    # hitting a Groq rate limit) silently became a normal
+                    # chat turn, and JARVIS_PERSONALITY's in-character,
+                    # confident tone fabricated a plausible-sounding but
+                    # entirely made-up completion ("Three rewrites were
+                    # attempted...") instead of reporting the real failure.
+                    # Confirmed this is real and spelling-independent, not
+                    # a trigger-matching gap: SANDBOX_TRIGGERS is a plain
+                    # substring check with no dependency on the leading
+                    # "J" (has_early_exit_trigger("ARVIS improve yourself")
+                    # and the correctly-spelled version both return True
+                    # identically) — the divergence a user saw between
+                    # typo/correct spelling was this exception being hit
+                    # intermittently (rate-limit timing), not the text.
+                    print(f"[Brain] Sandbox trigger '{trigger}' failed: {e}")
+                    response = f"Self-{action} failed, sir: {e}"
+                    from core.memory import save_turn
+                    save_turn(user_input, response)
+                    return Result(response=response, ok=False, provider="sandbox")
                 break
 
         # ── Maximum intelligence — explicit "give me your best" requests

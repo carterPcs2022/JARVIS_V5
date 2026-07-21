@@ -99,6 +99,15 @@ class SelfAnalysis:
             max_tokens=4096,
         )
 
+        # think() never raises on total provider failure — it returns a
+        # "[JARVIS OFFLINE] ..." string (see core/llm/router.py's chat()),
+        # which then fails json.loads() below and used to silently become
+        # improvements: [] — indistinguishable from "analyzed this file
+        # and found nothing," when actually nothing was analyzed at all.
+        # Same stable-marker convention core/brain_v2.py and
+        # services/self_audit.py already check for.
+        offline = analysis.startswith("[JARVIS OFFLINE]")
+
         try:
             clean = re.sub(r"```json|```", "", analysis).strip()
             data = json.loads(clean)
@@ -107,8 +116,9 @@ class SelfAnalysis:
 
         result = {
             "file":         filepath,
-            "improvements": data.get("improvements", []),
-            "count":        len(data.get("improvements", [])),
+            "improvements": [] if offline else data.get("improvements", []),
+            "count":        0 if offline else len(data.get("improvements", [])),
+            "error":        analysis if offline else None,
             "ts":           datetime.now().isoformat(),
         }
 
@@ -116,12 +126,36 @@ class SelfAnalysis:
         return result
 
     def analyze_self(self) -> dict:
-        """Analyze JARVIS's most important files. Weekly self-review."""
-        all_improvements = []
+        """Analyze JARVIS's most important files. Weekly self-review.
 
-        for filepath in ALLOWED_FILES[:5]:  # Top 5 files
-            if (BASE_DIR / filepath).exists():
-                result = self.analyze_file(filepath)
+        Each file's analyze_file() call is a real, independent LLM
+        request (core/llm/router.py's think()) — running the 5 of them
+        sequentially previously meant a single call (or its rate-limit
+        fallback chain) added its full latency 5 times over. Confirmed
+        live: a cycle with nothing to report still took ~2.5 minutes.
+        They don't depend on each other, so running them concurrently
+        via a thread pool cuts total latency to roughly the slowest
+        single call instead of the sum of all five, without changing
+        what gets analyzed or how."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        all_improvements = []
+        failed_files = []
+        files = [f for f in ALLOWED_FILES[:5] if (BASE_DIR / f).exists()]
+
+        with ThreadPoolExecutor(max_workers=len(files) or 1) as pool:
+            future_to_file = {pool.submit(self.analyze_file, f): f for f in files}
+            for future in as_completed(future_to_file):
+                filepath = future_to_file[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    print(f"[SelfAnalysis] {filepath} analysis failed: {e}")
+                    failed_files.append(filepath)
+                    continue
+                if result.get("error"):
+                    failed_files.append(filepath)
+                    continue
                 for imp in result.get("improvements", []):
                     imp["file"] = filepath
                     all_improvements.append(imp)
@@ -144,6 +178,8 @@ class SelfAnalysis:
             "total_found":  len(all_improvements),
             "safe":         len(safe),
             "improvements": safe[:10],
+            "failed_files": failed_files,
+            "analyzed":     len(files) - len(failed_files),
             "ts":           datetime.now().isoformat(),
         }
 

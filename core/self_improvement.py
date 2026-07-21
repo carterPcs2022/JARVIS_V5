@@ -51,6 +51,16 @@ class SelfImprovementEngine:
             results["analyzed"] = len(improvements)
 
             if not improvements:
+                failed = analysis.get("failed_files", [])
+                if failed and analysis.get("analyzed", 0) == 0:
+                    # Same overclaiming risk as core/brain_v2.py's "analyze"
+                    # path: every file failed to actually get analyzed
+                    # (LLM providers down), so "no improvements identified"
+                    # would misreport a total failure as a clean result.
+                    return {**results, "message":
+                        f"Couldn't complete analysis, sir — all {len(failed)} file(s) "
+                        f"attempted failed to analyze (LLM providers unavailable). "
+                        f"Nothing was actually checked."}
                 return {**results, "message": "No improvements identified."}
 
             for improvement in improvements[:3]:  # Max 3 per cycle
