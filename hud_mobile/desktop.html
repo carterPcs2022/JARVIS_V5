@@ -504,6 +504,10 @@ body::before {
       <button class="ctrl-btn" id="voice-mode-btn" onclick="toggleWakeWord()">VOICE OFF</button>
       <button class="ctrl-btn" id="enroll-voice-btn" onclick="enrollVoice()">🎤 ENROLL MY VOICE</button>
       <button class="ctrl-btn" id="reset-voice-btn" onclick="resetVoiceEnrollment()" title="Wipe the stored voice profile and start over">Reset &amp; Re-enroll</button>
+      <button class="ctrl-btn" id="enroll-iris-btn" onclick="enrollIris()">👁 ENROLL MY IRIS</button>
+      <button class="ctrl-btn" id="reset-iris-btn" onclick="resetIrisEnrollment()" title="Wipe the stored iris profile and start over">Reset Iris</button>
+      <button class="ctrl-btn" id="enroll-iris-btn" onclick="enrollIris()">👁 ENROLL MY IRIS</button>
+      <button class="ctrl-btn" id="reset-iris-btn" onclick="resetIrisEnrollment()" title="Wipe the stored iris profile and start over">Reset Iris</button>
       <button class="ctrl-btn chat-toggle-btn" id="chat-toggle-btn" onclick="toggleChatDrawer()" style="margin-left:auto" title="Show chat history">💬 CHAT<span class="unread-dot"></span></button>
     </div>
 
@@ -1205,6 +1209,14 @@ let enrollInFlight = false;
 const ENROLL_TARGET = 5;
 const ENROLL_SAMPLE_MS = 3500;
 
+// Same single-shot-per-click discipline as voice enrollment above, and the
+// same reason: a mid-capture re-click must not be able to spawn a second
+// concurrent enrollIris() run. Target matches server/routes/iris.py's
+// IRIS_ENROLL_TARGET.
+let irisSampleCount = 0;
+let irisInFlight = false;
+const IRIS_ENROLL_TARGET = 3;
+
 // Resetting or re-enrolling over an already-established voice profile now
 // requires re-auth (server-enforced in server/routes/voice.py, gated on
 // AVENGERS_PASSPHRASE). Deliberately NOT using window.prompt() for this —
@@ -1404,6 +1416,193 @@ async function resetVoiceEnrollment() {
   enrollInFlight = false;
   enrollBtn.disabled = false;
   enrollBtn.textContent = '🎤 ENROLL MY VOICE';
+  resetBtn.disabled = false;
+}
+
+// ── Iris enrollment — mirrors voice enrollment above, camera instead of
+// mic. Captures a single still frame per click (not continuous video) so
+// each POST is one deliberate sample, same one-click-one-sample discipline
+// as enrollVoice(). ──────────────────────────────────────────────────────
+
+async function syncIrisEnrollStatus() {
+  const btn = document.getElementById('enroll-iris-btn');
+  try {
+    const data = await jarvisGet('/stark/iris/profile/status');
+    if (data.error) return; // bridge unreachable/not configured — leave default state
+    irisSampleCount = data.sample_count || 0;
+    if (data.enrolled && irisSampleCount >= IRIS_ENROLL_TARGET) {
+      btn.textContent = '✓ IRIS ENROLLED';
+      btn.disabled = true;
+    } else if (irisSampleCount > 0) {
+      btn.textContent = `👁 ENROLL MY IRIS (${irisSampleCount}/${IRIS_ENROLL_TARGET}) — CLICK TO CONTINUE`;
+      btn.disabled = false;
+    }
+  } catch (e) {}
+}
+
+async function enrollIris() {
+  const btn = document.getElementById('enroll-iris-btn');
+  if (irisInFlight || irisSampleCount >= IRIS_ENROLL_TARGET) return;
+  irisInFlight = true;
+  btn.disabled = true;
+
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+  } catch (e) {
+    addMessage('system', 'Iris enrollment failed — camera access denied.');
+    btn.textContent = '⚠ CAMERA ACCESS DENIED';
+    irisInFlight = false;
+    btn.disabled = false;
+    return;
+  }
+
+  // Live preview overlay so the eye can actually be framed before capture —
+  // same plain-DOM-overlay approach as askPassphrase() above, not a native
+  // dialog.
+  const backdrop = document.createElement('div');
+  backdrop.style.cssText = 'position:fixed;inset:0;z-index:500;background:rgba(2,4,5,0.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;';
+  const video = document.createElement('video');
+  video.autoplay = true; video.playsInline = true; video.muted = true;
+  video.style.cssText = 'width:min(440px,80vw);border:1px solid var(--accent);border-radius:4px;box-shadow:0 0 24px rgba(95,216,255,0.2);transform:scaleX(-1);';
+  video.srcObject = stream;
+  const label = document.createElement('div');
+  label.style.cssText = 'color:var(--accent);font-family:inherit;font-size:12px;letter-spacing:2px;text-align:center;';
+  backdrop.appendChild(video);
+  backdrop.appendChild(label);
+  document.body.appendChild(backdrop);
+
+  try {
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      setTimeout(() => reject(new Error('camera_timeout')), 8000);
+    });
+
+    for (let i = 3; i >= 1; i--) {
+      label.textContent = `FRAME YOUR EYE — CAPTURING IN ${i}...`;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    label.textContent = 'CAPTURING...';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    var blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+  } catch (e) {
+    addMessage('system', 'Iris enrollment failed — could not read from the camera.');
+    btn.textContent = '⚠ ERROR — CLICK TO RETRY';
+    stream.getTracks().forEach((t) => t.stop());
+    backdrop.remove();
+    irisInFlight = false;
+    btn.disabled = false;
+    return;
+  }
+
+  stream.getTracks().forEach((t) => t.stop());
+  backdrop.remove();
+
+  btn.textContent = '⏳ Uploading...';
+  const form = new FormData();
+  form.append('image', blob, 'enroll.jpg');
+  form.append('profile', 'default');
+
+  try {
+    let r = await fetch(`${API}/stark/iris/enroll`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    let data = await r.json();
+    if (r.status === 403 && data.reauth_required) {
+      const passphrase = await askPassphrase('Re-authentication required — an iris profile is already enrolled. Enter passphrase to continue:');
+      if (passphrase === null) {
+        addMessage('system', 'Iris enrollment cancelled.');
+        btn.textContent = '👁 ENROLL MY IRIS';
+        irisInFlight = false;
+        btn.disabled = false;
+        return;
+      }
+      form.append('passphrase', passphrase);
+      r = await fetch(`${API}/stark/iris/enroll`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}` },
+        body: form,
+      });
+      data = await r.json();
+    }
+    // enrolled:false on a 200 (e.g. no eye detected in frame) is a real,
+    // fail-closed rejection from server/routes/iris.py — not a network
+    // error — surface the actual reason instead of a generic message.
+    if (data.error || data.enrolled === false) {
+      const reason = data.error || 'could not detect an eye in the photo';
+      addMessage('system', `Iris enrollment failed: ${reason}`);
+      btn.textContent = '⚠ ERROR — CLICK TO RETRY';
+      irisInFlight = false;
+      btn.disabled = false;
+      return;
+    }
+    irisSampleCount = data.sample_count || irisSampleCount + 1;
+  } catch (e) {
+    addMessage('system', 'Iris enrollment failed — request error.');
+    btn.textContent = '⚠ ERROR — CLICK TO RETRY';
+    irisInFlight = false;
+    btn.disabled = false;
+    return;
+  }
+
+  irisInFlight = false;
+  if (irisSampleCount >= IRIS_ENROLL_TARGET) {
+    btn.textContent = '✓ IRIS ENROLLED';
+    btn.disabled = true;
+    addMessage('system', 'Iris enrollment complete.');
+  } else {
+    btn.textContent = `👁 ENROLL MY IRIS (${irisSampleCount}/${IRIS_ENROLL_TARGET}) — CLICK TO CONTINUE`;
+    btn.disabled = false;
+  }
+}
+
+async function resetIrisEnrollment() {
+  const resetBtn = document.getElementById('reset-iris-btn');
+  const enrollBtn = document.getElementById('enroll-iris-btn');
+  resetBtn.disabled = true;
+  try {
+    let r = await fetch(`${API}/stark/iris/reset`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile: 'default' }),
+    });
+    let data = await r.json();
+    if (r.status === 403 && data.reauth_required) {
+      const passphrase = await askPassphrase('Re-authentication required — an iris profile is already enrolled. Enter passphrase to reset it:');
+      if (passphrase === null) {
+        addMessage('system', 'Iris profile reset cancelled.');
+        resetBtn.disabled = false;
+        return;
+      }
+      r = await fetch(`${API}/stark/iris/reset`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profile: 'default', passphrase }),
+      });
+      data = await r.json();
+    }
+    if (data.error) {
+      addMessage('system', `Iris profile reset failed: ${data.error}`);
+    } else if (data.reset === false) {
+      addMessage('system', data.reason === 'no profile to reset'
+        ? 'No iris profile to reset — enroll to create one.'
+        : 'Iris profile reset did not complete — try again.');
+    } else {
+      addMessage('system', 'Iris profile reset. Ready to re-enroll.');
+    }
+  } catch (e) {
+    addMessage('system', 'Iris profile reset failed — could not reach the server.');
+  }
+  irisSampleCount = 0;
+  irisInFlight = false;
+  enrollBtn.disabled = false;
+  enrollBtn.textContent = '👁 ENROLL MY IRIS';
   resetBtn.disabled = false;
 }
 
@@ -1763,6 +1962,7 @@ connectWs();
 pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
 pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
 syncEnrollStatus(); // one-time — voice enrollment status doesn't change during a session
+syncIrisEnrollStatus(); // one-time — iris enrollment status doesn't change during a session
 
 // pollStatus (/hud/status) never touches Groq — it's local system/security
 // stats only — so 5s is fine. The others are tiered by how fast their data
