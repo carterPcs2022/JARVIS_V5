@@ -75,12 +75,27 @@ SANDBOX_TRIGGERS = {
     "pending improvements": "pending",
 }
 
+# No trigger for "run a self check" / "health check" existed at all before
+# this was added — that phrase fell through to ordinary chat, which did an
+# unrelated web search and then confidently claimed "self-check complete,
+# all systems nominal" with nothing real behind it. utils.diagnostics.
+# full_diagnostic() already does a genuine, comprehensive check (LLM
+# provider availability, CPU/RAM/disk, lockdown/Friday state, config
+# validation, Mac Bridge reachability, memory file integrity) — this
+# routes to that instead of letting the phrase go unrecognized.
+SELF_CHECK_TRIGGERS = [
+    "run self check", "run a self check", "self check", "self-check",
+    "run self-check", "health check", "run health check",
+    "system check", "systems check", "run diagnostics", "run a diagnostic",
+    "run diagnostic", "status check", "full diagnostic",
+]
+
 
 def has_early_exit_trigger(user_input: str) -> bool:
     """True if `user_input` would be caught by one of Brain.process()'s
     early-exit trigger blocks (Mayday, clip, Mac app triggers, model
-    update, sandbox, Spotify quick commands, smart-home scenes) before
-    ever reaching the Reasoner/Planner/Executor pipeline.
+    update, sandbox, self-check, Spotify quick commands, smart-home
+    scenes) before ever reaching the Reasoner/Planner/Executor pipeline.
 
     Exists for server/websocket.py's _try_stream(), which decides whether
     to bypass the fast Groq-streaming path based on Reasoner.analyze()'s
@@ -120,6 +135,8 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if any(t in low for t in MODEL_UPDATE_TRIGGERS):
         return True
     if any(t in low for t in SANDBOX_TRIGGERS):
+        return True
+    if any(t in low for t in SELF_CHECK_TRIGGERS):
         return True
 
     try:
@@ -1012,6 +1029,49 @@ class Brain:
                     save_turn(user_input, response)
                     return Result(response=response, ok=False, provider="sandbox")
                 break
+
+        # ── Self/health check — real diagnostics only, never a fabricated
+        # "all nominal" claim. There was no trigger for this at all before:
+        # "JARVIS run self check" fell through to ordinary chat, which did
+        # an unrelated web search and then confidently reported "self-check
+        # complete, all systems nominal" — a real but irrelevant action
+        # plus a completely made-up safety claim on top of it.
+        # utils.diagnostics.full_diagnostic() already does a genuine check
+        # (LLM provider availability, CPU/RAM/disk, lockdown/Friday state,
+        # config validation, Mac Bridge reachability, memory file
+        # integrity) — the response below is built only from its real
+        # status/warnings, and an exception here returns an honest failure
+        # instead of falling through to the general pipeline (same fix as
+        # the sandbox block above, applied from the start this time).
+        if any(t in low_input for t in SELF_CHECK_TRIGGERS):
+            try:
+                from utils.diagnostics import full_diagnostic
+                diag = full_diagnostic()
+                status = diag.get("status", "UNKNOWN")
+                warnings = diag.get("warnings", [])
+                sys_snap = diag.get("system", {})
+
+                if status == "NOMINAL" and not warnings:
+                    response = (
+                        f"Self-check complete, sir. All systems nominal — "
+                        f"{diag.get('brain', 'brain status unknown')}, "
+                        f"CPU {sys_snap.get('cpu_percent', 0):.0f}%, "
+                        f"RAM {sys_snap.get('ram_used_pct', 0):.0f}%, "
+                        f"Disk {sys_snap.get('disk_used_pct', 0):.0f}%."
+                    )
+                else:
+                    issue_text = "; ".join(warnings) if warnings else "no specific warnings logged"
+                    response = f"Self-check complete, sir. Status: {status}. {issue_text}"
+
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=(status == "NOMINAL"), provider="diagnostics")
+            except Exception as e:
+                print(f"[Brain] Self-check failed: {e}")
+                response = f"Self-check failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="diagnostics")
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run
