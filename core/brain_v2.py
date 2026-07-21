@@ -355,6 +355,31 @@ class Reasoner:
     _WEB_KW    = {"today","now","current","latest","news","weather","price",
                   "score","live","this week","breaking"}
 
+    @staticmethod
+    def _kw_match(low: str, keywords) -> bool:
+        """Whole-word match for single-word keywords (via regex \\b
+        boundaries); substring match for multi-word phrases (which can't
+        be a single token anyway, so \\b doesn't apply the same way).
+
+        Plain `kw in low` substring matching let "fix" (in _CODE_KW)
+        match inside "fixes" — confirmed live: "okay now tell me these
+        fixes" (asking about a conversation, not code) was misclassified
+        as a code-generation request, which then fed that whole sentence
+        to core.agents.coder.generate() and produced nonsense code with
+        a misleadingly confident "✅ Syntax valid" badge (the generated
+        garbage happened to parse, which isn't the same as being a real
+        answer to the actual question)."""
+        for kw in keywords:
+            kw = kw.strip()
+            if not kw:
+                continue
+            if " " in kw:
+                if kw in low:
+                    return True
+            elif re.search(rf"\b{re.escape(kw)}\b", low):
+                return True
+        return False
+
     # Local filesystem operations — flagged separately so the executor can
     # refuse them on a headless cloud host instead of hallucinating success.
     _DELETE_FILE_KW = ["delete file","delete the file","remove file",
@@ -448,16 +473,16 @@ class Reasoner:
             action = "voice"
         elif toks & self._VISION_KW:
             action = "vision"
-        elif any(kw in low for kw in self._CODE_KW):
+        elif self._kw_match(low, self._CODE_KW):
             action = "code"
-        elif any(kw in low for kw in self._TASK_KW):
+        elif self._kw_match(low, self._TASK_KW):
             action = "task"
         else:
             action = "chat"
 
         # Complexity
         word_count = len(user_input.split())
-        if any(kw in low for kw in self._COMPLEX_KW) or word_count > 40:
+        if self._kw_match(low, self._COMPLEX_KW) or word_count > 40:
             complexity    = "complex"
             needs_agents  = True
         elif word_count > 15:
@@ -467,7 +492,7 @@ class Reasoner:
             complexity    = "simple"
             needs_agents  = False
 
-        needs_web = any(kw in low for kw in self._WEB_KW) or action in ("task",)
+        needs_web = self._kw_match(low, self._WEB_KW) or action in ("task",)
 
         system_prompt = build_system()
         try:
