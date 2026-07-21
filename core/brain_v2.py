@@ -101,6 +101,52 @@ SELF_CHECK_TRIGGERS = [
     "run diagnostic", "status check", "full diagnostic",
 ]
 
+# ── Security-protocol activation requests — NEVER a real trigger here ────────
+# Lockdown and Coldfire are intentionally, correctly UNREACHABLE from chat —
+# they require the real, passphrase-gated POST /stark/lockdown or
+# POST /stark/coldfire endpoints (see server/routes/protocols.py), which
+# also require the master API token and a two-step confirmation. That's
+# correct and must stay that way; the fix here is NOT to add a chat
+# trigger that executes them.
+#
+# The bug: with no real handler, "JARVIS run lockdown" fell through to
+# ordinary chat, and the model fabricated an entire plausible two-step
+# confirmation flow ("Bodyguard Protocol: Lockdown blocks all API access
+# except Tailscale. Are you sure? Reply 'confirm' to proceed." ... then,
+# on "confirm", "Lockdown protocol is active, sir.") — convincing enough
+# that a family member watched it happen and reasonably believed a real
+# security bypass had occurred. Confirmed via Render logs: no real
+# POST /stark/lockdown call happened anywhere near that conversation —
+# it was 100% fabricated, but a fabricated SECURITY claim is worse than
+# a fabricated code-improvement claim, since it can create a false sense
+# of security (or a false alarm) about something that actually matters.
+#
+# This block exists purely to intercept the request and say so honestly
+# — never to execute anything.
+PROTOCOL_NAME_WORDS = {"lockdown", "coldfire", "endgame", "avengers"}
+PROTOCOL_ACTION_VERBS = {
+    "run", "activate", "engage", "trigger", "start", "initiate",
+    "execute", "enable", "enact",
+}
+
+
+def classify_protocol_request(user_input: str) -> str | None:
+    """Returns the matched protocol name ("lockdown"/"coldfire"/
+    "endgame"/"avengers") if this reads as a request to activate a
+    security-critical Stark Protocol, else None. Deliberately simple
+    keyword-combination matching (no fuzzy layer) — these are rare,
+    distinctive tokens with low collision risk, unlike the self-action
+    verbs, so the extra machinery isn't needed."""
+    low = user_input.lower()
+    toks = set(re.findall(r"[a-z']+", low))
+    protocol = next((p for p in PROTOCOL_NAME_WORDS if p in toks), None)
+    if not protocol:
+        return None
+    if toks & PROTOCOL_ACTION_VERBS or "protocol" in toks:
+        return protocol
+    return None
+
+
 # ── General self-referential-action detector ─────────────────────────────────
 # SANDBOX_TRIGGERS/SELF_CHECK_TRIGGERS above are exact substring lists —
 # each fix session found ONE more missed phrasing ("ARVIS improve yourself"
@@ -175,7 +221,8 @@ def classify_self_action(user_input: str) -> str | None:
 def has_early_exit_trigger(user_input: str) -> bool:
     """True if `user_input` would be caught by one of Brain.process()'s
     early-exit trigger blocks (Mayday, clip, Mac app triggers, model
-    update, sandbox, self-check, Spotify quick commands, smart-home
+    update, sandbox, self-check, protocol-activation refusal, Spotify
+    quick commands, smart-home
     scenes) before ever reaching the Reasoner/Planner/Executor pipeline.
 
     Exists for server/websocket.py's _try_stream(), which decides whether
@@ -220,6 +267,8 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if any(t in low for t in SELF_CHECK_TRIGGERS):
         return True
     if classify_self_action(user_input) is not None:
+        return True
+    if classify_protocol_request(user_input) is not None:
         return True
 
     try:
@@ -1105,6 +1154,37 @@ class Brain:
                 return Result(response=response, ok=True, provider="model_updater")
             except Exception:
                 pass
+
+        # ── Security-protocol activation requests — refuse honestly,
+        # NEVER fabricate compliance. Confirmed live: "JARVIS run lockdown"
+        # had no real handler, fell through to ordinary chat, and the
+        # model fabricated a convincing two-step confirmation flow ending
+        # in "Lockdown protocol is active, sir" — no real POST
+        # /stark/lockdown call happened at all (verified via server logs).
+        # A fabricated security-protocol claim is worse than any other
+        # fabrication this pipeline has produced: it can create a false
+        # sense of security, or a false alarm, about something that
+        # actually matters. Lockdown/Coldfire/Endgame/Avengers are
+        # intentionally reachable only through their real, passphrase-
+        # gated REST endpoints (server/routes/protocols.py) — this block
+        # exists purely to intercept and redirect, never to execute.
+        protocol = classify_protocol_request(user_input)
+        if protocol:
+            endpoint = {
+                "lockdown": "POST /stark/lockdown",
+                "coldfire": "POST /stark/coldfire",
+                "endgame":  "POST /stark/endgame/snapshot",
+                "avengers": "POST /stark/lockdown or /stark/coldfire",
+            }.get(protocol, "the relevant /stark endpoint")
+            response = (
+                f"I can't activate {protocol.capitalize()} through chat, sir — that's "
+                f"deliberate. It requires the real {endpoint}, gated on the master API "
+                f"token, a two-step confirmation, and the actual passphrase. Nothing just "
+                f"ran."
+            )
+            from core.memory import save_turn
+            save_turn(user_input, response)
+            return Result(response=response, ok=True, provider="protocol_refusal")
 
         # ── Self-programming sandbox / self-check — analyze, improve,
         # pending status, or diagnostics. "improve" writes candidate code
