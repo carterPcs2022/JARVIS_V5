@@ -65,10 +65,21 @@ MODEL_UPDATE_TRIGGERS = [
 SANDBOX_TRIGGERS = {
     "analyze yourself":     "analyze",
     "check your code":      "analyze",
+    "analyze your code":    "analyze",
     "what can you improve": "analyze",
+    "self analyze":         "analyze",
+    "self-analyze":         "analyze",
     "improve yourself":     "improve",
     "optimize yourself":    "improve",
     "self improvement":     "improve",
+    # "self improve" (no "-ment") is a real natural phrasing that missed
+    # the "self improvement" substring entirely and fell through to
+    # ordinary chat — confirmed live, it fabricated a fake cycle report
+    # by echoing numbers from an earlier real "analyze yourself" turn in
+    # the same conversation. Added explicitly rather than assuming every
+    # short form is covered, same lesson as the self-check gap above.
+    "self improve":         "improve",
+    "self-improve":         "improve",
     "fix your code":        "improve",
     "run sandbox":          "improve",
     "upgrade yourself":     "improve",
