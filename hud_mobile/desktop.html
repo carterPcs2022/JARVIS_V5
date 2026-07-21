@@ -242,11 +242,40 @@ body::before {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 18px;
 }
+/* ── HUD core wrap: the SVG subsystem-status panel sits behind the
+   existing voice-status-ring (unchanged, still driven by the same
+   listening/processing/speaking classes) so nothing about voice-state
+   coloring regresses — this only adds a decorative + data-bearing layer
+   around it. ── */
+.hud-core-wrap {
+  position: relative; width: 300px; height: 300px;
+  display: flex; align-items: center; justify-content: center;
+}
+.hud-core-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.hud-core-svg .hud-ring-outer { fill: none; stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 6; opacity: 0.5; }
+.hud-core-svg .hud-ring-deco1 { fill: none; stroke: var(--accent3); stroke-width: 1; opacity: 0.35; }
+.hud-core-svg .hud-ring-deco2 { fill: none; stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 5; opacity: 0.3; }
+.hud-core-svg .hud-particle { fill: var(--accent); opacity: 0.25; }
+.hud-core-svg .hud-particle.pulse { animation: hud-particle-pulse 4.5s ease-in-out infinite; }
+@keyframes hud-particle-pulse { 0%,100% { opacity: 0.15; } 50% { opacity: 0.55; } }
+.hud-core-svg .hud-line { stroke: var(--border); stroke-width: 1; opacity: 0.3; transition: stroke 0.5s, opacity 0.5s; }
+.hud-core-svg .hud-line.ok   { stroke: var(--accent);  opacity: 0.75; }
+.hud-core-svg .hud-line.warn { stroke: var(--gold2);   opacity: 0.85; }
+.hud-core-svg .hud-line.off  { stroke: var(--muted);   opacity: 0.2; }
+.hud-core-svg .hud-node { transition: fill 0.5s, opacity 0.5s, filter 0.5s; }
+.hud-core-svg .hud-node.ok   { fill: var(--accent2); opacity: 1; filter: drop-shadow(0 0 5px var(--accent)); }
+.hud-core-svg .hud-node.warn { fill: var(--gold2);   opacity: 1; filter: drop-shadow(0 0 5px var(--gold2)); }
+.hud-core-svg .hud-node.off  { fill: var(--muted);   opacity: 0.5; filter: none; }
+.hud-core-svg .hud-node-label {
+  font-family: inherit; font-size: 6.5px; letter-spacing: 1px; fill: var(--text2);
+  text-transform: uppercase; opacity: 0.7;
+}
 .voice-status-ring {
   width: 120px; height: 120px; border-radius: 50%;
   border: 2px solid var(--border);
   display: flex; align-items: center; justify-content: center;
   position: relative; transition: border-color 0.3s;
+  z-index: 1;
 }
 .voice-status-ring::before {
   content: ''; position: absolute; inset: -8px; border-radius: 50%;
@@ -479,7 +508,65 @@ body::before {
     </div>
 
     <div class="voice-status-view" id="voice-status-view">
-      <div class="voice-status-ring"><div class="dot"></div></div>
+      <div class="hud-core-wrap">
+        <svg class="hud-core-svg" viewBox="0 0 300 300" aria-hidden="true">
+          <!-- layered decorative core rings, just outside the existing voice-status-ring -->
+          <circle class="hud-ring-deco1" cx="150" cy="150" r="68" />
+          <circle class="hud-ring-deco2" cx="150" cy="150" r="82" />
+          <!-- scattered particle field -->
+          <circle class="hud-particle pulse" cx="112" cy="98"  r="1.4" />
+          <circle class="hud-particle"       cx="205" cy="103" r="1"   />
+          <circle class="hud-particle"       cx="221" cy="140" r="1.6" />
+          <circle class="hud-particle pulse" cx="196" cy="205" r="1.2" />
+          <circle class="hud-particle"       cx="158" cy="222" r="1"   />
+          <circle class="hud-particle"       cx="108" cy="212" r="1.4" />
+          <circle class="hud-particle pulse" cx="82"  cy="178" r="1"   />
+          <circle class="hud-particle"       cx="80"  cy="122" r="1.3" />
+          <circle class="hud-particle"       cx="130" cy="88"  r="1"   />
+          <circle class="hud-particle pulse" cx="182" cy="92"  r="1.1" />
+          <circle class="hud-particle"       cx="230" cy="168" r="1"   />
+          <circle class="hud-particle"       cx="212" cy="228" r="1.3" />
+          <circle class="hud-particle pulse" cx="146" cy="234" r="1"   />
+          <circle class="hud-particle"       cx="95"  cy="235" r="1.2" />
+          <circle class="hud-particle"       cx="68"  cy="196" r="1"   />
+          <circle class="hud-particle pulse" cx="66"  cy="140" r="1.4" />
+          <circle class="hud-particle"       cx="97"  cy="99"  r="1"   />
+          <circle class="hud-particle"       cx="238" cy="120" r="1.1" />
+          <circle class="hud-particle pulse" cx="238" cy="188" r="1"   />
+          <circle class="hud-particle"       cx="175" cy="236" r="1.3" />
+          <circle class="hud-particle"       cx="60"  cy="168" r="1"   />
+          <!-- outer boundary ring -->
+          <circle class="hud-ring-outer" cx="150" cy="150" r="140" />
+          <!-- 8 radial nodes, real subsystem status -->
+          <line class="hud-line" id="hud-line-voice"    x1="150" y1="150" x2="150"   y2="32"   />
+          <line class="hud-line" id="hud-line-memory"   x1="150" y1="150" x2="233.4" y2="66.6" />
+          <line class="hud-line" id="hud-line-sandbox"  x1="150" y1="150" x2="268"   y2="150"  />
+          <line class="hud-line" id="hud-line-network"  x1="150" y1="150" x2="233.4" y2="233.4" />
+          <line class="hud-line" id="hud-line-llm"      x1="150" y1="150" x2="150"   y2="268"  />
+          <line class="hud-line" id="hud-line-security" x1="150" y1="150" x2="66.6"  y2="233.4" />
+          <line class="hud-line" id="hud-line-friday"   x1="150" y1="150" x2="32"    y2="150"  />
+          <line class="hud-line" id="hud-line-combat"   x1="150" y1="150" x2="66.6"  y2="66.6"  />
+
+          <circle class="hud-node" id="hud-node-voice"    cx="150"   cy="32"   r="4.5" />
+          <circle class="hud-node" id="hud-node-memory"   cx="233.4" cy="66.6" r="4.5" />
+          <circle class="hud-node" id="hud-node-sandbox"  cx="268"   cy="150"  r="4.5" />
+          <circle class="hud-node" id="hud-node-network"  cx="233.4" cy="233.4" r="4.5" />
+          <circle class="hud-node" id="hud-node-llm"      cx="150"   cy="268"  r="4.5" />
+          <circle class="hud-node" id="hud-node-security" cx="66.6"  cy="233.4" r="4.5" />
+          <circle class="hud-node" id="hud-node-friday"   cx="32"    cy="150"  r="4.5" />
+          <circle class="hud-node" id="hud-node-combat"   cx="66.6"  cy="66.6" r="4.5" />
+
+          <text class="hud-node-label" x="150"   y="24"  text-anchor="middle">VOICE</text>
+          <text class="hud-node-label" x="248"   y="60"  text-anchor="start">MEM</text>
+          <text class="hud-node-label" x="276"   y="153" text-anchor="start">SANDBOX</text>
+          <text class="hud-node-label" x="248"   y="246" text-anchor="start">NET</text>
+          <text class="hud-node-label" x="150"   y="284" text-anchor="middle">LLM</text>
+          <text class="hud-node-label" x="52"    y="246" text-anchor="end">SEC</text>
+          <text class="hud-node-label" x="24"    y="153" text-anchor="end">FRIDAY</text>
+          <text class="hud-node-label" x="52"    y="60"  text-anchor="end">COMBAT</text>
+        </svg>
+        <div class="voice-status-ring"><div class="dot"></div></div>
+      </div>
       <div class="voice-status-label" id="voice-status-label">READY</div>
       <div class="voice-status-hint">Say "JARVIS" or use the mic to speak — or open CHAT to type.</div>
     </div>
@@ -1510,6 +1597,17 @@ function setBar(barId, valId, pct) {
   val.className = 'diag-value' + (pct > 90 ? ' danger' : pct > 75 ? ' warn' : '');
 }
 
+// ── HUD core panel: 8 radial nodes, each a real subsystem's live status ──
+// (see .hud-core-svg above). 'ok' = healthy/online, 'warn' = degraded or
+// actively alerting, 'off' = unreachable/down. Fed entirely from data
+// these polls already fetch — no extra network calls.
+function updateHudNode(key, state) {
+  const node = document.getElementById(`hud-node-${key}`);
+  const line = document.getElementById(`hud-line-${key}`);
+  if (node) node.setAttribute('class', `hud-node ${state}`);
+  if (line) line.setAttribute('class', `hud-line ${state}`);
+}
+
 async function pollStatus() {
   try {
     const d = await jarvisGet('/hud/status');
@@ -1565,8 +1663,17 @@ async function pollStatus() {
 
     const allProvidersDown = !d.brain.groq && !d.brain.ollama;
     setStatus(allProvidersDown ? 'degraded' : 'online');
+
+    updateHudNode('llm', allProvidersDown ? 'off' : 'ok');
+    updateHudNode('memory', Object.keys(d.memory || {}).length > 0 ? 'ok' : 'off');
+    updateHudNode('sandbox', (sandbox.current_task || sandbox.pending_approvals > 0) ? 'warn' : 'ok');
+    updateHudNode('security', sec.threats_24h > 5 ? 'warn' : 'ok');
+    updateHudNode('friday', d.friday_online ? 'ok' : 'off');
+    const combat = d.combat_mode || {};
+    updateHudNode('combat', (combat.state === 'engaged' || combat.pending_confirm) ? 'warn' : 'ok');
   } catch (e) {
     setStatus('offline');
+    ['llm','memory','sandbox','security','friday','combat'].forEach(k => updateHudNode(k, 'off'));
   }
 }
 
@@ -1576,7 +1683,10 @@ async function pollNetwork() {
     const devices = d.devices || [];
     document.getElementById('net-known').textContent   = devices.filter(x => x.trusted).length;
     document.getElementById('net-unknown').textContent = devices.filter(x => !x.trusted).length;
-  } catch (e) {}
+    updateHudNode('network', 'ok');
+  } catch (e) {
+    updateHudNode('network', 'off');
+  }
   try {
     const h = await jarvisGet('/stark/network/internet');
     document.getElementById('net-latency').textContent = h.latency_ms ? `${h.latency_ms}ms` : '—';
@@ -1627,7 +1737,10 @@ async function pollVoiceStatus() {
     document.querySelector(`[data-engine="${s.active_engine}"]`)?.classList.add('active');
     const ed = document.getElementById('footer-el-dot');
     if (ed) ed.className = `footer-dot ${s.active_engine === 'elevenlabs' ? 'green' : 'yellow'}`;
-  } catch (e) {}
+    updateHudNode('voice', (s.active_engine && s.active_engine !== 'none') ? 'ok' : 'off');
+  } catch (e) {
+    updateHudNode('voice', 'off');
+  }
   try {
     const u = await jarvisGet('/stark/voice/usage');
     const budget = u.daily_budget || {};
