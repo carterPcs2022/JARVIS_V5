@@ -101,6 +101,76 @@ SELF_CHECK_TRIGGERS = [
     "run diagnostic", "status check", "full diagnostic",
 ]
 
+# ── General self-referential-action detector ─────────────────────────────────
+# SANDBOX_TRIGGERS/SELF_CHECK_TRIGGERS above are exact substring lists —
+# each fix session found ONE more missed phrasing ("ARVIS improve yourself"
+# typo tolerance, then "self improve" without "-ment", then "suggest some
+# improvements" fabricating an "Implemented suggestion list, sir" claim).
+# Natural language has no ceiling on how this can be rephrased; a fixed
+# list can never converge. This generalizes the fix using the same
+# technique Reasoner._is_calendar() already uses for calendar typo
+# tolerance: fuzzy phrase matching via difflib, not exact strings.
+#
+# Two-gate design: (1) a self-reference phrase ("yourself", "your code",
+# "self improve", etc.) must fuzzy-match one of the message's 1-3 word
+# windows, AND (2) an action-verb-shaped word must also be present. Both
+# gates matter — self-reference alone ("yourself, tell me a joke") isn't
+# a maintenance request, and an action verb alone ("fix my self-driving
+# car" — "self" appears, but not adjacent to any of these phrases at a
+# tight fuzzy cutoff) isn't either. Verified against both the exact bugs
+# found this session and a set of plausible unrelated requests that must
+# NOT trigger (see tests before this was wired in).
+_SELF_REF_PHRASES = [
+    "yourself", "your code", "your own code", "your own", "self improve",
+    "self-improve", "self improvement", "self analyze", "self-analyze",
+    "self check", "self-check", "your status", "your systems",
+    "your reasoning", "your own systems",
+]
+
+# Maps to a specific real action where confident. "suggest" alone is
+# deliberately NOT bucketed into "analyze" or "improve" — asking JARVIS
+# to "suggest improvements to yourself" is genuinely ambiguous between
+# wanting a read-only analysis and a real write+test cycle, so it's
+# routed to an honest clarifying question instead of guessing (see
+# Brain.process()'s self-action handler).
+_SELF_ACTION_VERB_STEMS = {
+    "improv": "improve", "fix": "improve", "optimi": "improve",
+    "upgrad": "improve", "rewrit": "improve",
+    "analyz": "analyze", "analys": "analyze", "review": "analyze",
+    "check": "self_check", "diagnos": "self_check",
+    "suggest": "ambiguous",
+}
+
+
+def classify_self_action(user_input: str) -> str | None:
+    """Returns "improve" | "analyze" | "self_check" | "ambiguous" if
+    `user_input` reads as a self-referential system-action request even
+    when it matches none of SANDBOX_TRIGGERS/SELF_CHECK_TRIGGERS
+    verbatim, or None if it doesn't read as one at all. Never guesses
+    between multiple plausible actions — "ambiguous" exists so the
+    caller can ask instead of picking one and fabricating a result for
+    whichever it didn't actually run."""
+    import difflib as _difflib
+    low = user_input.lower()
+
+    words = low.split()
+    windows = []
+    for n in (1, 2, 3):
+        windows += [" ".join(words[i:i + n]) for i in range(len(words) - n + 1)]
+    has_self_ref = any(
+        _difflib.get_close_matches(w, _SELF_REF_PHRASES, n=1, cutoff=0.82)
+        for w in windows
+    )
+    if not has_self_ref:
+        return None
+
+    for w in low.replace("-", " ").split():
+        w = w.strip(".,!?")
+        for stem, mapped_action in _SELF_ACTION_VERB_STEMS.items():
+            if w.startswith(stem):
+                return mapped_action
+    return None  # self-referential language present, but no action verb at all
+
 
 def has_early_exit_trigger(user_input: str) -> bool:
     """True if `user_input` would be caught by one of Brain.process()'s
@@ -148,6 +218,8 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if any(t in low for t in SANDBOX_TRIGGERS):
         return True
     if any(t in low for t in SELF_CHECK_TRIGGERS):
+        return True
+    if classify_self_action(user_input) is not None:
         return True
 
     try:
@@ -801,6 +873,83 @@ class Executor:
         return None
 
 
+# ── Sandbox/self-check action execution — shared by both the exact-trigger
+# match and the fuzzy classify_self_action() fallback in Brain.process(),
+# so neither path can drift from the other's behavior. ──────────────────────
+
+def _run_sandbox_action(action: str) -> str:
+    """Executes a real sandbox action and returns the honest response
+    text. Raises on real failure — callers decide how to report it."""
+    if action == "analyze":
+        from core.self_analysis import self_analysis, ALLOWED_FILES
+        result = self_analysis.analyze_self()
+        count = result.get("safe", 0)
+        failed = result.get("failed_files", [])
+        if count > 0:
+            return (
+                f"Self-analysis complete, sir. Found {count} potential improvements "
+                f"across {len(ALLOWED_FILES)} core files. "
+                f"Say 'JARVIS improve yourself' to write and test them."
+            )
+        if failed and result.get("analyzed", 0) == 0:
+            # Every file that was attempted failed to actually get
+            # analyzed (LLM providers down) — "No improvements identified"
+            # would falsely claim a clean bill of health for code that
+            # was never really checked.
+            return (
+                f"Self-analysis couldn't complete, sir — all {len(failed)} "
+                f"file(s) attempted failed to analyze (LLM providers "
+                f"unavailable). Nothing was actually checked."
+            )
+        if failed:
+            return (
+                f"Self-analysis partially complete, sir. No improvements found in "
+                f"the {result.get('analyzed', 0)} file(s) that analyzed successfully; "
+                f"{len(failed)} file(s) failed to analyze and weren't checked."
+            )
+        return "All code is optimal, sir. No improvements identified."
+
+    if action == "improve":
+        from core.self_improvement import self_improvement
+        result = self_improvement.run_improvement_cycle()
+        return result.get("message", "Cycle complete.")
+
+    if action == "pending":
+        from core.self_improvement import self_improvement
+        pending = self_improvement.get_pending_approvals()
+        return (f"{len(pending)} improvement(s) awaiting your approval, sir."
+                if pending else "No improvements pending approval.")
+
+    raise ValueError(f"unknown sandbox action: {action!r}")
+
+
+def _run_self_diagnostics() -> tuple[str, bool]:
+    """Real diagnostics only, never a fabricated "all nominal" claim.
+    utils.diagnostics.full_diagnostic() does a genuine check (LLM
+    provider availability, CPU/RAM/disk, lockdown/Friday state, config
+    validation, Mac Bridge reachability, memory file integrity) — the
+    response is built only from its real status/warnings. Returns
+    (response_text, ok)."""
+    from utils.diagnostics import full_diagnostic
+    diag = full_diagnostic()
+    status = diag.get("status", "UNKNOWN")
+    warnings = diag.get("warnings", [])
+    sys_snap = diag.get("system", {})
+
+    if status == "NOMINAL" and not warnings:
+        response = (
+            f"Self-check complete, sir. All systems nominal — "
+            f"{diag.get('brain', 'brain status unknown')}, "
+            f"CPU {sys_snap.get('cpu_percent', 0):.0f}%, "
+            f"RAM {sys_snap.get('ram_used_pct', 0):.0f}%, "
+            f"Disk {sys_snap.get('disk_used_pct', 0):.0f}%."
+        )
+    else:
+        issue_text = "; ".join(warnings) if warnings else "no specific warnings logged"
+        response = f"Self-check complete, sir. Status: {status}. {issue_text}"
+    return response, status == "NOMINAL"
+
+
 # ── Brain (assembles everything) ──────────────────────────────────────────────
 
 class Brain:
@@ -957,126 +1106,74 @@ class Brain:
             except Exception:
                 pass
 
-        # ── Self-programming sandbox — analysis/improve/pending status ───────
-        # "improve" writes candidate code and sandbox-tests it synchronously
-        # (can take a while — it's a real LLM rewrite + subprocess test) but
-        # never deploys anything; that always requires a separate explicit
-        # approval via voice ("JARVIS approve improvement") is not wired here
-        # on purpose — deployment approval goes through
-        # POST /stark/sandbox/approve/{id}, not a voice trigger, since it's
-        # the one action in this whole pipeline that writes a real file.
+        # ── Self-programming sandbox / self-check — analyze, improve,
+        # pending status, or diagnostics. "improve" writes candidate code
+        # and sandbox-tests it synchronously (can take a while — it's a
+        # real LLM rewrite + subprocess test) but never deploys anything;
+        # deployment approval always goes through a separate explicit
+        # POST /stark/sandbox/approve/{id}, not a voice trigger, since
+        # it's the one action in this whole pipeline that writes a real
+        # file.
+        #
+        # Exact SANDBOX_TRIGGERS/SELF_CHECK_TRIGGERS phrases are tried
+        # first (cheap, unambiguous). If neither matches,
+        # classify_self_action() catches phrasings those lists don't —
+        # every session-long fix here started as "one more missed exact
+        # phrase" (typo tolerance, "self improve" w/o "-ment", "suggest
+        # some improvements" fabricating "Implemented suggestion list,
+        # sir") until it became clear exact lists can't converge against
+        # open-ended rephrasing. An "ambiguous" classification (detected
+        # self-referential language, but not clearly analyze/improve/
+        # check) gets an honest clarifying question — never a guess.
         low_input = user_input.lower()
-        for trigger, action in SANDBOX_TRIGGERS.items():
-            if trigger in low_input:
-                try:
-                    if action == "analyze":
-                        from core.self_analysis import self_analysis, ALLOWED_FILES
-                        result = self_analysis.analyze_self()
-                        count = result.get("safe", 0)
-                        failed = result.get("failed_files", [])
-                        if count > 0:
-                            response = (
-                                f"Self-analysis complete, sir. Found {count} potential improvements "
-                                f"across {len(ALLOWED_FILES)} core files. "
-                                f"Say 'JARVIS improve yourself' to write and test them."
-                            )
-                        elif failed and result.get("analyzed", 0) == 0:
-                            # Every file that was attempted failed to
-                            # actually get analyzed (LLM providers down) —
-                            # "No improvements identified" would falsely
-                            # claim a clean bill of health for code that
-                            # was never really checked.
-                            response = (
-                                f"Self-analysis couldn't complete, sir — all {len(failed)} "
-                                f"file(s) attempted failed to analyze (LLM providers "
-                                f"unavailable). Nothing was actually checked."
-                            )
-                        elif failed:
-                            response = (
-                                f"Self-analysis partially complete, sir. No improvements found in "
-                                f"the {result.get('analyzed', 0)} file(s) that analyzed successfully; "
-                                f"{len(failed)} file(s) failed to analyze and weren't checked."
-                            )
-                        else:
-                            response = "All code is optimal, sir. No improvements identified."
-                    elif action == "improve":
-                        from core.self_improvement import self_improvement
-                        result = self_improvement.run_improvement_cycle()
-                        response = result.get("message", "Cycle complete.")
-                    elif action == "pending":
-                        from core.self_improvement import self_improvement
-                        pending = self_improvement.get_pending_approvals()
-                        response = (
-                            f"{len(pending)} improvement(s) awaiting your approval, sir."
-                            if pending else
-                            "No improvements pending approval."
-                        )
-                    else:
-                        continue
+        matched_action = next((a for t, a in SANDBOX_TRIGGERS.items() if t in low_input), None)
+        is_self_check = any(t in low_input for t in SELF_CHECK_TRIGGERS)
 
-                    from core.memory import save_turn
-                    save_turn(user_input, response)
-                    return Result(response=response, ok=True, provider="sandbox")
-                except Exception as e:
-                    # This used to `pass` and fall through to the general
-                    # reasoning/LLM pipeline below — meaning a real failure
-                    # here (e.g. analyze_self()'s sequential LLM calls
-                    # hitting a Groq rate limit) silently became a normal
-                    # chat turn, and JARVIS_PERSONALITY's in-character,
-                    # confident tone fabricated a plausible-sounding but
-                    # entirely made-up completion ("Three rewrites were
-                    # attempted...") instead of reporting the real failure.
-                    # Confirmed this is real and spelling-independent, not
-                    # a trigger-matching gap: SANDBOX_TRIGGERS is a plain
-                    # substring check with no dependency on the leading
-                    # "J" (has_early_exit_trigger("ARVIS improve yourself")
-                    # and the correctly-spelled version both return True
-                    # identically) — the divergence a user saw between
-                    # typo/correct spelling was this exception being hit
-                    # intermittently (rate-limit timing), not the text.
-                    print(f"[Brain] Sandbox trigger '{trigger}' failed: {e}")
-                    response = f"Self-{action} failed, sir: {e}"
-                    from core.memory import save_turn
-                    save_turn(user_input, response)
-                    return Result(response=response, ok=False, provider="sandbox")
-                break
-
-        # ── Self/health check — real diagnostics only, never a fabricated
-        # "all nominal" claim. There was no trigger for this at all before:
-        # "JARVIS run self check" fell through to ordinary chat, which did
-        # an unrelated web search and then confidently reported "self-check
-        # complete, all systems nominal" — a real but irrelevant action
-        # plus a completely made-up safety claim on top of it.
-        # utils.diagnostics.full_diagnostic() already does a genuine check
-        # (LLM provider availability, CPU/RAM/disk, lockdown/Friday state,
-        # config validation, Mac Bridge reachability, memory file
-        # integrity) — the response below is built only from its real
-        # status/warnings, and an exception here returns an honest failure
-        # instead of falling through to the general pipeline (same fix as
-        # the sandbox block above, applied from the start this time).
-        if any(t in low_input for t in SELF_CHECK_TRIGGERS):
-            try:
-                from utils.diagnostics import full_diagnostic
-                diag = full_diagnostic()
-                status = diag.get("status", "UNKNOWN")
-                warnings = diag.get("warnings", [])
-                sys_snap = diag.get("system", {})
-
-                if status == "NOMINAL" and not warnings:
-                    response = (
-                        f"Self-check complete, sir. All systems nominal — "
-                        f"{diag.get('brain', 'brain status unknown')}, "
-                        f"CPU {sys_snap.get('cpu_percent', 0):.0f}%, "
-                        f"RAM {sys_snap.get('ram_used_pct', 0):.0f}%, "
-                        f"Disk {sys_snap.get('disk_used_pct', 0):.0f}%."
-                    )
-                else:
-                    issue_text = "; ".join(warnings) if warnings else "no specific warnings logged"
-                    response = f"Self-check complete, sir. Status: {status}. {issue_text}"
-
+        if matched_action is None and not is_self_check:
+            fuzzy = classify_self_action(user_input)
+            if fuzzy == "ambiguous":
+                response = (
+                    "That reads like a self-maintenance request, sir, but I'm not certain "
+                    "which — I can analyze my own code (read-only), run a full self-improvement "
+                    "cycle (writes and sandbox-tests candidate changes), or run a diagnostic "
+                    "self-check. Which did you mean?"
+                )
                 from core.memory import save_turn
                 save_turn(user_input, response)
-                return Result(response=response, ok=(status == "NOMINAL"), provider="diagnostics")
+                return Result(response=response, ok=True, provider="sandbox_clarify")
+            elif fuzzy == "self_check":
+                is_self_check = True
+            elif fuzzy in ("analyze", "improve"):
+                matched_action = fuzzy
+            # fuzzy is None -> genuinely not a self-action request; falls
+            # through to the normal pipeline below, same as always.
+
+        if matched_action:
+            try:
+                response = _run_sandbox_action(matched_action)
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="sandbox")
+            except Exception as e:
+                # This used to `pass` and fall through to the general
+                # reasoning/LLM pipeline — meaning a real failure here
+                # (e.g. analyze_self()'s LLM calls hitting a Groq rate
+                # limit) silently became a normal chat turn, and
+                # JARVIS_PERSONALITY's in-character, confident tone
+                # fabricated a plausible-sounding but entirely made-up
+                # completion instead of reporting the real failure.
+                print(f"[Brain] Sandbox action '{matched_action}' failed: {e}")
+                response = f"Self-{matched_action} failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="sandbox")
+
+        if is_self_check:
+            try:
+                response, ok = _run_self_diagnostics()
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=ok, provider="diagnostics")
             except Exception as e:
                 print(f"[Brain] Self-check failed: {e}")
                 response = f"Self-check failed, sir: {e}"
