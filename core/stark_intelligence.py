@@ -85,7 +85,7 @@ class StarkIntelligence:
                 f"Based on recent conversations:\n{convo}\n\n"
                 f"What should the user be thinking about that they haven't "
                 f"asked about yet? One insight only. Be specific.",
-                force_model="standard",
+                force_model="standard", background=True,
             )
             if proactive:
                 insights.append(proactive)
@@ -99,7 +99,7 @@ class StarkIntelligence:
                 research = think(
                     f"What is the most important recent development "
                     f"relevant to the project: '{project}'? One sentence.",
-                    force_model="instant",
+                    force_model="instant", background=True,
                 )
                 if research:
                     insights.append(research)
@@ -151,7 +151,7 @@ class StarkIntelligence:
         if not predicted_next:
             return []
 
-        think(predicted_next, use_cache=True)
+        think(predicted_next, use_cache=True, background=True)
         return [predicted_next]
 
 

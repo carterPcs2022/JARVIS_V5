@@ -13,7 +13,7 @@ from collections import deque
 from pathlib import Path
 from datetime import date
 from config.settings import (
-    JARVIS_PERSONALITY, GROQ_API_KEY, OLLAMA_BASE_URL, USE_SMART_ROUTING,
+    JARVIS_PERSONALITY, GROQ_API_KEY, GROQ_MODEL, OLLAMA_BASE_URL, USE_SMART_ROUTING,
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL_SONNET, ANTHROPIC_MODEL_OPUS, ANTHROPIC_MODEL_FABLE,
     ENABLE_SONNET, ENABLE_OPUS, ENABLE_FABLE,
     SONNET_DAILY_CALL_LIMIT, OPUS_DAILY_CALL_LIMIT, FABLE_DAILY_CALL_LIMIT,
@@ -267,6 +267,43 @@ def _rate_check() -> bool:
     return len(_call_times) < _RATE_LIMIT
 
 
+# ── Daily request-cap awareness ────────────────────────────────────────────
+# _rate_check() above only guards Groq's 30-requests-per-minute figure — it
+# has no idea about the separate, much easier to exhaust cap: 1,000
+# requests/day on both llama-3.1-8b-instant and llama-3.3-70b-versatile
+# (confirmed against Groq's published limits, not assumed). That averages
+# out to ~41 requests/hour, shared across real user chat, every scheduled
+# background job (predictive pre-caching, proactive insights, research),
+# and every health-check ping — and nothing tracked it before this.
+#
+# Real user messages are never gated by this — only background/speculative
+# calls (chat(..., background=True)) get throttled once a model's daily
+# usage crosses a safety margin, so a background job can't be the thing
+# that burns the day's remaining budget out from under someone actually
+# waiting on a real answer later.
+_daily_call_times: dict = {}
+_DAILY_WINDOW = 86400  # seconds — rolling 24h, not a calendar-day reset
+_MODEL_DAILY_LIMITS = {
+    "llama-3.1-8b-instant":    1000,
+    "llama-3.3-70b-versatile": 1000,
+}
+_DEFAULT_DAILY_LIMIT = 1000  # conservative default for any model not explicitly listed
+_DAILY_SAFETY_MARGIN = 0.9   # background calls stop at 90% of the real daily cap
+
+
+def _record_daily_call(model_id: str):
+    _daily_call_times.setdefault(model_id, deque()).append(time.time())
+
+
+def _daily_budget_ok(model_id: str) -> bool:
+    dq = _daily_call_times.setdefault(model_id, deque())
+    now = time.time()
+    while dq and now - dq[0] > _DAILY_WINDOW:
+        dq.popleft()
+    limit = _MODEL_DAILY_LIMITS.get(model_id, _DEFAULT_DAILY_LIMIT)
+    return len(dq) < limit * _DAILY_SAFETY_MARGIN
+
+
 # ── Response cache for non-critical/background calls ──────────────────────────
 _cache: dict = {}
 _CACHE_TTL = 300  # seconds
@@ -361,13 +398,22 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
 
 def chat(messages: list[dict], max_tokens: int = 1024,
          temperature: float = 0.7, prefer: str = "groq", use_cache: bool = False,
-         force_model: str | None = None, query: str = "") -> dict:
+         force_model: str | None = None, query: str = "", background: bool = False) -> dict:
     """
     Route a chat request to the best available LLM.
 
     use_cache=True is for background/non-critical calls (consciousness
     reflections, workshop status, awareness narration) — identical requests
     within CACHE_TTL return the cached response instead of hitting Groq again.
+
+    background=True marks this as a speculative/non-critical call (scheduled
+    jobs: predictive pre-caching, proactive insights, research — never real
+    user chat). Once a Groq model's rolling-24h call count crosses
+    _DAILY_SAFETY_MARGIN of its real published daily cap, background calls
+    skip that model and fall through to the next provider instead of
+    spending the day's remaining budget — a background job should never be
+    the reason a real user message later in the day has nothing left to
+    call. Real (non-background) calls are never gated by this.
 
     force_model: one of MODEL_REGISTRY's keys ("instant"/"standard"/
     "reasoning"/"research"/"coder") to pin a specific tier. Otherwise, if
@@ -470,10 +516,14 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                     # for why per-request writes must never touch it).
                     state.set_model_status("groq", model_id, False)
                     continue
+                if background and not _daily_budget_ok(model_id):
+                    print(f"[LLM Router] {model_id} near its daily cap — skipping this background call")
+                    continue
                 if not _rate_check():
                     print("[LLM Router] Approaching Groq rate limit — brief backoff before calling")
                     time.sleep(2)
                 _call_times.append(time.time())
+                _record_daily_call(model_id)
                 _attempted.append("groq")
                 try:
                     result = cb.call(circuit_key, groq_chat, messages, max_tokens, temperature, model=model_id)
@@ -593,10 +643,13 @@ def chat(messages: list[dict], max_tokens: int = 1024,
 
 def think(user_input: str, context: str = "",
           system: str | None = None, max_tokens: int = 1024, use_cache: bool = False,
-          force_model: str | None = None, temperature: float | None = None) -> str:
+          force_model: str | None = None, temperature: float | None = None,
+          background: bool = False) -> str:
     """Simple one-shot think call. Returns the response string.
     Pass use_cache=True for background/non-critical calls to avoid piling
     onto the rate limit with repeated near-identical prompts.
+    Pass background=True for scheduled/speculative calls (never real user
+    chat) — see chat()'s docstring for what this does.
     Pass force_model to pin a tier — free Groq tiers ("instant"/"standard"/
     "reasoning"/"research"/"coder") or paid Anthropic tiers ("sonnet"/
     "opus"/"fable", each gated on ANTHROPIC_API_KEY + enabled + daily cap,
@@ -627,7 +680,8 @@ def think(user_input: str, context: str = "",
 
     messages.append({"role": "user", "content": user_content})
     return chat(messages, max_tokens=max_tokens, temperature=temperature if temperature is not None else 0.6,
-               use_cache=use_cache, force_model=force_model, query=user_input)["content"]
+               use_cache=use_cache, force_model=force_model, query=user_input,
+               background=background)["content"]
 
 
 # ── Response cache warming ─────────────────────────────────────────────────────
@@ -673,8 +727,20 @@ def warm_cache():
 # (check_groq sends an actual chat completion). Diagnostics/HUD polling can hit
 # these several times a minute; without a cache that turns a status check into
 # a live-traffic generator, which can itself trigger or prolong rate limiting.
+#
+# Was 30s — confirmed live that three independent periodic callers (HUD
+# polling every 5s, services/scheduler.py's 2-min health refresh, and its
+# 60s snap-monitor check) all read/refresh this same cache with no
+# force=True bypass anywhere, so the real ping-call frequency is bounded
+# by whichever TTL is set here. At 30s that's up to ~2,880 real "ping"
+# completions/day against Groq's actual 1,000-requests-per-day cap on
+# llama-3.1-8b-instant (confirmed via Groq's published limits, not
+# assumed) — pure health-check overhead competing with real chat traffic
+# for the same daily budget. Nothing here needs Groq's up/down status
+# fresher than a few minutes; it's a background indicator, not something
+# gating a live request.
 _HEALTH_CACHE: dict = {"groq": (0.0, False), "ollama": (0.0, False)}
-_HEALTH_TTL = 30  # seconds
+_HEALTH_TTL = 300  # seconds (was 30 — see comment above)
 
 
 def check_groq(force: bool = False) -> bool:
@@ -693,7 +759,13 @@ def check_groq(force: bool = False) -> bool:
     import httpx
     try:
         from core.llm.openai import chat as groq_chat, GroqRateLimitError
+        # This calls core.llm.openai.chat() directly, bypassing this
+        # module's own chat()/_daily_budget_ok() gating entirely — it
+        # still counts as a real request against Groq's actual daily cap,
+        # so record it here or the daily-budget tracker undercounts real
+        # usage and background jobs would keep calling past the real limit.
         groq_chat([{"role": "user", "content": "ping"}], max_tokens=5)
+        _record_daily_call(GROQ_MODEL)
         _HEALTH_CACHE["groq"] = (time.time(), True)
         return True
     except (httpx.HTTPStatusError, GroqRateLimitError) as e:

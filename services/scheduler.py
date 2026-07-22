@@ -486,9 +486,16 @@ def start():
         # proactive_research above — these still register and will start
         # firing on a live Render instance once real conversation history
         # accumulates; only local dev is skipped.
-        _add_llm_job(_stark_proactive_thinking, "interval", minutes=30, id="stark_proactive_thinking",
+        # Both intervals stretched (30->60min, 5->15min) as part of the
+        # Groq-rate-limit investigation: these two + health-check overhead
+        # were the dominant contributors to burning through Groq's real
+        # 1,000-requests/day cap on both llama-3.1-8b-instant and
+        # llama-3.3-70b-versatile, running around the clock regardless of
+        # actual usage. Kept both features rather than merging or dropping
+        # either (explicit choice) — just running them less often.
+        _add_llm_job(_stark_proactive_thinking, "interval", minutes=60, id="stark_proactive_thinking",
                      next_run_time=now + timedelta(seconds=180))
-        _add_llm_job(_stark_anticipate_needs, "interval", minutes=5, id="stark_anticipate_needs",
+        _add_llm_job(_stark_anticipate_needs, "interval", minutes=15, id="stark_anticipate_needs",
                      next_run_time=now + timedelta(seconds=240))
 
         _scheduler.start()

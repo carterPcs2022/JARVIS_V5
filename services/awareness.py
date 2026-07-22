@@ -362,7 +362,7 @@ class SituationalAwareness:
                     f"Is this news relevant to the project '{name}'?\n"
                     f"News: {top.get('snippet', '')}\n"
                     f"Reply YES or NO only.",
-                    force_model="instant",
+                    force_model="instant", background=True,
                 )
             except Exception as exc:
                 log.debug("Relevance check failed for %s: %s", name, exc)
