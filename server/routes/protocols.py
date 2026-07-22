@@ -1,8 +1,8 @@
 """server/routes/protocols.py — Stark Protocol endpoints."""
 import hmac
 import os
-from fastapi import APIRouter, Depends, HTTPException
-from utils.security import verify_token, bearer
+from fastapi import APIRouter, Depends, HTTPException, Request
+from utils.security import verify_token, bearer, _record_failed_auth_safe
 from fastapi.security import HTTPAuthorizationCredentials
 
 router = APIRouter(prefix="/stark", tags=["protocols"])
@@ -23,7 +23,7 @@ def _is_rhodey(creds) -> bool:
     return bool(token and creds and hmac.compare_digest(creds.credentials, token))
 
 
-def verify_any_read_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
+def verify_any_read_token(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """Accept master token, Pepper token, or Rhodey token."""
     from config.settings import API_TOKEN
     if not API_TOKEN:
@@ -32,16 +32,24 @@ def verify_any_read_token(creds: HTTPAuthorizationCredentials = Depends(bearer))
         if hmac.compare_digest(creds.credentials, API_TOKEN): return "master"
         if _is_pepper(creds):                   return "pepper"
         if _is_rhodey(creds):                   return "rhodey"
+    _record_failed_auth_safe(request.client.host if request.client else "unknown")
     raise HTTPException(401, "Unauthorized")
 
 
-def verify_master_only(creds: HTTPAuthorizationCredentials = Depends(bearer)):
+def verify_master_only(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """Only master token."""
     from config.settings import API_TOKEN
     if not API_TOKEN:
         return True
     if creds and hmac.compare_digest(creds.credentials, API_TOKEN):
         return True
+    # Guards the most sensitive routes (lockdown, coldfire, sandbox
+    # approve/persist) — a failed attempt here is more significant than
+    # an ordinary verify_token() 401, but it feeds the same brute-force
+    # counter (5+ failures/5min from one IP = a real BRUTE_FORCE threat),
+    # not a separate one, so a mixed pattern of failures across regular
+    # and master-only routes from the same IP still adds up correctly.
+    _record_failed_auth_safe(request.client.host if request.client else "unknown")
     raise HTTPException(401, "Master token required")
 
 

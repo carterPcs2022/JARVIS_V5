@@ -26,7 +26,21 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
     token = websocket.query_params.get("token", "")
-    return bool(token) and hmac.compare_digest(token, API_TOKEN)
+    ok = bool(token) and hmac.compare_digest(token, API_TOKEN)
+    if not ok:
+        # Same brute-force counter as utils.security.verify_token's REST
+        # 401s (services.sentinel.record_failed_auth) — this endpoint's
+        # rejections (e.g. the real "token=abcdef" WS 403 that prompted
+        # this fix) went completely unrecorded before, so the sentinel's
+        # threat log only ever reflected CPU/disk pressure, never actual
+        # unauthenticated access attempts against the chat pipeline.
+        try:
+            from utils.security import _record_failed_auth_safe
+            ip = websocket.client.host if websocket.client else "unknown"
+            _record_failed_auth_safe(ip)
+        except Exception:
+            pass
+    return ok
 
 # Combat-mode threat classification — was only ever wired into
 # server/routes/chat.py's POST /stark/chat, never into this module, despite

@@ -51,7 +51,7 @@ def is_trusted_ip(ip: str) -> bool:
             continue
     return False
 
-def verify_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
+def verify_token(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """
     - If JARVIS_API_TOKEN is empty -> open access (no auth needed at all).
     - If ENVIRONMENT is 'local' and DEV_MODE=true -> bypass auth, for painless
@@ -70,8 +70,24 @@ def verify_token(creds: HTTPAuthorizationCredentials = Depends(bearer)):
         return True
 
     if not creds or not hmac.compare_digest(creds.credentials, API_TOKEN):
+        _record_failed_auth_safe(request.client.host if request.client else "unknown")
         raise HTTPException(401, "Unauthorized — invalid token")
     return True
+
+
+def _record_failed_auth_safe(ip: str):
+    """services.sentinel.record_failed_auth() existed but was never
+    actually called from any real auth-check path — confirmed by grep,
+    every rejected request (401s, WS 403s) went completely unrecorded,
+    so the sentinel's threat log only ever reflected resource pressure
+    (HIGH_CPU/HIGH_DISK), never actual unauthenticated access attempts.
+    Wrapped in try/except since a sentinel hiccup must never be able to
+    turn a normal 401 into a 500."""
+    try:
+        from services.sentinel import record_failed_auth
+        record_failed_auth(ip)
+    except Exception:
+        pass
 
 _rate_store: dict = defaultdict(list)
 RATE_LIMIT, RATE_WINDOW = 60, 60
