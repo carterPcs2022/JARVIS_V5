@@ -36,12 +36,23 @@ def _instant_response(query: str) -> str | None:
     the LLM has no way to know that isn't the user's local time, so
     routing "what time is it" through a model risks a wrong or server-UTC
     answer. Returns None for anything else so the caller falls through to
-    the normal LLM pipeline."""
-    q = query.lower().strip()
-    if any(t in q for t in _TIME_TRIGGERS):
+    the normal LLM pipeline.
+
+    Only short-circuits when the trigger phrase IS essentially the whole
+    message. It used to substring-match anywhere in the query — "Jarvis
+    what time is it also make a note for me upgrading you at 9 AM today
+    please" contains "time is it", so the entire second half (a real,
+    separate request) silently vanished with zero acknowledgment: the
+    instant answer returns straight from Brain.process()'s early-exit
+    block, before the rest of the message is ever looked at again. A
+    compound message needs the real pipeline so the non-time part still
+    gets a response instead of being dropped."""
+    q = query.lower().strip().rstrip("?!.")
+    word_count = len(q.split())
+    if any(t in q for t in _TIME_TRIGGERS) and word_count <= 7:
         now = _now_local()
         return f"It's {now.strftime('%I:%M %p').lstrip('0')}, sir."
-    if any(t in q for t in _DATE_TRIGGERS):
+    if any(t in q for t in _DATE_TRIGGERS) and word_count <= 7:
         now = _now_local()
         return now.strftime("%A, %B %d.")
     return None
