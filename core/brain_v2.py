@@ -986,6 +986,16 @@ def _run_sandbox_action(action: str) -> str:
     if action == "improve":
         from core.self_improvement import self_improvement
         result = self_improvement.run_improvement_cycle()
+        if result.get("queued", 0) > 0:
+            try:
+                from core.memory import store_episode
+                store_episode(
+                    f"Self-improvement cycle queued {result['queued']} real code "
+                    f"change(s) for approval across {result.get('written', 0)} file(s)",
+                    importance=7, tags=["self_improvement", "sandbox"],
+                )
+            except Exception:
+                pass
         return result.get("message", "Cycle complete.")
 
     if action == "pending":
@@ -1066,6 +1076,12 @@ class Brain:
             critical("JARVIS MAYDAY", f"Mayday triggered at {datetime.now()}")
             audit_log.record("mayday", "jarvis",
                              {"query": user_input[:100], "mode": "MAYDAY"}, "triggered")
+            try:
+                from core.memory import store_episode
+                store_episode("Mayday distress phrase triggered", importance=10,
+                               emotions=["urgent"], tags=["mayday", "security"])
+            except Exception:
+                pass
 
             response = "Mayday received. What's happening, sir?"
             save_turn(user_input, response)
@@ -1207,6 +1223,13 @@ class Brain:
                 f"token, a two-step confirmation, and the actual passphrase. Nothing just "
                 f"ran."
             )
+            try:
+                from core.memory import store_episode
+                store_episode(f"Chat-based {protocol} activation attempt refused "
+                               f"(no real endpoint call — passphrase-gated)",
+                               importance=8, tags=["security", protocol])
+            except Exception:
+                pass
             from core.memory import save_turn
             save_turn(user_input, response)
             return Result(response=response, ok=True, provider="protocol_refusal")

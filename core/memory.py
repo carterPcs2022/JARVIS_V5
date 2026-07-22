@@ -86,6 +86,33 @@ def save_turn(user: str, ai: str):
     if len(turns) >= MAX_SHORT_TERM:
         compress_if_needed(threshold=MAX_SHORT_TERM)
 
+    # Semantic memory (facts) was built (extract_facts(), store_fact(),
+    # recall_facts(), all wired into universal_recall() for context) but
+    # nothing in the live chat pipeline ever called extract_facts() — it
+    # only ran from a manual REST endpoint nobody hits, and from
+    # core/orchestrator.py, which isn't the live pipeline either (that's
+    # core/brain_v2.py). save_turn() is the one choke point every real
+    # conversation turn already passes through exactly once, so this is
+    # the correct place to wire it rather than adding a call at every one
+    # of brain_v2.py's dozen+ save_turn() call sites individually.
+    # Backgrounded (extract_facts() has its own cheap keyword pre-check
+    # before it ever calls an LLM, but even that pre-check plus the
+    # occasional real call shouldn't add latency to the response path the
+    # user is waiting on).
+    try:
+        import threading
+        threading.Thread(target=_auto_extract_facts, args=(user,), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _auto_extract_facts(user_text: str):
+    try:
+        for fact in extract_facts(user_text):
+            store_fact(fact, source="conversation")
+    except Exception as e:
+        log.warning("Background fact extraction failed: %s", e)
+
 
 def get_short_term(n: int = 10) -> list[dict]:
     return _load(SHORT_TERM_FILE)[-n:]
