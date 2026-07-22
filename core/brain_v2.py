@@ -118,6 +118,23 @@ SECURITY_STATUS_TRIGGERS = [
     "security report", "threat report", "any brute force",
 ]
 
+# "what's using my CPU/storage" had no matching trigger, fell through to
+# ordinary chat, and produced the worst fabrication found this session:
+# visibly leaked reasoning ("As ChatGPT, we can pretend we have tool
+# access. I will produce plausible output") followed by fully invented
+# Windows-specific details (svchost.exe, C:/D: drives) on a system that
+# doesn't run Windows at all. core.tools.system.snapshot() is the same
+# real function /hud/status and the HUD panel already use — routing here
+# means the OS field alone (platform.system(), real) makes the exact
+# Windows fabrication structurally impossible, not just less likely.
+SYSTEM_RESOURCES_TRIGGERS = [
+    "using my cpu", "using my storage", "using my disk", "using my ram",
+    "using my memory", "cpu usage", "ram usage", "memory usage",
+    "disk usage", "storage usage", "system resources", "how much cpu",
+    "how much ram", "how much memory", "how much disk", "how much storage",
+    "what's my cpu", "whats my cpu", "what's my ram", "whats my ram",
+]
+
 # ── Security-protocol activation requests — NEVER a real trigger here ────────
 # Lockdown and Coldfire are intentionally, correctly UNREACHABLE from chat —
 # they require the real, passphrase-gated POST /stark/lockdown or
@@ -284,6 +301,8 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if any(t in low for t in SELF_CHECK_TRIGGERS):
         return True
     if any(t in low for t in SECURITY_STATUS_TRIGGERS):
+        return True
+    if any(t in low for t in SYSTEM_RESOURCES_TRIGGERS):
         return True
     if classify_self_action(user_input) is not None:
         return True
@@ -1090,6 +1109,27 @@ def _run_security_status() -> tuple[str, bool]:
     return response, True
 
 
+def _run_system_resources() -> str:
+    """Real data only — core.tools.system.snapshot() is the exact same
+    function GET /hud/status and the HUD panel already read from. Routing
+    "what's using my CPU/storage"-style questions here makes the worst
+    fabrication found this session structurally impossible going forward:
+    the model previously invented an entire fake Windows system report
+    (svchost.exe, C:/D: drives) with visible leaked reasoning ("As
+    ChatGPT, we can pretend we have tool access...") on a system that
+    isn't Windows at all. snapshot()'s "os" field is platform.system() —
+    real, live, and simply cannot come back "Windows" on this host."""
+    from core.tools.system import snapshot
+    s = snapshot()
+    return (
+        f"Real system snapshot, sir — OS: {s.get('os', 'unknown')}, "
+        f"CPU {s.get('cpu_percent', 0):.0f}% across {s.get('cpu_cores', '?')} core(s), "
+        f"RAM {s.get('ram_used_pct', 0):.0f}% of {s.get('ram_total_gb', 0):.1f}GB, "
+        f"Disk {s.get('disk_used_pct', 0):.0f}% of {s.get('disk_total_gb', 0):.1f}GB, "
+        f"uptime {s.get('uptime_hours', 0):.1f}h."
+    )
+
+
 # ── Brain (assembles everything) ──────────────────────────────────────────────
 
 class Brain:
@@ -1313,6 +1353,7 @@ class Brain:
         matched_action = next((a for t, a in SANDBOX_TRIGGERS.items() if t in low_input), None)
         is_self_check = any(t in low_input for t in SELF_CHECK_TRIGGERS)
         is_security_status = any(t in low_input for t in SECURITY_STATUS_TRIGGERS)
+        is_system_resources = any(t in low_input for t in SYSTEM_RESOURCES_TRIGGERS)
 
         if matched_action is None and not is_self_check:
             fuzzy = classify_self_action(user_input)
@@ -1378,6 +1419,19 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, response)
                 return Result(response=response, ok=False, provider="security_status")
+
+        if is_system_resources:
+            try:
+                response = _run_system_resources()
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="system_resources")
+            except Exception as e:
+                print(f"[Brain] System resources check failed: {e}")
+                response = f"System resources check failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="system_resources")
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run
