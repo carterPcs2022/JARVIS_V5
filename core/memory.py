@@ -49,7 +49,18 @@ def _load(path: Path) -> list | dict:
     return default
 
 
-def _save(path: Path, data):
+def _save(path: Path, data) -> bool:
+    """Returns whether the Turso mirror write actually succeeded — not
+    just whether Turso is configured (TURSO_DATABASE_URL/AUTH_TOKEN
+    present), which was the bug found while building notes: env vars can
+    be set while the actual write still silently falls back to local-only
+    (e.g. libsql_client not installed), and every existing caller of
+    _save() ignored this return value anyway, so exposing it doesn't
+    change their behavior — only a caller that wants to make an accurate
+    "did this actually persist durably" claim needs to look at it. See
+    core.memory.store_note()'s docstring for why this specific caller
+    can't just trust core.turso_store.is_configured() the way earlier
+    code implicitly assumed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
@@ -59,7 +70,7 @@ def _save(path: Path, data):
     # degrades to "doesn't persist across redeploys right now" rather
     # than losing the write entirely.
     from core.turso_store import put as turso_put
-    turso_put(_turso_key(path), data)
+    return turso_put(_turso_key(path), data)
 
 
 # ── Short-term memory ─────────────────────────────────────────────────────────
@@ -352,6 +363,7 @@ _SEMANTIC_FILE   = BASE_DIR / "memory" / "semantic.json"
 _PROCEDURAL_FILE = BASE_DIR / "memory" / "procedural.json"
 _EMOTIONAL_FILE  = BASE_DIR / "memory" / "emotional.json"
 _PROSPECTIVE_FILE = BASE_DIR / "memory" / "prospective.json"
+_NOTES_FILE      = BASE_DIR / "memory" / "notes.json"
 
 
 def _tfidf_score(q_tokens: list[str], doc_tokens: list[str]) -> float:
@@ -714,4 +726,54 @@ def get_clips(limit: int = 10) -> list:
     clips = _load(CLIPS_FILE)
     if not isinstance(clips, list):
         return []
+    return clips[-limit:]
+
+
+# ── Notes — real, durable, user-requested ("JARVIS, make a note of...") ─────
+# Turso-backed the same way every other memory file here is: _load()/_save()
+# already try Turso first and fall back to a local file only when Turso
+# isn't configured or the write/read fails (core/turso_store.py) — nothing
+# new needed for durability, just another key under the same pattern
+# episodic/semantic/procedural/emotional/prospective already use.
+
+def store_note(text: str, title: str = "") -> dict:
+    """note["durable"] reflects whether this save actually reached Turso
+    just now — not core.turso_store.is_configured() (env vars present),
+    which can be true while the real write still silently falls back to
+    local-only (confirmed live: libsql_client not installed locally,
+    TURSO_DATABASE_URL/AUTH_TOKEN both set — is_configured() said True,
+    the real write still fell back). core/brain_v2.py's _run_note_save()
+    reports durability from this field so "saved permanently" is never
+    said unless this specific save really did persist to Turso."""
+    notes = _load(_NOTES_FILE)
+    if not isinstance(notes, list):
+        notes = []
+    note = {
+        "id": str(len(notes) + 1),
+        "title": title,
+        "text": text,
+        "ts": datetime.now().isoformat(),
+        "tokens": _tokenize(f"{title} {text}"),
+    }
+    notes.append(note)
+    durable = _save(_NOTES_FILE, notes)
+    note["durable"] = durable
+    return note
+
+
+def get_all_notes(n: int = 100) -> list[dict]:
+    notes = _load(_NOTES_FILE)
+    if not isinstance(notes, list):
+        return []
+    return notes[-n:]
+
+
+def search_notes(query: str, k: int = 5) -> list[dict]:
+    notes = _load(_NOTES_FILE)
+    if not isinstance(notes, list) or not notes:
+        return []
+    q_tokens = _tokenize(query)
+    scored = [(_tfidf_score(q_tokens, n.get("tokens", [])), n) for n in notes]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [n for score, n in scored[:k] if score > 0]
     return clips[-limit:]

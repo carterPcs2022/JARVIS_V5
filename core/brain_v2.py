@@ -181,6 +181,71 @@ def classify_protocol_request(user_input: str) -> str | None:
     return None
 
 
+# ── Real note-taking — "JARVIS, make a note of X" / "JARVIS, what are my
+# notes" ──────────────────────────────────────────────────────────────────
+# Unlike every other trigger above, these need to extract real content
+# (the note text, an optional title, or a search query) rather than just
+# detect a bare phrase — CORE RULE 9 used to say plainly that no real
+# note-taking existed and a "make a note" request had nowhere real to go;
+# this is what makes that rule obsolete. Storage goes through
+# core.memory.store_note()/get_all_notes()/search_notes(), which reuse
+# the same Turso-backed _load()/_save() every other memory category here
+# already uses — durable the same way, not a new mechanism.
+
+_NOTE_TITLE_PATTERN = re.compile(
+    r"note (?:called|titled|named)\s+['\"](?P<title>[^'\"]+)['\"]\s*:?\s*(?P<text>.+)",
+    re.IGNORECASE,
+)
+_NOTE_SAVE_PATTERNS = [
+    re.compile(r"make a note (?:of|that|about)?\s*:?\s*(?P<text>.+)", re.IGNORECASE),
+    re.compile(r"save (?:this|a note)(?: about)?\s*:?\s*(?P<text>.+)", re.IGNORECASE),
+    re.compile(r"note this\s*:?\s*(?P<text>.+)", re.IGNORECASE),
+    re.compile(r"remember this\s*:?\s*(?P<text>.+)", re.IGNORECASE),
+]
+
+
+def classify_note_save(user_input: str) -> dict | None:
+    """Returns {"title": str, "text": str} if this reads as a real
+    note-save request with actual content to save, else None. The title
+    pattern is checked first and, if matched, used exclusively — "note
+    called 'X': Y" must not also fall through to the generic patterns
+    and produce a second, title-less match."""
+    stripped = user_input.strip()
+    m = _NOTE_TITLE_PATTERN.search(stripped)
+    if m:
+        text = m.group("text").strip()
+        return {"title": m.group("title").strip(), "text": text} if text else None
+    for pattern in _NOTE_SAVE_PATTERNS:
+        m = pattern.search(stripped)
+        if m:
+            text = m.group("text").strip()
+            if text:
+                return {"title": "", "text": text}
+    return None
+
+
+_NOTE_SEARCH_PATTERN = re.compile(r"(?:my )?notes (?:on|about|for)\s+(?P<query>.+)", re.IGNORECASE)
+NOTE_RECALL_TRIGGERS = [
+    "what are my notes", "show me my notes", "list my notes",
+    "read my notes", "show my notes", "what notes do i have",
+]
+
+
+def classify_note_recall(user_input: str) -> str | None:
+    """Returns a search query string for "notes on/about X", "" for a
+    bare "show/list my notes" (list all), or None if this isn't a
+    note-recall request at all."""
+    low = user_input.lower().strip()
+    m = _NOTE_SEARCH_PATTERN.search(low)
+    if m:
+        query = m.group("query").strip().rstrip("?.")
+        if query:
+            return query
+    if any(t in low for t in NOTE_RECALL_TRIGGERS):
+        return ""
+    return None
+
+
 # ── General self-referential-action detector ─────────────────────────────────
 # SANDBOX_TRIGGERS/SELF_CHECK_TRIGGERS above are exact substring lists —
 # each fix session found ONE more missed phrasing ("ARVIS improve yourself"
@@ -307,6 +372,10 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if classify_self_action(user_input) is not None:
         return True
     if classify_protocol_request(user_input) is not None:
+        return True
+    if classify_note_save(user_input) is not None:
+        return True
+    if classify_note_recall(user_input) is not None:
         return True
 
     try:
@@ -1130,6 +1199,47 @@ def _run_system_resources() -> str:
     )
 
 
+def _run_note_save(text: str, title: str = "") -> str:
+    """Real, durable storage via core.memory.store_note() — Turso-backed
+    the same way every other memory category is. Reports durability from
+    note["durable"] (whether THIS save actually reached Turso just now),
+    not core.turso_store.is_configured() (env vars merely present) —
+    confirmed live those two can disagree: is_configured() said True
+    locally while libsql_client wasn't even installed, so the real write
+    silently fell back to local-only and the old code claimed "saved
+    permanently" anyway. Never claim durability that didn't really happen."""
+    from core.memory import store_note
+
+    note = store_note(text, title)
+    where = ("saved permanently" if note.get("durable") else
+             "saved locally only, sir — this won't survive a redeploy right now")
+    title_part = f' titled "{title}"' if title else ""
+    return f'Note{title_part} {where}: "{text}"'
+
+
+def _run_note_recall(query: str) -> str:
+    """Real recall via core.memory.get_all_notes()/search_notes() — lists
+    or searches what's actually stored, never invents note content."""
+    from core.memory import get_all_notes, search_notes
+
+    def _fmt(n: dict) -> str:
+        title = f' — {n["title"]}' if n.get("title") else ""
+        return f'- [{n.get("ts", "")[:10]}]{title}: {n.get("text", "")}'
+
+    if query:
+        notes = search_notes(query, k=5)
+        if not notes:
+            return f'No notes found matching "{query}", sir.'
+        lines = "\n".join(_fmt(n) for n in notes)
+        return f'{len(notes)} note(s) matching "{query}", sir:\n{lines}'
+
+    notes = get_all_notes(n=10)
+    if not notes:
+        return "You don't have any saved notes yet, sir."
+    lines = "\n".join(_fmt(n) for n in notes)
+    return f'{len(notes)} most recent note(s), sir:\n{lines}'
+
+
 # ── Brain (assembles everything) ──────────────────────────────────────────────
 
 class Brain:
@@ -1432,6 +1542,40 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, response)
                 return Result(response=response, ok=False, provider="system_resources")
+
+        # ── Real note-taking — checked before the generic self-action/
+        # protocol fuzzy detectors reach it, since a note's actual text
+        # content could otherwise coincidentally overlap with another
+        # trigger's keywords. Save is checked before recall — "save this
+        # note about my notes on the project" is a save, not a recall,
+        # even though it also contains "notes".
+        note_save = classify_note_save(user_input)
+        if note_save:
+            try:
+                response = _run_note_save(note_save["text"], note_save["title"])
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="note_save")
+            except Exception as e:
+                print(f"[Brain] Note save failed: {e}")
+                response = f"Note save failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="note_save")
+
+        note_query = classify_note_recall(user_input)
+        if note_query is not None:
+            try:
+                response = _run_note_recall(note_query)
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="note_recall")
+            except Exception as e:
+                print(f"[Brain] Note recall failed: {e}")
+                response = f"Note recall failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="note_recall")
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run
