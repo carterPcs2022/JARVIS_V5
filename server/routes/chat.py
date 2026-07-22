@@ -77,13 +77,24 @@ def chat(body: dict, request: Request):
 
     try:
         classification = threat_future.result(timeout=THREAT_CLASSIFY_TIMEOUT_SECONDS)
-    except Exception:
-        classification = None
+    except Exception as e:
+        # Used to set classification=None here, which skipped
+        # combat_mode.handle_classification() entirely below — a real
+        # emergency message that happened to hit a slow/failed
+        # classification got silently treated as "no threat," identically
+        # to a genuinely safe message, with zero trace anywhere. This is a
+        # personal safety/emergency-detection feature; defaulting an
+        # unknown to "safe" is the wrong direction to fail in. Now
+        # constructs the same classifier_failed marker classify() itself
+        # uses on an internal failure, so combat_mode's check-in logic
+        # still runs instead of being skipped a third, silent way.
+        from services.threat_detector import classifier_failed_result
+        print(f"[Chat] Threat classification unavailable ({e}) — asking a check-in question instead of assuming safe.")
+        classification = classifier_failed_result(f"threat_future exception: {e}")
 
-    if classification:
-        from services.combat_mode import combat_mode
-        outcome = combat_mode.handle_classification(msg, classification)
-        if outcome.get("soft_confirm_prompt") and isinstance(result.get("response"), str):
-            result["response"] = f"{result['response']}\n\n{outcome['soft_confirm_prompt']}"
+    from services.combat_mode import combat_mode
+    outcome = combat_mode.handle_classification(msg, classification)
+    if outcome.get("soft_confirm_prompt") and isinstance(result.get("response"), str):
+        result["response"] = f"{result['response']}\n\n{outcome['soft_confirm_prompt']}"
 
     return result

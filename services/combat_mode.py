@@ -134,6 +134,28 @@ class CombatMode:
         """Apply threat_detector.classify()'s output to the state machine.
         Returns status plus a 'soft_confirm_prompt' string when JARVIS should
         ask a check-in question instead of auto-engaging."""
+        # classifier_failed=True means the classifier never actually ran
+        # (timeout, provider outage, malformed JSON) — is_threat=False in
+        # that dict means "unknown," not "confirmed safe." Every caller
+        # (server/websocket.py, server/routes/chat.py) that fails to get a
+        # real classification in time now constructs this same marker via
+        # threat_detector.classifier_failed_result() rather than silently
+        # passing None/skipping this call entirely — this is a personal
+        # safety/emergency-detection feature, and "defaulted to safe on
+        # error" is the wrong direction to fail in. Checked first, before
+        # category/is_threat, since neither field is meaningful when the
+        # classifier didn't run. Always surfaces a check-in rather than
+        # either staying silent (the old behavior) or auto-engaging full
+        # combat mode (a repeated technical glitch is not real evidence of
+        # danger, so escalating from failures alone would just be a
+        # false-alarm risk).
+        if classification.get("classifier_failed"):
+            print(f"[CombatMode] Classification unavailable for a message "
+                  f"({classification.get('reasoning', 'unknown reason')}) — "
+                  f"asking a check-in question instead of assuming safe.")
+            return {**self.status(),
+                    "soft_confirm_prompt": "Everything okay? I wasn't able to properly check that message."}
+
         category = classification.get("category", "none")
         confidence = classification.get("confidence", 0.0)
         is_threat = classification.get("is_threat", False)

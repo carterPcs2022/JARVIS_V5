@@ -29,12 +29,29 @@ If the message is the user explicitly saying they're safe now / a false alarm / 
 Respond with ONLY strict JSON, no other text, in exactly this shape:
 {"is_threat": bool, "confidence": 0.0-1.0, "category": "physical|security|emergency|stand_down|none", "reasoning": "one sentence"}"""
 
-_DEFAULT_RESULT = {
-    "is_threat": False,
-    "confidence": 0.0,
-    "category": "none",
-    "reasoning": "classifier unavailable",
-}
+def classifier_failed_result(reason: str) -> dict:
+    """Shared shape for "the classifier didn't actually run" — used both
+    by classify()'s own internal failure paths below, and by every caller
+    that awaits/submits classify() with its own timeout (server/
+    websocket.py, server/routes/chat.py) and needs the identical marker
+    when THAT wait fails, not just when classify() itself raises.
+
+    is_threat stays False so nothing downstream that only checks that one
+    field silently breaks, but classifier_failed=True is the real signal:
+    services.combat_mode.handle_classification() checks this FIRST, before
+    is_threat, specifically so a failed classification can never be
+    silently treated as "confirmed not a threat" — this is a personal
+    safety/emergency-detection feature, and defaulting an unknown to
+    "safe" is the wrong direction to fail in. A real emergency message
+    that happens to hit a classifier hiccup (malformed JSON, timeout,
+    provider outage) must still surface *something*, not nothing."""
+    return {
+        "is_threat": False,
+        "confidence": 0.0,
+        "category": "none",
+        "reasoning": reason,
+        "classifier_failed": True,
+    }
 
 
 def classify(message: str) -> dict:
@@ -59,8 +76,8 @@ def classify(message: str) -> dict:
         # instead of both looking identical.
         if result.get("error"):
             print(f"[ThreatDetector] router reported provider failure, "
-                  f"defaulting to no-threat: {result['error']}")
-            return {**_DEFAULT_RESULT, "reasoning": f"classifier error: {result['error']}"}
+                  f"classifier could not run: {result['error']}")
+            return classifier_failed_result(f"provider failure: {result['error']}")
 
         # Temporary — measuring this classifier's real per-call token cost
         # against the Groq dashboard, which aggregates every caller on the
@@ -76,11 +93,12 @@ def classify(message: str) -> dict:
             "confidence": float(parsed.get("confidence", 0.0)),
             "category": parsed.get("category", "none"),
             "reasoning": parsed.get("reasoning", ""),
+            "classifier_failed": False,
         }
     except Exception as e:
         # Logged, not just embedded in the returned "reasoning" field — a
         # silently-broken classifier (bad JSON, network error, etc.) would
         # otherwise look identical to "no threat detected" in both behavior
         # and logs, with zero trace of which one actually happened.
-        print(f"[ThreatDetector] classify() failed, defaulting to no-threat: {e}")
-        return {**_DEFAULT_RESULT, "reasoning": f"classifier error: {e}"}
+        print(f"[ThreatDetector] classify() failed, classifier could not run: {e}")
+        return classifier_failed_result(f"classify() exception: {e}")

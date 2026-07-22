@@ -101,6 +101,23 @@ SELF_CHECK_TRIGGERS = [
     "run diagnostic", "status check", "full diagnostic",
 ]
 
+# "Jarvis any threats?" had no matching trigger, fell through to ordinary
+# chat, and the model literally ran a web search for "JARVIS" + "threat"
+# instead of checking real security status — a different flavor of the
+# same root cause as the self-check gap above (no real handler existed
+# for this phrasing), but a more concerning failure mode: it took a real
+# but completely wrong action (a web search that can't possibly answer
+# "are there threats to JARVIS's own systems") instead of either checking
+# the real data or admitting it couldn't. services/sentinel.py's
+# summary()/threats() are the same real threat log that feeds the HUD's
+# SEC node — this routes to that instead of letting the phrase go
+# unrecognized.
+SECURITY_STATUS_TRIGGERS = [
+    "any threats", "security status", "threat status", "any intrusions",
+    "any attacks", "any breaches", "how secure", "sentinel status",
+    "security report", "threat report", "any brute force",
+]
+
 # ── Security-protocol activation requests — NEVER a real trigger here ────────
 # Lockdown and Coldfire are intentionally, correctly UNREACHABLE from chat —
 # they require the real, passphrase-gated POST /stark/lockdown or
@@ -265,6 +282,8 @@ def has_early_exit_trigger(user_input: str) -> bool:
     if any(t in low for t in SANDBOX_TRIGGERS):
         return True
     if any(t in low for t in SELF_CHECK_TRIGGERS):
+        return True
+    if any(t in low for t in SECURITY_STATUS_TRIGGERS):
         return True
     if classify_self_action(user_input) is not None:
         return True
@@ -1034,6 +1053,43 @@ def _run_self_diagnostics() -> tuple[str, bool]:
     return response, status == "NOMINAL"
 
 
+def _run_security_status() -> tuple[str, bool]:
+    """Real Sentinel data only — the same services.sentinel.summary()/
+    threats() the HUD's SEC node is driven from (see hud_mobile/
+    desktop.html's pollStatus()). Distinguishes resource-pressure
+    categories (HIGH_CPU/HIGH_RAM/HIGH_DISK) from actually access-related
+    ones (BRUTE_FORCE, FILE_TAMPERED, NEW_PORT) — the former are common
+    and not concerning on their own, the latter are what "any threats?"
+    is really asking about. Returns (response_text, ok)."""
+    from services.sentinel import summary, threats as get_threats
+    s = summary()
+    count = s.get("last_24h", 0)
+
+    if count == 0:
+        return "No threats logged in the last 24 hours, sir. Sentinel's clean.", True
+
+    by_sev = s.get("by_severity", {})
+    sev_text = ", ".join(f"{v} {k}" for k, v in by_sev.items()) or "no severity breakdown"
+
+    recent = get_threats(24)
+    access_categories = {"BRUTE_FORCE", "FILE_TAMPERED", "NEW_PORT"}
+    access_threats = [t for t in recent if t.get("category") in access_categories]
+
+    if access_threats:
+        top = "; ".join(f"{t.get('category')}: {t.get('detail', '')}" for t in access_threats[:3])
+        response = (
+            f"{count} threat(s) in the last 24h, sir ({sev_text}) — including "
+            f"{len(access_threats)} access-related: {top}"
+        )
+        return response, False
+
+    response = (
+        f"{count} threat(s) logged in the last 24h, sir ({sev_text}) — all "
+        f"resource-pressure (CPU/RAM/disk), nothing access-related."
+    )
+    return response, True
+
+
 # ── Brain (assembles everything) ──────────────────────────────────────────────
 
 class Brain:
@@ -1256,6 +1312,7 @@ class Brain:
         low_input = user_input.lower()
         matched_action = next((a for t, a in SANDBOX_TRIGGERS.items() if t in low_input), None)
         is_self_check = any(t in low_input for t in SELF_CHECK_TRIGGERS)
+        is_security_status = any(t in low_input for t in SECURITY_STATUS_TRIGGERS)
 
         if matched_action is None and not is_self_check:
             fuzzy = classify_self_action(user_input)
@@ -1308,6 +1365,19 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, response)
                 return Result(response=response, ok=False, provider="diagnostics")
+
+        if is_security_status:
+            try:
+                response, ok = _run_security_status()
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=ok, provider="security_status")
+            except Exception as e:
+                print(f"[Brain] Security status check failed: {e}")
+                response = f"Security status check failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="security_status")
 
         # ── Maximum intelligence — explicit "give me your best" requests
         # bypass the normal intent/plan/executor pipeline entirely and run

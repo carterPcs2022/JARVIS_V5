@@ -57,15 +57,28 @@ async def _apply_threat_classification(loop: asyncio.AbstractEventLoop, msg: str
                                         classify_task: "asyncio.Future") -> str | None:
     """Await the classification kicked off alongside the main response,
     hand it to combat_mode, and return a soft-confirm prompt to append to
-    the reply if one applies. Never raises — a slow/failed classification
-    degrades to "no threat" for this message only, same as chat.py."""
+    the reply if one applies. Never raises.
+
+    Used to silently return None on a timeout/exception here — skipping
+    combat_mode.handle_classification() entirely, with no log line, no
+    trace. This is a personal safety/emergency-detection feature; a real
+    emergency message that happened to hit a slow classify_task got
+    treated identically to "confirmed not a threat," completely silently.
+    Now constructs the same classifier_failed marker services.
+    threat_detector.classify() itself uses on an internal failure, and
+    still calls handle_classification() with it — that function checks
+    classifier_failed first and asks a check-in question rather than
+    doing nothing, so a failure here behaves the same as a failure
+    inside classify() itself instead of a third, worse, silent variant."""
+    from services.threat_detector import classifier_failed_result
+    from services.combat_mode import combat_mode
     try:
         classification = await asyncio.wait_for(classify_task, timeout=THREAT_CLASSIFY_TIMEOUT_SECONDS)
-    except Exception:
-        return None
-    if not classification:
-        return None
-    from services.combat_mode import combat_mode
+        if not classification:
+            classification = classifier_failed_result("classify_task returned no result")
+    except Exception as e:
+        print(f"[WS] Threat classification unavailable ({e}) — asking a check-in question instead of assuming safe.")
+        classification = classifier_failed_result(f"classify_task exception: {e}")
     outcome = await loop.run_in_executor(None, combat_mode.handle_classification, msg, classification)
     return outcome.get("soft_confirm_prompt")
 
