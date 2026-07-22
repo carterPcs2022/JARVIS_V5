@@ -659,7 +659,7 @@ const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127
 
 function getToken() { return localStorage.getItem('jarvis_token') || ''; }
 
-function ensureToken() {
+async function ensureToken() {
   const urlParams = new URLSearchParams(location.search);
   const urlToken = urlParams.get('token');
   if (urlToken) {
@@ -667,21 +667,17 @@ function ensureToken() {
     window.history.replaceState({}, '', location.pathname);
   }
   if (!getToken() && !DEV_MODE) {
-    // prompt() can throw in some embedded/automated browser contexts
-    // (sandboxed webviews, certain in-app browsers) instead of just
-    // returning a value — uncaught, that exception halted this entire
-    // inline script right here, so nothing after this call ever ran:
-    // no WebSocket connection, no button handlers, no mic/wake-word
-    // setup. A page that loses its saved token (cache clear, private
-    // window, different device) shouldn't come back completely dead
-    // with zero indication why — worst case now is "no token", not
-    // "no page".
-    try {
-      const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
-      if (t) localStorage.setItem('jarvis_token', t);
-    } catch (e) {
-      console.error('Token prompt failed — continuing without one:', e);
-    }
+    // Uses askPassphrase()'s plain-DOM-overlay pattern instead of
+    // window.prompt() — confirmed the real cause of a real lockout:
+    // prompt()/alert()/confirm() are unreliable or silently no-op in
+    // standalone-PWA / embedded-webview contexts. A silently-failing
+    // prompt() left getToken() permanently empty, the WebSocket kept
+    // sending token="" forever, and there was no way back in short of
+    // manually clearing browser site data. A bare DOM element (what
+    // askPassphrase() already builds) always renders regardless of
+    // browser context.
+    const t = await askPassphrase('Enter your JARVIS API token (leave blank if not set):');
+    if (t) localStorage.setItem('jarvis_token', t);
   }
 }
 
@@ -807,7 +803,22 @@ function connectWs() {
   try {
     ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(getToken())}`);
     ws.onopen  = () => setStatus('online');
-    ws.onclose = () => { setStatus('offline'); setTimeout(connectWs, 3000); };
+    ws.onclose = (e) => {
+      setStatus('offline');
+      // 1008 = server/websocket.py's _ws_token_ok() rejected the token —
+      // not a network problem, the saved token is just wrong. Retrying
+      // blindly with the same rejected token forever left a bad cached
+      // token permanently stuck (confirmed live) with no way back short
+      // of manually clearing browser site data, since ensureToken() only
+      // prompts when getToken() is empty — a wrong-but-non-empty token
+      // silently defeats that check forever. Clear it and re-prompt.
+      if (e.code === 1008) {
+        localStorage.removeItem('jarvis_token');
+        ensureToken().then(connectWs);
+        return;
+      }
+      setTimeout(connectWs, 3000);
+    };
     ws.onerror = () => setStatus('degraded');
     ws.onmessage = (e) => {
       try { handleWsMessage(JSON.parse(e.data)); } catch (err) {}

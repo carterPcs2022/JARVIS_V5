@@ -10,13 +10,42 @@
 
   function getToken() { return localStorage.getItem('jarvis_token') || ''; }
 
-  // Mirrors hud_mobile/desktop.html's ensureToken() exactly — this file
-  // (the /hud/mobile frontend) had no equivalent at all: no ?token= URL
-  // bootstrap, no prompt fallback, just a TOKEN constant read once from
-  // localStorage. Since /ws/chat now requires a token (previously had
-  // none), a page that never had one saved would silently retry-connect
-  // forever with no token to send and no way to get one.
-  function ensureToken() {
+  // Plain DOM overlay instead of window.prompt() — confirmed the real
+  // cause of a real lockout: prompt()/alert()/confirm() are unreliable
+  // or silently no-op in iOS Safari's "Add to Home Screen" standalone
+  // PWA mode, which is exactly how this HUD gets used on a phone. A
+  // silently-failing prompt() left getToken() permanently empty, the
+  // WebSocket kept sending token="" forever, and there was no way back
+  // in short of manually clearing browser site data. A bare DOM element
+  // always renders, standalone or not.
+  function askForToken(message) {
+    return new Promise((resolve) => {
+      const backdrop = document.createElement('div');
+      backdrop.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;padding:20px;';
+      backdrop.innerHTML = `
+        <div style="background:#0a0f12;border:1px solid #2f5866;border-radius:6px;padding:20px;width:100%;max-width:340px;font-family:monospace;">
+          <div style="font-size:12px;letter-spacing:1px;color:#7fb0c4;margin-bottom:12px;">${message}</div>
+          <input type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                 style="width:100%;background:rgba(255,255,255,0.05);border:1px solid #2f5866;color:#5fd8ff;padding:10px;font-family:inherit;font-size:14px;border-radius:4px;box-sizing:border-box;" />
+          <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end;">
+            <button class="tok-skip" style="padding:8px 16px;border:1px solid #2f5866;background:transparent;color:#7fb0c4;border-radius:4px;font-family:inherit;font-size:12px;">SKIP</button>
+            <button class="tok-ok" style="padding:8px 16px;border:1px solid #5fd8ff;background:rgba(95,216,255,0.1);color:#5fd8ff;border-radius:4px;font-family:inherit;font-size:12px;">CONNECT</button>
+          </div>
+        </div>`;
+      document.body.appendChild(backdrop);
+      const input = backdrop.querySelector('input');
+      const finish = (val) => { backdrop.remove(); resolve(val); };
+      backdrop.querySelector('.tok-skip').onclick = () => finish(null);
+      backdrop.querySelector('.tok-ok').onclick = () => finish(input.value.trim());
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(input.value.trim()); });
+      setTimeout(() => input.focus(), 50);
+    });
+  }
+
+  // Mirrors hud_mobile/desktop.html's ensureToken() — bootstraps a token
+  // from ?token=... in the URL (e.g. from a saved home-screen shortcut
+  // link) if present, else prompts if nothing is saved yet.
+  async function ensureToken() {
     const urlParams = new URLSearchParams(location.search);
     const urlToken = urlParams.get('token');
     if (urlToken) {
@@ -24,15 +53,8 @@
       window.history.replaceState({}, '', location.pathname);
     }
     if (!getToken() && !DEV_MODE) {
-      // See desktop.html's identical comment: prompt() can throw instead
-      // of returning a value in some embedded/automated browser contexts —
-      // uncaught, that would halt this entire IIFE right here.
-      try {
-        const t = prompt('Enter your JARVIS API token:\n(Leave blank if JARVIS_API_TOKEN is not set)');
-        if (t) localStorage.setItem('jarvis_token', t);
-      } catch (e) {
-        console.error('Token prompt failed — continuing without one:', e);
-      }
+      const t = await askForToken('Enter your JARVIS API token:\n(leave blank if not set)');
+      if (t) localStorage.setItem('jarvis_token', t);
     }
   }
   ensureToken();
@@ -282,6 +304,23 @@
       // intentionally. Surfacing this beats a generic "error" message when
       // debugging phone-specific connectivity (Private Relay, Low Data Mode,
       // captive portals, etc. all tend to produce 1006 with no reason).
+      //
+      // 1008 specifically means server/websocket.py's _ws_token_ok()
+      // rejected the token (server/websocket.py:79-83) — not a network
+      // problem, the saved token is just wrong. The old behavior blindly
+      // retried with that same rejected token every 5s forever: confirmed
+      // live, a bad token got stuck in localStorage with literally no way
+      // back short of manually clearing browser site data, since
+      // ensureToken() only ever prompts when getToken() is empty — a
+      // wrong-but-non-empty cached token silently short-circuits that
+      // check permanently. Clear it and re-prompt instead of repeating
+      // the same failure forever.
+      if (e.code === 1008) {
+        addEvent('error', 'Token rejected — clearing it and asking for a new one.');
+        localStorage.removeItem('jarvis_token');
+        ensureToken().then(connect);
+        return;
+      }
       addEvent('error', `Disconnected (code ${e.code}${e.reason ? ': ' + e.reason : ''}) — retrying in 5s…`);
       reconnectTimer = setTimeout(connect, 5000);
     };
