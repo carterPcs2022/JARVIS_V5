@@ -676,8 +676,13 @@ async function ensureToken() {
     // manually clearing browser site data. A bare DOM element (what
     // askPassphrase() already builds) always renders regardless of
     // browser context.
+    // askPassphrase()'s input isn't trimmed (fine for a passphrase; not
+    // fine here) — a copy-pasted token with a trailing space/newline
+    // would get saved verbatim and then silently fail hmac.compare_digest()
+    // on every single connection with no visible reason. Confirmed this
+    // exact failure mode live right after deploying this fix.
     const t = await askPassphrase('Enter your JARVIS API token (leave blank if not set):');
-    if (t) localStorage.setItem('jarvis_token', t);
+    if (t && t.trim()) localStorage.setItem('jarvis_token', t.trim());
   }
 }
 
