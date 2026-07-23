@@ -39,13 +39,19 @@ def verify_any_read_token(request: Request, creds: HTTPAuthorizationCredentials 
 
 
 def verify_master_only(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
-    """Only master token."""
+    """Only master token. Gates the highest-stakes routes, so also enforces
+    the optional PROTOCOL_ALLOWED_IPS network allowlist (see
+    utils.security._check_protocol_ip_allowlist) — a correct master token
+    from an unrecognized network still gets rejected if that env var is
+    set."""
     from config.settings import API_TOKEN
-    from utils.security import _reject_if_blocked
-    _reject_if_blocked(request.client.host if request.client else "unknown")
+    from utils.security import _reject_if_blocked, _check_protocol_ip_allowlist
+    ip = request.client.host if request.client else "unknown"
+    _reject_if_blocked(ip)
     if not API_TOKEN:
         return True
     if creds and hmac.compare_digest(creds.credentials, API_TOKEN):
+        _check_protocol_ip_allowlist(ip)
         return True
     # Guards the most sensitive routes (lockdown, coldfire, sandbox
     # approve/persist) — a failed attempt here is more significant than

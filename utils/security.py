@@ -78,6 +78,48 @@ def verify_token(request: Request, creds: HTTPAuthorizationCredentials = Depends
     return True
 
 
+def _check_protocol_ip_allowlist(ip: str):
+    """Optional extra layer on top of the master token for the highest-
+    stakes routes (lockdown, coldfire, scatter, sandbox approve/persist,
+    run_protocol) — set PROTOCOL_ALLOWED_IPS (comma-separated IPs/CIDRs,
+    your real public IP(s)) to reject requests from anywhere else even
+    with a valid master token. Empty/unset = disabled, same "unset secret
+    = gate doesn't apply" convention as every other gate this session —
+    most home ISPs rotate residential public IPs periodically, so a
+    hardcoded allowlist could otherwise lock the owner out with no way
+    back in except Render's dashboard. This is opt-in and only as strict
+    as the value you actually set."""
+    allowed = os.getenv("PROTOCOL_ALLOWED_IPS", "")
+    if not allowed:
+        return
+    entries = [e.strip() for e in allowed.split(",") if e.strip()]
+    if not entries:
+        return
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        raise HTTPException(403, "Request origin could not be verified")
+    for entry in entries:
+        try:
+            if "/" in entry:
+                if addr in ipaddress.ip_network(entry, strict=False):
+                    return
+            elif addr == ipaddress.ip_address(entry):
+                return
+        except ValueError:
+            continue
+    try:
+        from services.notifications import alert
+        alert("Protocol request from unrecognized network",
+              f"A Stark Protocol endpoint was called with a valid master "
+              f"token from {ip}, which isn't in PROTOCOL_ALLOWED_IPS. "
+              f"Rejected — if this was really you, add this IP to that "
+              f"env var.")
+    except Exception:
+        pass
+    raise HTTPException(403, "Request origin not in the allowed network")
+
+
 def _reject_if_blocked(ip: str):
     """Checked before the token comparison on every auth path (REST,
     WebSocket, Pepper/Rhodey/master tiers) — an IP that's tripped the
