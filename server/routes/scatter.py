@@ -25,6 +25,7 @@ router = APIRouter(prefix="/stark/scatter", tags=["scatter"])
 class ScatterRequest(BaseModel):
     passphrase: str
     confirm_token: str = ""
+    iris_token: str = ""
 
 
 class ReassembleRequest(BaseModel):
@@ -33,20 +34,36 @@ class ReassembleRequest(BaseModel):
 
 @router.post("")
 async def scatter(req: ScatterRequest, _=Depends(verify_master_only)):
-    from core.protocols import request_avengers_confirmation, confirm_avengers
+    from core.protocols import (
+        request_avengers_confirmation, confirm_avengers,
+        consume_iris_confirmation,
+    )
+    from server.routes.iris import iris_profile_enrolled
 
     if not req.confirm_token:
         tok = request_avengers_confirmation("scatter", req.passphrase)
+        from datetime import datetime
+        from services.notifications import critical
+        critical("Scatter Protocol requested",
+                  f"Requested at {datetime.now().strftime('%H:%M:%S')}. This will "
+                  f"disperse your identity across nodes — not easily reversible. "
+                  f"Approve via iris scan + confirm token within 10 minutes, or "
+                  f"ignore to leave it unexecuted.")
         return {
             "status":          "awaiting_confirmation",
             "confirm_token":   tok,
             "warning":         "Scatter will disperse your identity across nodes. Not easily reversible.",
-            "message":         "Send this token back within 60 seconds, with the same passphrase, to confirm.",
-            "expires_seconds": 60,
+            "message":         "Send this token back within 10 minutes, with the same passphrase, to confirm.",
+            "expires_seconds": 600,
         }
 
     if not confirm_avengers(req.confirm_token, req.passphrase):
         raise HTTPException(403, "Confirmation failed or expired")
+
+    if await iris_profile_enrolled():
+        if not req.iris_token or not consume_iris_confirmation(req.iris_token):
+            raise HTTPException(403, "Iris verification required — call POST /stark/iris/verify "
+                                      "and pass the returned iris_confirm_token as iris_token.")
 
     from core.scatter import get_engine
     result = get_engine().scatter(req.passphrase)

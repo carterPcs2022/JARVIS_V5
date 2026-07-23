@@ -112,7 +112,11 @@ def _log_protocol_event(protocol: str, detail: str, severity: str = "info"):
 
 _pending_confirmations: dict[str, dict] = {}
 _pending_lock = threading.Lock()
-AVENGERS_WINDOW = 60   # seconds
+AVENGERS_WINDOW = 600  # seconds — was 60; too tight for "check phone, do iris
+                       # scan" in practice, widened for the Stark Protocol 2FA
+                       # flow (Lockdown/Coldfire/Scatter). Still expires
+                       # unexecuted if never confirmed — never defaults to
+                       # running.
 
 
 def request_avengers_confirmation(action: str, passphrase: str) -> str:
@@ -149,7 +153,8 @@ def confirm_avengers(token: str, passphrase: str) -> bool:
 # approve/persist.
 
 _iris_confirmations: dict[str, dict] = {}
-IRIS_CONFIRM_WINDOW = 120  # seconds — enough time to verify, then act
+IRIS_CONFIRM_WINDOW = 600  # seconds — was 120; widened alongside
+                           # AVENGERS_WINDOW for the same reason
 
 
 def issue_iris_confirmation() -> str:

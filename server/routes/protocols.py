@@ -119,13 +119,21 @@ async def lockdown(body: dict):
         return {"error": "passphrase required"}
 
     if not token:
-        # First call — issue confirmation token
+        # First call — issue confirmation token and push a real notification
+        # with real details, so approving isn't a blind guess at what's
+        # being requested.
         tok = request_avengers_confirmation("lockdown", passphrase)
+        from datetime import datetime
+        from services.notifications import critical
+        critical("Suit Lockdown requested",
+                  f"Requested at {datetime.now().strftime('%H:%M:%S')}. This will "
+                  f"restrict JARVIS's API access. Approve via iris scan + confirm "
+                  f"token within 10 minutes, or ignore to leave it unexecuted.")
         return {
             "status":          "awaiting_confirmation",
             "confirm_token":   tok,
-            "message":         "Send this token back within 60 seconds to confirm lockdown.",
-            "expires_seconds": 60,
+            "message":         "Send this token back within 10 minutes to confirm lockdown.",
+            "expires_seconds": 600,
         }
 
     # Second call — confirm and execute
@@ -153,17 +161,23 @@ def lift_lockdown():
 # ── Protocol 6: Coldfire ──────────────────────────────────────────────────────
 
 @router.post("/coldfire", dependencies=[Depends(verify_master_only)])
-def coldfire(body: dict):
+async def coldfire(body: dict):
     """
     Wipe all sensitive data. Requires:
     1. COLDFIRE_PASSPHRASE env var set
     2. body: {"passphrase": "...", "confirm_token": "..."}
     3. Avengers Protocol double-confirmation
+    4. Iris AND-gate (same convention as lockdown): if a profile is
+       enrolled, the second call must also carry a fresh iris_token from
+       POST /stark/iris/verify. Previously missing here — Coldfire had the
+       passphrase + two-step confirm but no iris leg, unlike Lockdown.
     """
     from core.protocols import (
         coldfire as do_coldfire,
-        request_avengers_confirmation, confirm_avengers
+        request_avengers_confirmation, confirm_avengers,
+        consume_iris_confirmation,
     )
+    from server.routes.iris import iris_profile_enrolled
     passphrase = body.get("passphrase", "")
     token      = body.get("confirm_token", "")
 
@@ -172,15 +186,27 @@ def coldfire(body: dict):
 
     if not token:
         tok = request_avengers_confirmation("coldfire", passphrase)
+        from datetime import datetime
+        from services.notifications import critical
+        critical("Coldfire Protocol requested",
+                  f"Requested at {datetime.now().strftime('%H:%M:%S')}. This will "
+                  f"WIPE all sensitive data — irreversible. Approve via iris scan "
+                  f"+ confirm token within 10 minutes, or ignore to leave it unexecuted.")
         return {
             "status":        "awaiting_confirmation",
             "confirm_token": tok,
             "warning":       "⚠ Coldfire will wipe ALL sensitive data. Irreversible.",
-            "expires_seconds": 60,
+            "expires_seconds": 600,
         }
 
     if not confirm_avengers(token, passphrase):
         raise HTTPException(403, "Confirmation failed or expired")
+
+    if await iris_profile_enrolled():
+        iris_token = body.get("iris_token", "")
+        if not iris_token or not consume_iris_confirmation(iris_token):
+            raise HTTPException(403, "Iris verification required — call POST /stark/iris/verify "
+                                      "and pass the returned iris_confirm_token as iris_token.")
 
     return do_coldfire(passphrase)
 
