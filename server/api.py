@@ -12,7 +12,23 @@ import time
 # misleading; this is uptime of the actual JARVIS process.
 BOOT_TIME = time.time()
 
-app = FastAPI(title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0")
+# Real incident: the interactive /docs page (FastAPI's default Swagger UI)
+# is fully public with no auth of its own — anyone who reaches it can read
+# the whole API surface and fire real requests directly from the browser,
+# no code, no HUD, just a valid token pasted into the "Authorize" box. This
+# is exactly how the Coldfire/Scatter incident this session actually
+# happened. Disabled entirely in production (docs_url/redoc_url/
+# openapi_url all None); still available locally for real debugging, same
+# ENVIRONMENT convention DEV_MODE already uses elsewhere in this codebase.
+from config.settings import ENVIRONMENT
+_DOCS_ENABLED = ENVIRONMENT == "local"
+
+app = FastAPI(
+    title="JARVIS", description="Just A Rather Very Intelligent System V5", version="5.0",
+    docs_url=("/docs" if _DOCS_ENABLED else None),
+    redoc_url=("/redoc" if _DOCS_ENABLED else None),
+    openapi_url=("/openapi.json" if _DOCS_ENABLED else None),
+)
 
 # /health must always come up — Render's container health check hits this
 # path, and a non-200/unreachable response within its timeout kills the

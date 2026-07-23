@@ -165,7 +165,7 @@ async def glasses_audio():
                         headers={"Cache-Control": "no-cache"})
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(verify_token)])
 async def glasses_status():
     """Health check for the glasses pipeline — hit this after deploying to
     confirm every leg (transcription, brain, TTS) is actually reachable."""

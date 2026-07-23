@@ -1,11 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from utils.security import verify_token
 from core.tools.system import snapshot
 import datetime
 
 router = APIRouter(prefix="/stark", tags=["telemetry"])
 
 
-@router.get("/telemetry")
+@router.get("/telemetry", dependencies=[Depends(verify_token)])
 def telemetry():
     # snapshot() already guards each psutil call individually (see
     # core/tools/system.py), but wrap the whole call too — belt and
