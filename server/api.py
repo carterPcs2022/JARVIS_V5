@@ -149,6 +149,7 @@ async def security_gate_middleware(request: Request, call_next):
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": "Access denied"}, status_code=403)
 
+    body = ""
     if request.method in ("POST", "PUT", "PATCH"):
         try:
             from services.canary import canary
@@ -159,6 +160,23 @@ async def security_gate_middleware(request: Request, call_next):
                 return JSONResponse({"error": "Access denied"}, status_code=403)
         except Exception:
             pass
+
+    # behavioral_security's detection logic (rapid-fire, endpoint scanning,
+    # body-size spikes, off-hours sensitive-endpoint access) existed but
+    # record_request() — its only write path — was never called from
+    # anywhere, so every profile stayed empty and the read-only risk-score
+    # endpoints always reported nothing. This is the single call site that
+    # feeds it, right alongside the other request-level security checks
+    # above. Read-only/alert-only, same as before — no auto-blocking.
+    try:
+        from services.behavioral_security import behavioral
+        behavioral.record_request(
+            ip, request.url.path, request.method,
+            user_agent=request.headers.get("user-agent", ""),
+            body_size=len(body.encode()) if body else 0,
+        )
+    except Exception:
+        pass
 
     return await call_next(request)
 

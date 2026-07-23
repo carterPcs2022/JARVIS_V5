@@ -327,6 +327,31 @@ def _daily_canary_replant():
         log.debug("Daily canary replant failed: %s", e)
 
 
+def _health_trend_check():
+    """Multi-day pattern check over accumulated health_data.json history —
+    distinct from services/health.py's per-reading watch_for_anomaly(),
+    which is webhook-triggered and can't see a pattern spanning several
+    days. Findings get queued for the digest, not fired immediately."""
+    try:
+        from services.health import health_monitor
+        health_monitor.watch_for_trends()
+    except Exception as e:
+        log.debug("Health trend check failed: %s", e)
+
+
+def _notification_digest_flush():
+    """Sends anything queued via services.notifications.queue_digest()
+    (currently: health trend findings) as one batched notification, then
+    clears the queue. Runs after _health_trend_check so same-morning
+    findings go out together, and before morning_routine (7:30) so it
+    doesn't compete with that for attention."""
+    try:
+        from services.notifications import flush_digest
+        flush_digest()
+    except Exception as e:
+        log.debug("Digest flush failed: %s", e)
+
+
 def _proactive_screen_check():
     """Local Mac only — services.screen_monitor already no-ops everywhere
     else, but skipping the job registration entirely on Render/Railway
@@ -449,6 +474,13 @@ def start():
             _scheduler.add_job(_weekly_self_improvement_cycle, "cron", day_of_week="sun", hour=4, minute=0,
                                 id="weekly_self_improvement_cycle")
 
+        # Health trend detection (multi-day patterns, e.g. a short-sleep
+        # streak) + digest flush — both before morning_routine (7:30) so
+        # findings, if any, arrive as part of the morning digest rather
+        # than as a separate later ping.
+        _scheduler.add_job(_health_trend_check, "cron", hour=6, minute=30, id="health_trend_check")
+        _scheduler.add_job(_notification_digest_flush, "cron", hour=7, minute=0, id="notification_digest_flush")
+
         # Absolute final batch: morning/evening routines, price/package tracking
         _scheduler.add_job(_morning_routine, "cron", hour=7, minute=30, id="morning_routine", replace_existing=True)
         _scheduler.add_job(_evening_routine, "cron", hour=22, minute=0, id="evening_routine", replace_existing=True)
@@ -501,10 +533,11 @@ def start():
         _scheduler.start()
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
+                 "health trend check/daily 6:30, digest flush/daily 7:00, "
                  "morning/evening routines, price/package tracking, "
                  "secret scan/dead man's switch/canary replant, log/audio cleanup, "
                  "proactive screen check (local), proactive research/2h, "
-                 "stark proactive thinking/30m, stark anticipate needs/5m, "
+                 "stark proactive thinking/60m, stark anticipate needs/15m, "
                  "weekly model update check, weekly self-improvement cycle (queue-only)")
         return True
     except ImportError:

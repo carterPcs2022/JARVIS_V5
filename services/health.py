@@ -251,9 +251,22 @@ class HealthMonitor:
         if heart_rate is not None:
             try:
                 hr = float(heart_rate)
-                if hr > 120:
+                if hr > 150:
+                    # core.event_bus.bus.alert() only routes to Pushover/
+                    # voice/Telegram at severity in ("critical", "high") —
+                    # every health anomaly used to fire at "warning", so a
+                    # genuinely dangerous reading was HUD-only, invisible
+                    # unless a browser tab happened to be open. 120-150bpm
+                    # stays "warning" (routine exercise range); above that
+                    # is worth an actual notification.
                     bus.alert(
                         f"HEALTH ANOMALY: Heart rate is {hr:.0f}bpm — significantly elevated. "
+                        f"Recorded at {timestamp}.",
+                        severity="high"
+                    )
+                elif hr > 120:
+                    bus.alert(
+                        f"HEALTH ANOMALY: Heart rate is {hr:.0f}bpm — elevated. "
                         f"Recorded at {timestamp}.",
                         severity="warning"
                     )
@@ -272,6 +285,84 @@ class HealthMonitor:
                     )
             except (ValueError, TypeError):
                 pass
+
+    def detect_trends(self) -> list[str]:
+        """Multi-day pattern detection over accumulated health_data.json
+        history — distinct from watch_for_anomaly()'s single-reading
+        thresholds, which can't see a pattern that only shows up across
+        several days (e.g. a short-sleep streak where no single night
+        crosses an acute threshold by much, but four in a row do)."""
+        data = self._load_data()
+        if not data:
+            return []
+
+        findings = []
+
+        # Sleep: collapse to one reading per calendar day (last snapshot
+        # wins if the Shortcut synced more than once that day), then look
+        # for a run of consecutive under-5h nights.
+        by_day: dict[str, float] = {}
+        for snap in data:
+            sl = snap.get("sleep_hours")
+            ts_str = snap.get("timestamp", "")
+            if sl is None or not ts_str:
+                continue
+            try:
+                day = datetime.fromisoformat(ts_str).date().isoformat()
+                by_day[day] = float(sl)
+            except (ValueError, TypeError):
+                continue
+
+        days_sorted = sorted(by_day.keys())
+        if len(days_sorted) >= 4:
+            last_4 = days_sorted[-4:]
+            if all(by_day[d] < 5 for d in last_4):
+                avg = sum(by_day[d] for d in last_4) / len(last_4)
+                findings.append(
+                    f"Sleep has been under 5 hours for {len(last_4)} nights running "
+                    f"({last_4[0]} to {last_4[-1]}, averaging {avg:.1f}h)."
+                )
+
+        # Resting HR: compare this week's daily average to the prior week's.
+        by_day_rhr: dict[str, float] = {}
+        for snap in data:
+            rhr = snap.get("resting_hr")
+            ts_str = snap.get("timestamp", "")
+            if rhr is None or not ts_str:
+                continue
+            try:
+                day = datetime.fromisoformat(ts_str).date().isoformat()
+                by_day_rhr[day] = float(rhr)
+            except (ValueError, TypeError):
+                continue
+
+        rhr_days = sorted(by_day_rhr.keys())
+        if len(rhr_days) >= 10:
+            recent_week = rhr_days[-7:]
+            prior_week = rhr_days[-14:-7] if len(rhr_days) >= 14 else rhr_days[:-7]
+            if prior_week:
+                recent_avg = sum(by_day_rhr[d] for d in recent_week) / len(recent_week)
+                prior_avg = sum(by_day_rhr[d] for d in prior_week) / len(prior_week)
+                if recent_avg - prior_avg >= 5:
+                    findings.append(
+                        f"Resting heart rate has risen from an average of {prior_avg:.0f}bpm "
+                        f"to {recent_avg:.0f}bpm over the last week."
+                    )
+
+        return findings
+
+    def watch_for_trends(self) -> None:
+        """Scheduler-driven (unlike watch_for_anomaly, which is webhook-
+        driven per reading). Multi-day patterns aren't acute events, so
+        findings are queued for the daily digest rather than firing
+        bus.alert() immediately per finding — see services/notifications.py
+        queue_digest()/flush_digest()."""
+        findings = self.detect_trends()
+        if not findings:
+            return
+        from services.notifications import queue_digest
+        for finding in findings:
+            queue_digest("HEALTH_TREND", finding)
 
 
 health_monitor = HealthMonitor()

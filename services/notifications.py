@@ -153,3 +153,38 @@ class SmartRouter:
 
 
 smart_router = SmartRouter()
+
+
+# ── Digest queue ───────────────────────────────────────────────────────────
+# For signal that's real but not acute — multi-day health trends, and
+# anything else non-urgent added later — firing bus.alert() the moment
+# each one's detected trains you to ignore notifications, which is exactly
+# the fatigue problem from this week's incident review. queue_digest()
+# holds items in memory; flush_digest() (called once/day by the scheduler,
+# services/scheduler.py's notification_digest_flush job) sends everything
+# queued as one batched notification and clears the queue. In-memory only,
+# same as behavioral_security's anomaly log — a restart between queue and
+# flush drops pending items, which is an acceptable trade for a personal
+# assistant (nothing here is safety-critical enough to need durability).
+_digest_queue: list[dict] = []
+
+
+def queue_digest(category: str, message: str):
+    _digest_queue.append({"category": category, "message": message, "ts": _dt.now().isoformat()})
+    log.info("Queued digest notification [%s]: %s", category, message)
+
+
+def flush_digest(title: str = "JARVIS Daily Digest"):
+    """Send everything queued via queue_digest() as one notification, then
+    clear the queue. No-op if empty — no 'nothing happened' pings.
+    Routed through SmartRouter at 'high' priority (reaches Pushover) since
+    a digest is already batched to once/day; there's no fatigue risk left
+    to guard against by also demoting it to a channel-limited priority."""
+    global _digest_queue
+    if not _digest_queue:
+        return
+    lines = [f"- [{item['category']}] {item['message']}" for item in _digest_queue]
+    body = "\n".join(lines)
+    count = len(_digest_queue)
+    _digest_queue = []
+    SmartRouter.route(body, priority="high", title=f"{title} ({count} item{'s' if count != 1 else ''})")
