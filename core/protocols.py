@@ -1995,10 +1995,13 @@ def run_protocol(number: int, params: dict | None = None) -> dict:
 
     try:
         if name == "coldfire":
-            passphrase = params.get("passphrase", "")
-            if not passphrase:
-                return {"error": "passphrase required for Protocol 6 (Coldfire)"}
-            result = coldfire(passphrase)
+            # Deliberately NOT calling coldfire() here. POST /stark/coldfire
+            # enforces a two-step Avengers confirmation (request a token,
+            # resubmit within 60s) before wiping — this generic dispatch
+            # must not offer a one-call path around that gate.
+            return {"error": "Protocol 6 (Coldfire) cannot be run via this endpoint. "
+                              "Use POST /stark/coldfire, which enforces the required "
+                              "Avengers double-confirmation."}
         elif name == "house_party":
             from services.house_party import house_party
             result = house_party.activate(params.get("task", ""))
@@ -2007,10 +2010,13 @@ def run_protocol(number: int, params: dict | None = None) -> dict:
         elif name == "endgame_snapshot":
             result = endgame_snapshot()
         elif name == "scatter":
-            passphrase = params.get("passphrase", "")
-            if not passphrase:
-                return {"error": "passphrase required for Protocol 17 (Scatter)"}
-            result = scatter_identity(passphrase)
+            # Deliberately NOT calling scatter_identity() here, same reasoning
+            # as Coldfire above: POST /stark/scatter enforces master-only auth
+            # plus a two-step Avengers confirmation before scattering identity.
+            # This generic dispatch must not offer a one-call path around that.
+            return {"error": "Protocol 17 (Scatter) cannot be run via this endpoint. "
+                              "Use POST /stark/scatter, which enforces the required "
+                              "master token and Avengers double-confirmation."}
         elif name == "sokovia":
             result = sokovia.check(params.get("action", ""), params.get("details", {}))
         elif name == "initiative":
