@@ -16,50 +16,91 @@ by the file's relative path string (e.g. "memory/short_term.json") — this
 preserves _load()/_save()'s exact (path -> list|dict) contract, so none of
 core/memory.py's other ~15 functions needed to change.
 
-Not independently verified against live Turso/libsql_client docs (no
-network access to check the exact client API from here) — every call is
-wrapped so a mismatch fails loudly in logs and falls back to local JSON
-files rather than crashing anything. Smoke-test once real credentials are
-in place; the error message will say exactly what's wrong if the client
-API differs from what's written here."""
+Talks to Turso's HTTP API directly (POST {url}/v2/pipeline) via `requests`
+instead of the `libsql_client` package. That package's HTTP transport calls
+the legacy v1/execute endpoint and reads response["result"] — once real
+credentials were in place, every single call failed with KeyError('result'),
+confirmed live: Turso's actual current API is v2/pipeline, and a successful
+execute response is shaped {"results": [{"type": "ok", "response":
+{"type": "execute", "result": {"cols": [...], "rows": [...]}}}]}, not a
+top-level "result" key at all. v2/pipeline is Turso's documented, stable
+HTTP interface (docs.turso.tech/sdk/http/reference) — talking to it
+directly removes both that mismatch and the extra asyncio-executor-thread
+machinery libsql_client's sync wrapper ran per client instance.
+
+Every call is still wrapped so any transport/shape mismatch fails loudly
+in logs and falls back to local JSON files rather than crashing anything."""
 import json
 import logging
 from datetime import datetime, timezone
+
+import requests
 
 from config.settings import TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
 
 log = logging.getLogger(__name__)
 
-_client = None
 _bootstrapped = False
+_TIMEOUT_SECONDS = 10
 
 
 def is_configured() -> bool:
     return bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)
 
 
-def _get_client():
-    global _client, _bootstrapped
-    if _client is None:
-        import libsql_client
-        # A libsql:// URL tells the client to use its WebSocket (Hrana)
-        # transport — Turso's server rejected that handshake outright (400
-        # on the upgrade, "Invalid response status") the one time this got
-        # smoke-tested, so force plain HTTPS instead. That's also the
-        # better fit here regardless: this store does occasional
-        # independent reads/writes, not a rapid sequence of queries that
-        # would benefit from a persistent streaming connection.
-        url = TURSO_DATABASE_URL.replace("libsql://", "https://", 1)
-        _client = libsql_client.create_client_sync(
-            url=url, auth_token=TURSO_AUTH_TOKEN,
-        )
+def _pipeline_url() -> str:
+    # Same libsql:// -> https:// normalization as before — Turso's
+    # WebSocket (Hrana) scheme, not needed for the plain HTTP pipeline API.
+    url = TURSO_DATABASE_URL.replace("libsql://", "https://", 1)
+    return url.rstrip("/") + "/v2/pipeline"
+
+
+def _arg(value) -> dict:
+    if value is None:
+        return {"type": "null"}
+    if isinstance(value, bool):
+        return {"type": "integer", "value": str(int(value))}
+    if isinstance(value, int):
+        return {"type": "integer", "value": str(value)}
+    if isinstance(value, float):
+        return {"type": "float", "value": value}
+    return {"type": "text", "value": str(value)}
+
+
+def _execute(sql: str, args: list) -> dict:
+    """POST one statement (+ an implicit connection close) to Turso's
+    v2/pipeline endpoint. Returns the execute step's "result" dict
+    ({"cols": [...], "rows": [...]}). Raises on any HTTP/transport error
+    or a non-"ok" pipeline result — every caller here catches broadly."""
+    payload = {
+        "requests": [
+            {"type": "execute", "stmt": {"sql": sql, "args": [_arg(a) for a in args]}},
+            {"type": "close"},
+        ]
+    }
+    resp = requests.post(
+        _pipeline_url(),
+        json=payload,
+        headers={"Authorization": f"Bearer {TURSO_AUTH_TOKEN}"},
+        timeout=_TIMEOUT_SECONDS,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    first = body["results"][0]
+    if first.get("type") != "ok":
+        raise RuntimeError(f"Turso pipeline error: {first}")
+    return first["response"]["result"]
+
+
+def _ensure_bootstrapped():
+    global _bootstrapped
     if not _bootstrapped:
-        _client.execute(
+        _execute(
             "CREATE TABLE IF NOT EXISTS memory_files ("
-            "path TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)"
+            "path TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            [],
         )
         _bootstrapped = True
-    return _client
 
 
 def get(key: str):
@@ -69,11 +110,12 @@ def get(key: str):
     if not is_configured():
         return None
     try:
-        client = _get_client()
-        rs = client.execute("SELECT data FROM memory_files WHERE path = ?", [key])
-        if not rs.rows:
+        _ensure_bootstrapped()
+        result = _execute("SELECT data FROM memory_files WHERE path = ?", [key])
+        rows = result.get("rows") or []
+        if not rows:
             return None
-        return json.loads(rs.rows[0][0])
+        return json.loads(rows[0][0]["value"])
     except Exception as e:
         log.error("Turso read failed for %s, falling back to local file: %s", key, e)
         return None
@@ -87,8 +129,8 @@ def put(key: str, value) -> bool:
     if not is_configured():
         return False
     try:
-        client = _get_client()
-        client.execute(
+        _ensure_bootstrapped()
+        _execute(
             "INSERT INTO memory_files (path, data, updated_at) VALUES (?, ?, ?) "
             "ON CONFLICT(path) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at",
             [key, json.dumps(value), datetime.now(timezone.utc).isoformat()],
