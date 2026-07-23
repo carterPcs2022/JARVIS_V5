@@ -530,6 +530,152 @@
     navigator.serviceWorker.register('/hud/sw.js').catch(() => {});
   }
 
+  // ── Stark Protocol 2FA — approve from phone ────────────────────────────────
+  // Lockdown/Coldfire/Scatter require passphrase + two-step confirm + iris
+  // (server/routes/protocols.py, server/routes/scatter.py). The iris leg
+  // previously only worked from desktop.html's camera capture — this file
+  // had no iris code at all, so completing the flow required being
+  // physically at the Mac. The actual biometric processing happens
+  // server-side on the Mac Bridge, not in the browser, so capturing from a
+  // phone's camera works identically — this closes that gap.
+
+  const PROTOCOL_ENDPOINTS = {
+    lockdown: '/stark/lockdown',
+    coldfire: '/stark/coldfire',
+    scatter:  '/stark/scatter',
+  };
+
+  async function captureIrisFrame() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,4,5,0.9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;';
+    const video = document.createElement('video');
+    video.autoplay = true; video.playsInline = true; video.muted = true;
+    video.style.cssText = 'width:min(440px,85vw);border:1px solid #5fd8ff;border-radius:4px;transform:scaleX(-1);';
+    video.srcObject = stream;
+    const label = document.createElement('div');
+    label.style.cssText = 'color:#5fd8ff;font-family:monospace;font-size:12px;letter-spacing:2px;text-align:center;';
+    backdrop.appendChild(video); backdrop.appendChild(label);
+    document.body.appendChild(backdrop);
+
+    try {
+      await new Promise((resolve, reject) => {
+        video.onloadedmetadata = resolve;
+        setTimeout(() => reject(new Error('camera_timeout')), 8000);
+      });
+      for (let i = 3; i >= 1; i--) {
+        label.textContent = `FRAME YOUR EYE — CAPTURING IN ${i}...`;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      label.textContent = 'CAPTURING...';
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      return await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    } finally {
+      stream.getTracks().forEach((t) => t.stop());
+      backdrop.remove();
+    }
+  }
+
+  async function verifyIrisForConfirmation() {
+    let blob;
+    try {
+      blob = await captureIrisFrame();
+    } catch (e) {
+      addBubble('system', 'Iris capture failed — camera access denied or timed out.');
+      return null;
+    }
+    const form = new FormData();
+    form.append('image', blob, 'verify.jpg');
+    form.append('profile', 'default');
+    try {
+      const r = await fetch(`${API}/stark/iris/verify`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}` },
+        body: form,
+      });
+      const data = await r.json();
+      if (!data.verified) {
+        addBubble('system', `Iris verification failed: ${data.error || 'no match'}.`);
+        return null;
+      }
+      return data.iris_confirm_token || null;
+    } catch (e) {
+      addBubble('system', 'Iris verification failed — request error.');
+      return null;
+    }
+  }
+
+  function openProtocolApprovalPanel() {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:20px;';
+    backdrop.innerHTML = `
+      <div style="background:#0a0f12;border:1px solid #2f5866;border-radius:6px;padding:20px;width:100%;max-width:360px;font-family:monospace;">
+        <div style="font-size:12px;letter-spacing:1px;color:#7fb0c4;margin-bottom:12px;">APPROVE STARK PROTOCOL REQUEST</div>
+        <select class="pa-protocol" style="width:100%;background:rgba(255,255,255,0.05);border:1px solid #2f5866;color:#5fd8ff;padding:8px;font-family:inherit;font-size:13px;border-radius:4px;box-sizing:border-box;margin-bottom:8px;">
+          <option value="lockdown">Suit Lockdown</option>
+          <option value="coldfire">Coldfire</option>
+          <option value="scatter">Scatter</option>
+        </select>
+        <input class="pa-passphrase" type="password" placeholder="Passphrase" autocomplete="off"
+               style="width:100%;background:rgba(255,255,255,0.05);border:1px solid #2f5866;color:#5fd8ff;padding:10px;font-family:inherit;font-size:14px;border-radius:4px;box-sizing:border-box;margin-bottom:8px;" />
+        <input class="pa-token" type="text" placeholder="confirm_token (from the Pushover alert)" autocomplete="off"
+               style="width:100%;background:rgba(255,255,255,0.05);border:1px solid #2f5866;color:#5fd8ff;padding:10px;font-family:inherit;font-size:14px;border-radius:4px;box-sizing:border-box;margin-bottom:8px;" />
+        <div class="pa-status" style="font-size:11px;color:#7fb0c4;margin-bottom:8px;min-height:14px;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button class="pa-cancel" style="padding:8px 16px;border:1px solid #2f5866;background:transparent;color:#7fb0c4;border-radius:4px;font-family:inherit;font-size:12px;">CANCEL</button>
+          <button class="pa-submit" style="padding:8px 16px;border:1px solid #5fd8ff;background:rgba(95,216,255,0.1);color:#5fd8ff;border-radius:4px;font-family:inherit;font-size:12px;">SCAN IRIS &amp; APPROVE</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+
+    const statusEl = backdrop.querySelector('.pa-status');
+    backdrop.querySelector('.pa-cancel').onclick = () => backdrop.remove();
+    backdrop.querySelector('.pa-submit').onclick = async () => {
+      const protocol   = backdrop.querySelector('.pa-protocol').value;
+      const passphrase = backdrop.querySelector('.pa-passphrase').value;
+      const confirmTok = backdrop.querySelector('.pa-token').value.trim();
+      if (!passphrase || !confirmTok) {
+        statusEl.textContent = 'Passphrase and confirm_token are both required.';
+        return;
+      }
+      statusEl.textContent = 'Scanning iris...';
+      const irisToken = await verifyIrisForConfirmation();
+      if (!irisToken) {
+        statusEl.textContent = 'Iris verification failed — not submitted.';
+        return;
+      }
+      statusEl.textContent = 'Iris verified — submitting...';
+      try {
+        const r = await fetch(`${API}${PROTOCOL_ENDPOINTS[protocol]}`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passphrase, confirm_token: confirmTok, iris_token: irisToken }),
+        });
+        const data = await r.json();
+        if (!r.ok) {
+          statusEl.textContent = `Rejected: ${data.detail || data.error || r.status}`;
+          return;
+        }
+        backdrop.remove();
+        addBubble('system', `${protocol} approved and executed.`);
+      } catch (e) {
+        statusEl.textContent = 'Request failed — network error.';
+      }
+    };
+  }
+
+  // Floating approve button — always available, independent of chat state.
+  (function addProtocolApprovalButton() {
+    const btn = document.createElement('button');
+    btn.textContent = '🔐';
+    btn.title = 'Approve a pending Stark Protocol request';
+    btn.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:500;width:44px;height:44px;border-radius:50%;border:1px solid #2f5866;background:#0a0f12;color:#5fd8ff;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    btn.onclick = openProtocolApprovalPanel;
+    document.body.appendChild(btn);
+  })();
+
   // ── Boot ───────────────────────────────────────────────────────────────────
   connect();
 })();
