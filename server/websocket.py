@@ -25,6 +25,15 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
         return True
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
+
+    ip = websocket.client.host if websocket.client else "unknown"
+    try:
+        from services.sentinel import is_blocked
+        if is_blocked(ip):
+            return False
+    except Exception:
+        pass
+
     token = websocket.query_params.get("token", "")
     ok = bool(token) and hmac.compare_digest(token, API_TOKEN)
     if not ok:
@@ -36,7 +45,6 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
         # unauthenticated access attempts against the chat pipeline.
         try:
             from utils.security import _record_failed_auth_safe
-            ip = websocket.client.host if websocket.client else "unknown"
             _record_failed_auth_safe(ip)
         except Exception:
             pass

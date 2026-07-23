@@ -26,6 +26,8 @@ def _is_rhodey(creds) -> bool:
 def verify_any_read_token(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """Accept master token, Pepper token, or Rhodey token."""
     from config.settings import API_TOKEN
+    from utils.security import _reject_if_blocked
+    _reject_if_blocked(request.client.host if request.client else "unknown")
     if not API_TOKEN:
         return "master"
     if creds:
@@ -39,6 +41,8 @@ def verify_any_read_token(request: Request, creds: HTTPAuthorizationCredentials 
 def verify_master_only(request: Request, creds: HTTPAuthorizationCredentials = Depends(bearer)):
     """Only master token."""
     from config.settings import API_TOKEN
+    from utils.security import _reject_if_blocked
+    _reject_if_blocked(request.client.host if request.client else "unknown")
     if not API_TOKEN:
         return True
     if creds and hmac.compare_digest(creds.credentials, API_TOKEN):

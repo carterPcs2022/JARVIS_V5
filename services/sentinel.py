@@ -13,6 +13,19 @@ _running = False
 _baseline: dict = {}
 _failed_logins: dict = defaultdict(list)
 
+# ── Failed-auth rate limiting / IP blocking ──────────────────────────────────
+# Proposed and scoped earlier this session, built now: 5 failed auths in a
+# 5-minute window (matches the existing BRUTE_FORCE threshold below) blocks
+# that IP for 15 minutes. Trusted IPs (is_trusted_ip — loopback, Render's
+# internal network, health checks) are exempt, same as the existing
+# BRUTE_FORCE logging, so this can never affect legitimate infra traffic.
+# The block is purely in-memory (resets on redeploy) and time-boxed — never
+# permanent, never something that needs manual unblocking if it's wrong.
+FAILURE_THRESHOLD = 5
+FAILURE_WINDOW     = 300   # seconds — 5 minutes
+BLOCK_DURATION      = 900  # seconds — 15 minutes
+_blocked_ips: dict = {}    # ip -> unblock timestamp
+
 def _hash(path: str) -> str | None:
     try:
         with open(path, "rb") as f:
@@ -171,10 +184,41 @@ def record_failed_auth(ip: str):
     if is_trusted_ip(ip):
         return
     now = time.time()
-    _failed_logins[ip] = [t for t in _failed_logins[ip] if now - t < 300]
+    _failed_logins[ip] = [t for t in _failed_logins[ip] if now - t < FAILURE_WINDOW]
     _failed_logins[ip].append(now)
-    if len(_failed_logins[ip]) >= 5:
-        _log_threat("BRUTE_FORCE", f"5+ failed auth from {ip}", "high")
+    if len(_failed_logins[ip]) >= FAILURE_THRESHOLD:
+        _log_threat("BRUTE_FORCE", f"{FAILURE_THRESHOLD}+ failed auth from {ip}", "high")
+        already_blocked = ip in _blocked_ips and _blocked_ips[ip] > now
+        _blocked_ips[ip] = now + BLOCK_DURATION
+        if not already_blocked:
+            # Only alert on the transition into a block, not on every
+            # subsequent rejected request while already blocked — that
+            # would spam a real Pushover critical() on every retry.
+            try:
+                from services.notifications import alert
+                alert("Brute-force block triggered",
+                      f"{ip} hit {FAILURE_THRESHOLD}+ failed auth attempts in "
+                      f"{FAILURE_WINDOW // 60} minutes — blocked for "
+                      f"{BLOCK_DURATION // 60} minutes.")
+            except Exception:
+                pass
+
+
+def is_blocked(ip: str) -> bool:
+    """Cheap check called before token comparison on every auth path (REST,
+    WebSocket, and the protocol Pepper/Rhodey/master tiers) — a blocked IP
+    gets rejected without ever reaching hmac.compare_digest, so continued
+    guessing during the block window can't even attempt a comparison."""
+    from utils.security import is_trusted_ip
+    if is_trusted_ip(ip):
+        return False
+    expiry = _blocked_ips.get(ip)
+    if expiry is None:
+        return False
+    if time.time() >= expiry:
+        del _blocked_ips[ip]
+        return False
+    return True
 
 def summary() -> dict:
     log = []

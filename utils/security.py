@@ -69,10 +69,31 @@ def verify_token(request: Request, creds: HTTPAuthorizationCredentials = Depends
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
 
+    ip = request.client.host if request.client else "unknown"
+    _reject_if_blocked(ip)
+
     if not creds or not hmac.compare_digest(creds.credentials, API_TOKEN):
-        _record_failed_auth_safe(request.client.host if request.client else "unknown")
+        _record_failed_auth_safe(ip)
         raise HTTPException(401, "Unauthorized — invalid token")
     return True
+
+
+def _reject_if_blocked(ip: str):
+    """Checked before the token comparison on every auth path (REST,
+    WebSocket, Pepper/Rhodey/master tiers) — an IP that's tripped the
+    brute-force threshold (services.sentinel.is_blocked) gets rejected
+    immediately, without ever reaching hmac.compare_digest. Wrapped in
+    try/except like _record_failed_auth_safe below — a sentinel hiccup
+    must never be able to turn a normal auth check into a 500, or worse,
+    silently let blocking stop working."""
+    try:
+        from services.sentinel import is_blocked
+        if is_blocked(ip):
+            raise HTTPException(403, "Too many failed attempts — temporarily blocked")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
 
 def _record_failed_auth_safe(ip: str):
