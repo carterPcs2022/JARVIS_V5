@@ -485,11 +485,24 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     _candidates = ["groq"] if IS_HEADLESS_CLOUD else ["groq", "ollama"]
     if CEREBRAS_API_KEY:
         # Cerebras is a separate free account/quota from Groq — normally
-        # tried last among the free options (lowest RPM of the three). But
-        # if server/api.py's 30s post-boot probe just caught Groq
-        # rate-limited, jump Cerebras to the front so the user's first live
-        # message doesn't have to pay to rediscover that same 429 itself.
-        if time.time() < state.get("groq_prefer_alt_until", 0):
+        # tried last among the free options, since its real published free
+        # tier (5 RPM / 30K TPM / 1M TPD — see core/llm/cerebras.py) is far
+        # tighter than Groq's, so it can't absorb Groq's full volume by
+        # default. But all 5 Groq-hosted tiers (instant/standard/reasoning/
+        # research/coder) previously shared one point of failure — a Groq
+        # outage took out everything until the per-request reactive
+        # fallback below kicked in, and every request paid that failed
+        # attempt first. The "reasoning" tier specifically is the right
+        # one to proactively default to Cerebras instead: it's real-world
+        # low-volume (only reached via explicit trigger phrases like
+        # "should i"/"debate"/"calculate", not the general chat catchall
+        # _DEFAULT_TIER="standard" gets), so it won't blow through
+        # Cerebras's 5 RPM cap, and Cerebras's configured model
+        # (CEREBRAS_MODEL, default gpt-oss-120b) is itself a genuine
+        # reasoning-oriented model, not a mismatch for this tier. Every
+        # other tier keeps the existing Groq-first, Cerebras-as-fallback
+        # behavior unchanged.
+        if groq_tier == "reasoning" or time.time() < state.get("groq_prefer_alt_until", 0):
             _candidates.insert(0, "cerebras")
         else:
             _candidates.append("cerebras")
