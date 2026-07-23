@@ -17,6 +17,12 @@ def _pushover(title: str, message: str, priority: Priority):
     user  = os.getenv("PUSHOVER_USER_KEY", "")
     token = os.getenv("PUSHOVER_API_TOKEN", "")
     if not user or not token:
+        # Previously a silent no-op — a HIGH/CRITICAL notification (e.g. a
+        # Stark Protocol 2FA request) could vanish with zero trace anywhere
+        # if these env vars were ever unset, which is exactly what happened
+        # once during this session. Now at least visible in logs.
+        log.warning("Pushover not configured (PUSHOVER_USER_KEY/PUSHOVER_API_TOKEN "
+                    "missing) — skipped notification: %s", title)
         return
     prio_map = {Priority.INFO: -1, Priority.WARNING: 0, Priority.HIGH: 1, Priority.CRITICAL: 2}
     data = urllib.parse.urlencode({
