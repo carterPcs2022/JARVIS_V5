@@ -671,7 +671,11 @@
     const btn = document.createElement('button');
     btn.textContent = '🔐';
     btn.title = 'Approve a pending Stark Protocol request';
-    btn.style.cssText = 'position:fixed;bottom:80px;right:16px;z-index:500;width:44px;height:44px;border-radius:50%;border:1px solid #2f5866;background:#0a0f12;color:#5fd8ff;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
+    // bottom:80px collided almost exactly with the existing voice mic
+    // button in the input row — confirmed live via a real click test that
+    // hit the wrong element. 170px clears the whole toolbar+input area,
+    // sitting just above it instead.
+    btn.style.cssText = 'position:fixed;bottom:170px;right:16px;z-index:500;width:44px;height:44px;border-radius:50%;border:1px solid #2f5866;background:#0a0f12;color:#5fd8ff;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,0.4);';
     btn.onclick = openProtocolApprovalPanel;
     document.body.appendChild(btn);
   })();
