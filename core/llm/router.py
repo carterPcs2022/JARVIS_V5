@@ -313,6 +313,43 @@ def _cache_key(messages: list) -> str:
     return hashlib.md5(json.dumps(messages, sort_keys=True).encode()).hexdigest()
 
 
+def _second_opinion_check(query: str, primary_answer: str) -> str:
+    """Item D of the reasoning-quality investigation: a cheap cross-check
+    for genuinely high-stakes decisions, deliberately narrow — only called
+    for the opus tier (see _call_anthropic_tier below), never routine chat,
+    never sonnet/fable. Fires one lightweight Sonnet call asking it to
+    JUDGE the primary answer rather than regenerate the question from
+    scratch — cheaper and more targeted than a full independent second
+    answer. Returns a short caveat to append if it substantively
+    disagrees, or "" if it agrees or the check itself fails — this must
+    never block, delay past its own call, or replace the primary answer;
+    a failure here is silent and non-fatal by design."""
+    try:
+        from core.llm.anthropic_client import call_anthropic
+        from config.settings import ANTHROPIC_MODEL_SONNET
+        critique_prompt = (
+            f"Someone asked: {query}\n\n"
+            f"Another AI answered: {primary_answer}\n\n"
+            f'Do you substantively agree with this answer? Reply with exactly '
+            f'one line: either "AGREE" or "DISAGREE: <one sentence why, and '
+            f'what you would say instead>". Nothing else — no preamble, no '
+            f"restating the question."
+        )
+        result = call_anthropic(
+            [{"role": "user", "content": critique_prompt}],
+            system="You are a careful second reviewer checking another AI's answer to a high-stakes question. Be direct and brief.",
+            model=ANTHROPIC_MODEL_SONNET,
+            max_tokens=200,
+        )
+        if not result or not result.get("content"):
+            return ""
+        verdict = result["content"].strip()
+        return verdict if verdict.upper().startswith("DISAGREE") else ""
+    except Exception as e:
+        print(f"[LLM Router] Second-opinion check failed (non-fatal): {e}")
+        return ""
+
+
 def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query: str,
                          temperature: float | None = None) -> dict | None:
     """Dispatch a chat() call to one of the Anthropic tiers. Enriches
@@ -392,7 +429,13 @@ def _call_anthropic_tier(tier: str, messages: list[dict], max_tokens: int, query
     except Exception:
         pass
 
-    return {"content": result["content"], "model": result["model"], "provider": "anthropic",
+    content = result["content"]
+    if tier == "opus":
+        disagreement = _second_opinion_check(query, content)
+        if disagreement:
+            content = f"{content}\n\n(Second opinion flagged disagreement — {disagreement})"
+
+    return {"content": content, "model": result["model"], "provider": "anthropic",
             "tier": tier, "thinking_used": result.get("thinking_used", False)}
 
 
