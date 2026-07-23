@@ -40,7 +40,7 @@ STALE_AFTER_SECONDS = 600  # p25_snap_monitor alone runs every 60s, so a
                            # healthy scheduler heartbeats well under this
 
 
-@router.get("/stark/scheduler/heartbeat")
+@router.api_route("/stark/scheduler/heartbeat", methods=["GET", "HEAD"])
 def scheduler_heartbeat():
     from datetime import datetime
     from fastapi.responses import JSONResponse
