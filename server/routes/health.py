@@ -25,3 +25,41 @@ def health():
         "uptime_seconds": int(time.time() - BOOT_TIME),
         "state": state.snapshot(),
     }
+
+
+# Deliberately unauthenticated, same as /health above — an external
+# watchdog (UptimeRobot etc.) can't carry a bearer token, and there's
+# nothing sensitive in the response (just a timestamp and a job id).
+#
+# This exists because /health only proves uvicorn is answering requests —
+# it stayed green throughout the 2026-07-16 incident where a NameError
+# during job registration silently killed services.scheduler's entire
+# BackgroundScheduler on every boot. That failure mode needs its own
+# check: is the scheduler itself actually still cycling through jobs.
+STALE_AFTER_SECONDS = 600  # p25_snap_monitor alone runs every 60s, so a
+                           # healthy scheduler heartbeats well under this
+
+
+@router.get("/stark/scheduler/heartbeat")
+def scheduler_heartbeat():
+    from datetime import datetime
+    from fastapi.responses import JSONResponse
+    from services.scheduler import last_heartbeat
+
+    hb = last_heartbeat()
+    ts = hb.get("ts")
+
+    if ts is None:
+        return JSONResponse({"healthy": False, "reason": "no job has run yet"}, status_code=503)
+
+    age_seconds = (datetime.now() - datetime.fromisoformat(ts)).total_seconds()
+    healthy = age_seconds < STALE_AFTER_SECONDS
+
+    body = {
+        "healthy": healthy,
+        "last_job_id": hb.get("job_id"),
+        "last_job_outcome": hb.get("outcome"),
+        "last_job_at": ts,
+        "age_seconds": round(age_seconds, 1),
+    }
+    return JSONResponse(body, status_code=200 if healthy else 503)

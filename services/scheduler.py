@@ -6,6 +6,26 @@ log = logging.getLogger(__name__)
 
 _scheduler = None
 
+# Last time any scheduled job actually finished executing (success or
+# error — either still proves the scheduler itself is alive and cycling
+# through jobs, which is the only thing an external watchdog needs to
+# know). Backs GET /stark/scheduler/heartbeat (server/routes/health.py) —
+# unlike /health, which only proves uvicorn is answering requests and
+# stayed green throughout the 2026-07-16 incident where a NameError during
+# job registration silently killed the entire scheduler on every boot.
+_last_job_event: dict = {"ts": None, "job_id": None, "outcome": None}
+
+
+def _on_job_event(event):
+    _last_job_event["ts"] = datetime.now().isoformat()
+    _last_job_event["job_id"] = event.job_id
+    _last_job_event["outcome"] = "error" if getattr(event, "exception", None) else "success"
+
+
+def last_heartbeat() -> dict:
+    return dict(_last_job_event)
+
+
 
 def _email_check():
     try:
@@ -412,6 +432,10 @@ def start():
         # is what an unprompted "morning" message showing up in the middle
         # of the night traced back to).
         _scheduler = BackgroundScheduler(daemon=True, timezone=USER_TIMEZONE)
+
+        from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
+        _scheduler.add_listener(_on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+
         _scheduler.add_job(_email_check,  "interval", minutes=15, id="email_check")
         _scheduler.add_job(_system_check, "interval", minutes=5,  id="system_check")
         _scheduler.add_job(_mac_bridge_check, "interval", minutes=30, id="mac_bridge_check")

@@ -20,22 +20,22 @@ class HealthMonitor:
     """Monitors and analyzes personal health metrics."""
 
     def _load_data(self) -> list:
-        """Load health data from JSON file."""
-        if not HEALTH_DATA_FILE.exists():
-            return []
-        try:
-            with open(HEALTH_DATA_FILE, "r") as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else []
-        except (json.JSONDecodeError, OSError) as e:
-            logger.error(f"Failed to load health data: {e}")
-            return []
+        """Load health data — Turso-mirrored via core.memory._load(), same
+        as every other memory category. Previously a plain JSON file with
+        no durability path at all: not Turso-backed like core/memory.py's
+        conversation/note stores, and not covered by the manual
+        /stark/backup snapshot either — a Render redeploy (ephemeral disk,
+        no persistent volume on this service) could silently wipe the
+        entire health history a multi-day trend check depends on."""
+        from core.memory import _load
+        data = _load(HEALTH_DATA_FILE)
+        return data if isinstance(data, list) else []
 
     def _save_data(self, data: list) -> None:
-        """Save health data list to JSON file."""
-        HEALTH_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(HEALTH_DATA_FILE, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+        """Save health data — see _load_data()'s note on why this goes
+        through core.memory._save() instead of a plain json.dump()."""
+        from core.memory import _save
+        _save(HEALTH_DATA_FILE, data)
 
     def get_latest_health(self) -> dict:
         """Return the most recent health snapshot."""
