@@ -41,7 +41,14 @@ from config.settings import TURSO_DATABASE_URL, TURSO_AUTH_TOKEN
 log = logging.getLogger(__name__)
 
 _bootstrapped = False
-_TIMEOUT_SECONDS = 10
+# Render's own health check only waits 5s — if a caller of get()/put() ever
+# runs on a path that isn't offloaded off the main thread, a slow Turso
+# response could stall long enough to fail that check (confirmed live: a
+# real 10s read timeout happened during tonight's redeploys). Kept well
+# under 5s so a slow/unreachable Turso always fails fast and falls back to
+# the local file, same "fail fast" pattern as core/llm/router.py's Groq
+# rate-limit handling.
+_TIMEOUT_SECONDS = 3
 
 
 def is_configured() -> bool:
