@@ -3,7 +3,7 @@ core/context.py — JARVIS context assembler.
 Pulls short-term memory, long-term recall, web search, and personality
 into a single coherent context string for any LLM call.
 """
-from core.memory import get_context_string, recall_as_context
+from core.memory import get_context_string, recall_as_context, facts_as_context, episodes_as_context
 from core.personality import build_system_prompt
 from config.settings import JARVIS_PERSONALITY
 
@@ -75,6 +75,13 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
     # Short-term conversation history — always included, highest priority
     short = get_context_string(n=8)
 
+    # Known facts (semantic memory) — item C of the reasoning-quality
+    # investigation. Real data already accumulates here (core.orchestrator,
+    # core.stark_intelligence, services.reading_memory all write facts) but
+    # it was never read back into reasoning before this. Short and
+    # high-value, so it gets priority right after short-term.
+    facts = facts_as_context(user_input)
+
     # Long-term memory recall
     ltm = recall_as_context(user_input)
 
@@ -83,19 +90,33 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
     if include_web:
         web = _get_web_context(user_input, deep=deep)
 
+    # Notable past episodes (episodic memory) — same gap as facts above
+    # (core.brain_v2 already writes these — Mayday triggers, protocol-
+    # refusal events — with nowhere for it to feed back in). Lowest budget
+    # priority of the five: supplementary narrative context, not the kind
+    # of thing that should push out a real web result or a known fact.
+    episodes = episodes_as_context(user_input)
+
     def _tok_est(s: str) -> int:
         return int(len(s.split()) * 1.3)  # rough words-to-tokens estimate
 
-    # Reserve budget in priority order (short-term first) but assemble the
-    # final string in the original [ltm, web, short] order — short-term
-    # stays closest to the actual user question in the final prompt, which
-    # tends to help recency-weighted attention.
+    # Reserve budget in priority order (short-term, facts, web, ltm,
+    # episodes) but assemble the final string in the original relative
+    # ordering (facts/episodes framed as supporting knowledge, short-term
+    # stays closest to the actual user question) — short-term stays last,
+    # which tends to help recency-weighted attention.
     budget = MAX_CONTEXT_TOKENS
-    include = {"short": "", "web": "", "ltm": ""}
+    include = {"short": "", "facts": "", "web": "", "ltm": "", "episodes": ""}
 
     if short:
         include["short"] = short
         budget -= _tok_est(short)
+
+    if facts and budget > 0:
+        facts_trimmed = _trim_to_budget(facts, budget)
+        if facts_trimmed:
+            include["facts"] = facts_trimmed
+            budget -= _tok_est(facts_trimmed)
 
     if web and budget > 0:
         web_trimmed = _trim_to_budget(web, budget)
@@ -107,8 +128,14 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
         ltm_trimmed = _trim_to_budget(ltm, budget)
         if ltm_trimmed:
             include["ltm"] = ltm_trimmed
+            budget -= _tok_est(ltm_trimmed)
 
-    parts = [include["ltm"], include["web"], include["short"]]
+    if episodes and budget > 0:
+        episodes_trimmed = _trim_to_budget(episodes, budget)
+        if episodes_trimmed:
+            include["episodes"] = episodes_trimmed
+
+    parts = [include["facts"], include["ltm"], include["web"], include["episodes"], include["short"]]
     return "\n\n".join(p for p in parts if p)
 
 

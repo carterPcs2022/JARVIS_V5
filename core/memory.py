@@ -407,6 +407,25 @@ def recall_episodes(query: str, k: int = 3) -> list[dict]:
     return [ep for score, ep in scored[:k] if score > 0]
 
 
+def episodes_as_context(query: str) -> str:
+    """Item C of the reasoning-quality investigation: episodic memory was
+    already actively written to (core.brain_v2, e.g. Mayday triggers,
+    protocol-activation refusals) but never read back anywhere — the data
+    accumulated with no path back into reasoning. Wired in here, same
+    pattern as recall_as_context() below for long-term conversation
+    recall. Deliberately NOT wiring in procedural/emotional/prospective
+    alongside this — none of the three have any real write path anywhere
+    in the codebase (confirmed by grep), so there's nothing to retrieve;
+    wiring in reads of permanently-empty stores would add zero value."""
+    hits = recall_episodes(query)
+    if not hits:
+        return ""
+    lines = ["[Notable past events:]"]
+    for e in hits:
+        lines.append(f"  [{e['ts'][:10]}] {e['event']}")
+    return "\n".join(lines)
+
+
 # ── 3. Semantic Memory — discrete facts about the world ──────────────────────
 
 def extract_facts(conversation_turn: str) -> list[str]:
@@ -479,6 +498,22 @@ def recall_facts(query: str, k: int = 5) -> list[dict]:
     ]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [f for score, f in scored[:k] if score > 0]
+
+
+def facts_as_context(query: str) -> str:
+    """Item C of the reasoning-quality investigation: semantic facts were
+    already actively written to (core.orchestrator, core.stark_intelligence,
+    services.reading_memory) but never read back into reasoning anywhere —
+    same "built but unwired" gap as episodic memory above. These are
+    typically short, high signal-to-token-cost, so worth including even
+    under a tight budget."""
+    hits = recall_facts(query)
+    if not hits:
+        return ""
+    lines = ["[Known facts:]"]
+    for f in hits:
+        lines.append(f"  - {f['fact']}")
+    return "\n".join(lines)
 
 
 def _contradicts(new_fact: str, old_fact: str) -> bool:
