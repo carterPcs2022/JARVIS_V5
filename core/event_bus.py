@@ -108,6 +108,19 @@ class EventBus:
             except Exception:
                 pass
 
+            # Independent second channel — Gmail API via a completely
+            # different account/provider than Pushover, so a Pushover-side
+            # failure (trial expiry, account issue, Pushover itself being
+            # down) can't take this one down with it. Still runs inside
+            # this same JARVIS process, though — if the whole service is
+            # down, neither channel fires; this covers Pushover-specific
+            # failure, not JARVIS-process-down.
+            try:
+                from services.alert_email import send_alert_email
+                send_alert_email(severity, category, message)
+            except Exception:
+                pass
+
         # Speak critical and high alerts immediately
         if severity in ("critical", "high"):
             try:

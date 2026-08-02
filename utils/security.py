@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from collections import defaultdict
 import time
-from config.settings import API_TOKEN, ALLOWED_ORIGINS, ENVIRONMENT
+from config.settings import API_TOKEN, ALLOWED_ORIGINS, ENVIRONMENT, PUBLIC_URL, TWILIO_AUTH_TOKEN
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -136,6 +136,42 @@ def _reject_if_blocked(ip: str):
         raise
     except Exception:
         pass
+
+
+def _public_request_url(request: Request) -> str:
+    """Reconstruct the externally-visible URL a signer (Twilio, GitHub)
+    actually sent its request to. Render terminates TLS at its edge and
+    forwards internally over plain http, so request.url reports the wrong
+    scheme/host unless we honor X-Forwarded-* — same problem PUBLIC_URL
+    already exists to solve for outbound TwiML action URLs in
+    services/phone.py, so prefer it when it's actually configured."""
+    if PUBLIC_URL and "localhost" not in PUBLIC_URL:
+        base = PUBLIC_URL.rstrip("/")
+    else:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+        base = f"{proto}://{host}"
+    query = f"?{request.url.query}" if request.url.query else ""
+    return f"{base}{request.url.path}{query}"
+
+
+def verify_twilio_signature(request: Request, form: dict):
+    """Twilio's own documented scheme: HMAC-SHA1 (via twilio's
+    RequestValidator) over the exact request URL + sorted POST params,
+    compared against X-Twilio-Signature. Fails closed — if
+    TWILIO_AUTH_TOKEN isn't set, every request is rejected rather than
+    silently accepted, same convention as every other secret-gated check
+    in this file (unset secret = the gate stays shut, not open)."""
+    if not TWILIO_AUTH_TOKEN:
+        raise HTTPException(403, "SMS webhook not configured")
+    signature = request.headers.get("x-twilio-signature", "")
+    if not signature:
+        raise HTTPException(403, "Missing X-Twilio-Signature")
+    from twilio.request_validator import RequestValidator
+    validator = RequestValidator(TWILIO_AUTH_TOKEN)
+    url = _public_request_url(request)
+    if not validator.validate(url, form, signature):
+        raise HTTPException(403, "Invalid Twilio signature")
 
 
 def _record_failed_auth_safe(ip: str):

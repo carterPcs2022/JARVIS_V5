@@ -499,6 +499,12 @@ MY_PHONE_NUMBER         = os.getenv("MY_PHONE_NUMBER", "")
 DISCORD_BOT_TOKEN       = os.getenv("DISCORD_BOT_TOKEN", "")
 DISCORD_CHANNEL_ID      = int(os.getenv("DISCORD_CHANNEL_ID", "0") or "0")
 
+# ── Inbound webhooks (services/webhooks.py) ───────────────────────────────────
+# Separate from GITHUB_TOKEN (that's a PAT for outbound API/git calls) — this
+# is the shared secret GitHub signs *incoming* webhook deliveries with.
+GITHUB_WEBHOOK_SECRET   = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
 # ── Language ──────────────────────────────────────────────────────────────────
 JARVIS_LANGUAGE = os.getenv("JARVIS_LANGUAGE", "auto")
 DEEPL_API_KEY   = os.getenv("DEEPL_API_KEY", "")

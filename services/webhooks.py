@@ -1,6 +1,82 @@
-"""services/webhooks.py — Universal webhook receiver. GitHub, Stripe, IFTTT,
-Zapier, or anything else that can POST JSON."""
+"""services/webhooks.py — Webhook receiver for GitHub and Stripe.
+
+Every source that reaches WebhookManager.process() is verified against that
+service's own documented signing scheme before this module ever sees the
+payload (see verify_webhook_source, called from server/routes/final_features.py
+before the request body is parsed). Sources with no registered handler AND no
+known signing scheme (the old "IFTTT, Zapier, or anything else" catch-all)
+are rejected at the route with a 404 — that catch-all used to hand any
+anonymous POST body straight to custom_handler(), which fed it into
+brain.process_dict() with zero auth. There was no evidence any such
+integration was actually wired up (no IFTTT/Zapier config anywhere in this
+codebase), so closing it costs nothing real and removes a live
+prompt-injection surface."""
+import hashlib
+import hmac
+import time
 from datetime import datetime
+
+from fastapi import HTTPException
+
+
+def verify_webhook_source(source: str, request, raw_body: bytes):
+    """Raise HTTPException if `source` isn't github/stripe, or the request's
+    signature doesn't verify. Fails closed: an unset secret rejects every
+    request for that source rather than accepting anything, same convention
+    as verify_twilio_signature in utils/security.py."""
+    if source == "github":
+        from config.settings import GITHUB_WEBHOOK_SECRET
+        _verify_github_signature(raw_body, request.headers.get("x-hub-signature-256", ""), GITHUB_WEBHOOK_SECRET)
+    elif source == "stripe":
+        from config.settings import STRIPE_WEBHOOK_SECRET
+        _verify_stripe_signature(raw_body, request.headers.get("stripe-signature", ""), STRIPE_WEBHOOK_SECRET)
+    else:
+        raise HTTPException(404, f"Unknown webhook source: {source}")
+
+
+def _verify_github_signature(raw_body: bytes, signature_header: str, secret: str):
+    """GitHub's documented scheme: X-Hub-Signature-256 is 'sha256=' + the
+    hex HMAC-SHA256 of the raw request body, keyed with the webhook secret
+    configured in the repo's Settings -> Webhooks."""
+    if not secret:
+        raise HTTPException(403, "GitHub webhook not configured")
+    if not signature_header or not signature_header.startswith("sha256="):
+        raise HTTPException(403, "Missing X-Hub-Signature-256")
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature_header):
+        raise HTTPException(403, "Invalid GitHub signature")
+
+
+def _verify_stripe_signature(raw_body: bytes, signature_header: str, secret: str, tolerance_seconds: int = 300):
+    """Stripe's documented scheme (https://stripe.com/docs/webhooks/signatures):
+    Stripe-Signature is 't=<timestamp>,v1=<hex hmac>[,v1=<hex hmac>...]'. The
+    signed payload is '<timestamp>.<raw body>', HMAC-SHA256 keyed with the
+    endpoint's signing secret. Implemented directly against that spec rather
+    than the `stripe` package, which isn't a dependency of this project and
+    there's currently no evidence Stripe is actually connected (no
+    STRIPE_* value set anywhere) — this is Stripe's own published algorithm,
+    not a custom scheme. Timestamp tolerance rejects replayed old deliveries."""
+    if not secret:
+        raise HTTPException(403, "Stripe webhook not configured")
+    if not signature_header:
+        raise HTTPException(403, "Missing Stripe-Signature")
+
+    parts = dict(p.split("=", 1) for p in signature_header.split(",") if "=" in p)
+    timestamp = parts.get("t")
+    v1_sigs = [p.split("=", 1)[1] for p in signature_header.split(",") if p.startswith("v1=")]
+    if not timestamp or not v1_sigs:
+        raise HTTPException(403, "Malformed Stripe-Signature")
+
+    try:
+        if abs(time.time() - int(timestamp)) > tolerance_seconds:
+            raise HTTPException(403, "Stripe signature timestamp outside tolerance")
+    except ValueError:
+        raise HTTPException(403, "Malformed Stripe-Signature timestamp")
+
+    signed_payload = f"{timestamp}.".encode() + raw_body
+    expected = hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
+    if not any(hmac.compare_digest(expected, sig) for sig in v1_sigs):
+        raise HTTPException(403, "Invalid Stripe signature")
 
 
 def github_handler(payload: dict) -> dict:

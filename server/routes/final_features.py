@@ -10,12 +10,17 @@ router = APIRouter(prefix="/stark", tags=["final-features"])
 protected = APIRouter(prefix="/stark", tags=["final-features"], dependencies=[Depends(verify_token)])
 
 
-# ── Webhooks (source can be any external service, no auth — services sign their own payloads) ──
+# ── Webhooks (github/stripe only; each verified against its own signing
+#    scheme in verify_webhook_source before the body is parsed — see
+#    services/webhooks.py) ──────────────────────────────────────────────────
 
 @router.post("/webhook/{source}")
 async def receive_webhook(source: str, request: Request):
-    payload = await request.json()
-    from services.webhooks import WebhookManager
+    import json
+    from services.webhooks import WebhookManager, verify_webhook_source
+    raw_body = await request.body()
+    verify_webhook_source(source, request, raw_body)
+    payload = json.loads(raw_body) if raw_body else {}
     return WebhookManager.process(source, payload)
 
 
@@ -25,12 +30,15 @@ def webhook_history():
     return WebhookManager.history()
 
 
-# ── SMS via Twilio (Twilio signs its own requests; no bearer token) ─────────────
+# ── SMS via Twilio (X-Twilio-Signature verified against TWILIO_AUTH_TOKEN;
+#    no bearer token, since Twilio can't send one — see verify_twilio_signature) ──
 
 @router.post("/sms/incoming")
 async def sms_incoming(request: Request):
     from services.messaging import handle_incoming_sms, send_sms
+    from utils.security import verify_twilio_signature
     form = await request.form()
+    verify_twilio_signature(request, dict(form))
     from_number = form.get("From", "")
     body = form.get("Body", "")
     reply = handle_incoming_sms(from_number, body)
