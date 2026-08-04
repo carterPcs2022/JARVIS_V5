@@ -498,12 +498,14 @@ TWILIO_PHONE            = os.getenv("TWILIO_PHONE", "")
 MY_PHONE_NUMBER         = os.getenv("MY_PHONE_NUMBER", "")
 DISCORD_BOT_TOKEN       = os.getenv("DISCORD_BOT_TOKEN", "")
 DISCORD_CHANNEL_ID      = int(os.getenv("DISCORD_CHANNEL_ID", "0") or "0")
-
-# ── Inbound webhooks (services/webhooks.py) ───────────────────────────────────
-# Separate from GITHUB_TOKEN (that's a PAT for outbound API/git calls) — this
-# is the shared secret GitHub signs *incoming* webhook deliveries with.
-GITHUB_WEBHOOK_SECRET   = os.getenv("GITHUB_WEBHOOK_SECRET", "")
-STRIPE_WEBHOOK_SECRET   = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Mirrors TELEGRAM_AUTHORIZED_IDS above: without this, anyone who can type
+# "JARVIS ..." in the configured channel gets a full brain.process_dict()
+# response — same trust level as a signed-in owner. Discord user IDs (not
+# usernames — right-click a user with Developer Mode on -> Copy User ID).
+# Empty means "not opted into this allowlist" (matches every other optional
+# gate in this file), so an owner who hasn't set it yet isn't locked out —
+# but it should be set before DISCORD_BOT_TOKEN goes live in a shared server.
+DISCORD_AUTHORIZED_IDS  = [i.strip() for i in os.getenv("DISCORD_AUTHORIZED_IDS", "").split(",") if i.strip()]
 
 # ── Language ──────────────────────────────────────────────────────────────────
 JARVIS_LANGUAGE = os.getenv("JARVIS_LANGUAGE", "auto")
