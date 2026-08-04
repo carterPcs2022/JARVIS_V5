@@ -1616,8 +1616,24 @@ class Brain:
         # 5 distinct tiers, so that flag could flip on an unrelated
         # model's success or failure. Ollama has no such gap: it only
         # ever calls one configured model, so its flat flag is accurate.
+        #
+        # This used to gate on Groq + Ollama alone, which is stale relative
+        # to core/llm/router.py's actual fallback chain: Cerebras and
+        # Anthropic (sonnet/opus/fable) are real, working tiers the router
+        # already tries (see router.chat()'s Cerebras block and its
+        # "Groq/Ollama exhausted — trying Anthropic as last resort" path),
+        # but core/state.py never tracked their availability. A Groq rate
+        # limit with Ollama offline (the normal Render state — Ollama is
+        # local-only) was enough to trip Friday Protocol even while
+        # Cerebras was answering every request fine in the same log window.
+        # Only declare "no LLM reachable" when neither fallback key is even
+        # configured — if either is, let the real pipeline (which tries
+        # every tier, not just two) make the call instead of guessing ahead
+        # of it.
         from core.state import state as _state
-        if not _state.any_model_available("groq") and not _state.get("ollama_available"):
+        from config.settings import CEREBRAS_API_KEY, ANTHROPIC_API_KEY
+        if (not _state.any_model_available("groq") and not _state.get("ollama_available")
+                and not CEREBRAS_API_KEY and not ANTHROPIC_API_KEY):
             from core.friday_fallback import respond as friday_respond
             r = friday_respond(user_input)
             return Result(
