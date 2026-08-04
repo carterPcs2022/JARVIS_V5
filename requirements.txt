@@ -25,6 +25,10 @@ argon2-cffi>=23.1.0
 twilio>=9.0.0
 prometheus-client>=0.20.0
 
+# Messaging (optional — services/messaging.py's bots no-op at runtime if
+# their token env var is unset)
+discord.py>=2.4.0
+
 # Scheduling
 APScheduler>=3.10.0
 
@@ -67,3 +71,4 @@ tzdata>=2024.1
 # services/investment.py)
 yfinance>=0.2.37
 pycoingecko>=3.1.0
+
