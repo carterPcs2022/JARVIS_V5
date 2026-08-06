@@ -4,6 +4,7 @@ Each integration is fully optional: if the relevant credentials aren't set in
 .env, that channel simply doesn't start. All three route through the same
 brain.process_dict() pipeline JARVIS already uses everywhere else.
 """
+import asyncio
 import os
 from config.settings import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_AUTHORIZED_IDS,
@@ -47,14 +48,19 @@ class TelegramBot:
 
         text = update.message.text
         from core.brain_v2 import brain
-        result = brain.process_dict(text)
+        # Runs in a worker thread — handle_message executes on the same
+        # asyncio loop the whole Application (polling, other chats' updates)
+        # runs on, and process_dict() is a blocking call (LLM round-trip +
+        # memory/DB work) that would otherwise stall every other Telegram
+        # update until this one finishes.
+        result = await asyncio.to_thread(brain.process_dict, text)
         response = result["response"]
 
         await update.message.reply_text(response)
 
         try:
             from services.elevenlabs_voice import generate_for_network
-            audio_path = generate_for_network(response)
+            audio_path = await asyncio.to_thread(generate_for_network, response)
             if audio_path and os.path.exists(audio_path):
                 with open(audio_path, "rb") as f:
                     await update.message.reply_voice(f)
@@ -189,7 +195,13 @@ class JarvisDiscordBot:
                 return
             await interaction.response.defer()  # avoids the 3s interaction timeout
             from core.brain_v2 import brain
-            result = brain.process_dict(message)
+            # Off the gateway's event loop — process_dict() is a blocking
+            # LLM/DB call, and this is the same loop that carries Discord's
+            # heartbeat and every other concurrent interaction. Blocking it
+            # here is what made the bot feel slow/laggy under any real load:
+            # a second /ask (or the heartbeat itself) had to wait in line
+            # behind this one instead of running concurrently.
+            result = await asyncio.to_thread(brain.process_dict, message)
             response = result["response"]
             # Discord hard-caps a single message at 2000 chars — brain
             # responses (status dumps, long reasoning) can exceed that, and

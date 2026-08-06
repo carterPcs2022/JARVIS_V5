@@ -10,6 +10,7 @@ POST /stark/glasses/text     <- text fallback, no audio upload (auth required)
 GET  /stark/glasses/audio    <- serves the most recently generated response audio
 GET  /stark/glasses/status   <- pipeline health check
 """
+import asyncio
 import os
 import tempfile
 import time
@@ -77,7 +78,7 @@ async def glasses_listen(audio: UploadFile = File(...)):
         audio_path = tmp.name
 
     try:
-        text = _transcribe(audio_path)
+        text = await asyncio.to_thread(_transcribe, audio_path)
         if not text or len(text.strip()) < 2:
             return {"error": "I didn't catch that. Try again.", "audio": False}
 
@@ -91,7 +92,7 @@ async def glasses_listen(audio: UploadFile = File(...)):
             # Tone analysis costs one extra "instant"-tier LLM call, so skip
             # it on the quick-response path above — only run it when we're
             # already paying for a full brain call.
-            tone = analyze_voice_tone(text)
+            tone = await asyncio.to_thread(analyze_voice_tone, text)
             brain_input = text
             if tone.get("stress_level", 5) > 7:
                 brain_input = f"[User sounds stressed/urgent — be extra supportive and direct] {text}"
@@ -99,13 +100,13 @@ async def glasses_listen(audio: UploadFile = File(...)):
                 brain_input = f"[User's energy is high — match their energy] {text}"
 
             from core.brain_v2 import brain
-            result = brain.process_dict(brain_input)
+            result = await asyncio.to_thread(brain.process_dict, brain_input)
             response_text = result["response"]
             latency_note = "brain"
 
         print(f"[Glasses] Responding ({latency_note}): {response_text[:100]}")
 
-        audio_response_path = _generate_voice(response_text)
+        audio_response_path = await asyncio.to_thread(_generate_voice, response_text)
         latency = round(time.time() - start, 2)
         print(f"[Glasses] Total latency: {latency}s")
 
@@ -143,11 +144,11 @@ async def glasses_text(body: dict):
         latency_ms = 0
     else:
         from core.brain_v2 import brain
-        result = brain.process_dict(text)
+        result = await asyncio.to_thread(brain.process_dict, text)
         response = result["response"]
         latency_ms = result.get("latency_ms", 0)
 
-    audio_path = _generate_voice(response)
+    audio_path = await asyncio.to_thread(_generate_voice, response)
 
     return {
         "response":   response,

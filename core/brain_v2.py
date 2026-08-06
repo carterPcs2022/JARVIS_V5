@@ -1267,6 +1267,23 @@ class Brain:
             response = privacy_mode.private_think(user_input)
             return Result(response=response, model="ollama", provider="ollama-private")
 
+        # ── Translator mode: bypass the whole pipeline, relay a straight
+        # translation instead of a conversational reply. The exit phrase
+        # check comes first — otherwise there's no way to leave this mode
+        # from a chat-only channel (Discord/Telegram/SMS) once it's on.
+        from core.translator_mode import translator_mode
+        if translator_mode.is_active():
+            from core.memory import save_turn
+            if translator_mode.is_exit_phrase(user_input):
+                translator_mode.disable()
+                response = "Translator mode off, sir."
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="translator_mode_exit")
+
+            response = translator_mode.translate_turn(user_input)
+            save_turn(user_input, response)
+            return Result(response=response, ok=True, provider="translator")
+
         analyze_message(user_input)
         bus.chat("user", user_input)
         state.set("last_interaction", datetime.now().isoformat())

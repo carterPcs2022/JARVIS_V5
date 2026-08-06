@@ -1,7 +1,7 @@
 """server/routes/final_features.py — Wires the final major feature set into the API:
 webhooks, personal search, second brain, privacy mode, news anchor, decisions,
 tutor, legacy, fitness, content creation, visualization, emotional state,
-offline mode, language, and the SMS webhook."""
+offline mode, language, translator mode, and the SMS webhook."""
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse, PlainTextResponse
 from utils.security import verify_token
@@ -407,3 +407,28 @@ def language_translate(body: dict):
 def language_set(body: dict):
     from core.language import set_preferred_language
     return set_preferred_language(body.get("language", "en"))
+
+
+# ── Translator mode ────────────────────────────────────────────────────────────
+# Live relay mode: while active, JARVIS stops conversing and just translates
+# every message — one-way into target_language, or back-and-forth if
+# source_language is also given (see core/translator_mode.py). Say
+# "stop translating" (or similar) in chat to exit from a channel with no
+# REST/HUD access, e.g. Discord/Telegram/SMS.
+
+@protected.post("/translator/enable")
+def translator_enable(body: dict):
+    from core.translator_mode import translator_mode
+    return translator_mode.enable(body.get("target_language", ""), body.get("source_language"))
+
+
+@protected.post("/translator/disable")
+def translator_disable():
+    from core.translator_mode import translator_mode
+    return translator_mode.disable()
+
+
+@protected.get("/translator/status")
+def translator_status():
+    from core.translator_mode import translator_mode
+    return translator_mode.status()
