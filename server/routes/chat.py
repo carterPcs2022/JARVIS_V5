@@ -1,6 +1,9 @@
 """server/routes/chat.py — Chat route using Brain V2 pipeline."""
+import asyncio
 import concurrent.futures
-from fastapi import APIRouter, Depends, Request
+import tempfile
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from utils.security import verify_token, rate_limit
 from core.brain_v2 import brain
 
@@ -22,13 +25,11 @@ TASK_TIMEOUT_SECONDS = 15
 THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
 
 
-@router.post("/chat", dependencies=[Depends(verify_token), Depends(rate_limit)])
-def chat(body: dict, request: Request):
-    msg = body.get("message", "").strip()
-    if not msg:
-        return {"error": "No message provided"}
-
-    ip = request.client.host if request.client else ""
+def _process_chat_message(msg: str, ip: str) -> dict:
+    """Shared by /chat and /chat/upload — firewall screening, combat-mode
+    fast path, threat classification, and the timeout-guarded brain call,
+    all in one place so an attachment gets exactly the same handling a
+    plain text message does instead of a stripped-down duplicate path."""
     try:
         from services.ai_firewall import ai_firewall
         screen = ai_firewall.screen(msg, ip)
@@ -98,3 +99,36 @@ def chat(body: dict, request: Request):
         result["response"] = f"{result['response']}\n\n{outcome['soft_confirm_prompt']}"
 
     return result
+
+
+@router.post("/chat", dependencies=[Depends(verify_token), Depends(rate_limit)])
+def chat(body: dict, request: Request):
+    msg = body.get("message", "").strip()
+    if not msg:
+        return {"error": "No message provided"}
+
+    ip = request.client.host if request.client else ""
+    return _process_chat_message(msg, ip)
+
+
+@router.post("/chat/upload", dependencies=[Depends(verify_token), Depends(rate_limit)])
+async def chat_upload(request: Request, file: UploadFile = File(...), message: str = Form("")):
+    """Attach a picture or file to a chat turn. Images are handed to the
+    brain's existing vision pipeline (core/tools/vision.py); everything
+    else is pre-summarized (services.documents.ingest) and folded in as
+    context — see core/attachments.py for why each takes that path."""
+    from core.attachments import compose_turn_with_attachment
+
+    filename = file.filename or "upload"
+    suffix = Path(filename).suffix
+    content = await file.read()
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        composed = await asyncio.to_thread(compose_turn_with_attachment, message, tmp_path, filename)
+        ip = request.client.host if request.client else ""
+        return await asyncio.to_thread(_process_chat_message, composed, ip)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
