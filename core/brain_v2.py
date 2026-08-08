@@ -870,11 +870,25 @@ class Executor:
                 try:
                     from core.state import state
                     from core.personality import get_voice_mode
-                    from services.elevenlabs_voice import speak_with_mode, generate_for_network
+                    from services.elevenlabs_voice import (
+                        speak_with_mode, generate_chunks_for_network, split_for_speech,
+                    )
                     mode = state.get("voice_mode") or get_voice_mode()
                     if VOICE_LOCAL_PLAYBACK:
-                        speak_with_mode(response, mode, play=True)
-                    generate_for_network(response)
+                        # speak_with_mode() cleans with clean_for_voice()'s default
+                        # 500-char cap, which *truncates* (mid-sentence, silently)
+                        # rather than splitting — a real JARVIS answer routinely
+                        # runs past that, which is what made him audibly stop
+                        # talking partway through a response. split_for_speech()
+                        # at the same 500-char width keeps each chunk under that
+                        # cap so speak_with_mode() doesn't re-truncate it, and
+                        # nothing past char 500 is ever dropped.
+                        for chunk in split_for_speech(response, max_chars=500):
+                            speak_with_mode(chunk, mode, play=True)
+                    # Same fix for the network/HUD audio path: generate_for_network()
+                    # truncates past 800 chars; generate_chunks_for_network() speaks
+                    # the whole response across multiple audio files instead.
+                    generate_chunks_for_network(response)
                 except Exception:
                     pass
 
