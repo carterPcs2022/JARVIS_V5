@@ -1306,11 +1306,25 @@ class Brain:
         # can never be delayed by a slow model call ──────────────────────────
         from config.settings import JARVIS_MAYDAY_PHRASE
         if JARVIS_MAYDAY_PHRASE in user_input.lower():
-            from services.notifications import critical
             from services.audit_log import audit_log
             from core.memory import save_turn
+            from core.event_bus import bus
 
-            critical("JARVIS MAYDAY", f"Mayday triggered at {datetime.now()}")
+            # bus.alert(..., severity="critical") is the same escalation
+            # chain lockdown/sentinel/dead-man's-switch already use —
+            # Pushover, email, spoken alert, Telegram, and a real Twilio
+            # call to the owner's own phone (MY_PHONE_NUMBER). Mayday used
+            # to call services.notifications.critical() directly, which is
+            # only the Pushover/macOS/HUD leg of that chain — a distress
+            # phrase never actually rang anyone's phone.
+            try:
+                from services.location import get_current_location
+                loc = get_current_location()
+            except Exception:
+                loc = "unknown"
+            distress_msg = f"JARVIS Mayday triggered. Location context: {loc}."
+            bus.alert(distress_msg, severity="critical", category="MAYDAY")
+
             audit_log.record("mayday", "jarvis",
                              {"query": user_input[:100], "mode": "MAYDAY"}, "triggered")
             try:
@@ -1319,6 +1333,15 @@ class Brain:
                                emotions=["urgent"], tags=["mayday", "security"])
             except Exception:
                 pass
+
+            # Real people who can judge whether this needs EMS — not an
+            # automated 911/dispatch call. See services/emergency_contacts.py
+            # for why that line is drawn there.
+            try:
+                from services.emergency_contacts import alert_all
+                alert_all(distress_msg, reason="mayday")
+            except Exception as e:
+                print(f"[Brain] Mayday emergency-contact alert failed: {e}")
 
             response = "Mayday received. What's happening, sir?"
             save_turn(user_input, response)
