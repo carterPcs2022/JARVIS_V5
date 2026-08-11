@@ -121,8 +121,15 @@ def memory_store_fact(body: dict):
                       body.get("source", "manual"), body.get("category", "general"))
 
 
-@router.get("/memory/facts")
+@router.get("/memory/facts/search")
 def memory_recall_facts(q: str, k: int = 5):
+    """Was registered at GET /memory/facts — collided with (and was
+    silently shadowed by, since server/routes/memory.py's bulk-export
+    /memory/facts is registered first in server/api.py) the endpoint
+    FRIDAY's training sync uses to pull the full facts list. Nothing
+    currently calls this exact path with a `q` param (checked), so
+    renaming to disambiguate is safe rather than actually changing
+    reachable behavior for anyone."""
     from core.memory import recall_facts
     return recall_facts(q, k)
 
