@@ -545,7 +545,8 @@ def start():
         # Both intervals stretched (30->60min, 5->15min) as part of the
         # Groq-rate-limit investigation: these two + health-check overhead
         # were the dominant contributors to burning through Groq's real
-        # 1,000-requests/day cap on both llama-3.1-8b-instant and
+        # 1,000-requests/day cap on both openai/gpt-oss-20b (llama-3.1-8b-
+        # instant's replacement, decommissioned 2026-08-16) and
         # llama-3.3-70b-versatile, running around the clock regardless of
         # actual usage. Kept both features rather than merging or dropping
         # either (explicit choice) — just running them less often.

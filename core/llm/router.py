@@ -63,9 +63,17 @@ def _instant_response(query: str) -> str | None:
 # include deepseek-r1-distill-llama-70b, mixtral-8x7b-32768, and gemma2-9b-it.
 # All three are decommissioned; using them would 404 on every call. Only
 # models actually present in Groq's live catalog are listed here.
+#
+# "instant" swapped from llama-3.1-8b-instant to openai/gpt-oss-20b —
+# Groq decommissions llama-3.1-8b-instant on 2026-08-16 and recommends
+# gpt-oss-20b as the direct replacement. Already a verified-live id here
+# (its 120b sibling is the "research" tier below), so this isn't a guess,
+# but the max_tokens/best_for below are carried over from the old model
+# unchanged — worth a real check against gpt-oss-20b's own behavior once
+# it's taking live traffic, not just trusted as-is.
 MODEL_REGISTRY = {
     "instant": {
-        "id": "llama-3.1-8b-instant", "max_tokens": 1024,
+        "id": "openai/gpt-oss-20b", "max_tokens": 1024,
         "best_for": ["greeting", "simple_fact", "time", "status"],
     },
     "standard": {
@@ -270,8 +278,12 @@ def _rate_check() -> bool:
 # ── Daily request-cap awareness ────────────────────────────────────────────
 # _rate_check() above only guards Groq's 30-requests-per-minute figure — it
 # has no idea about the separate, much easier to exhaust cap: 1,000
-# requests/day on both llama-3.1-8b-instant and llama-3.3-70b-versatile
-# (confirmed against Groq's published limits, not assumed). That averages
+# requests/day on both llama-3.3-70b-versatile and (as of the
+# llama-3.1-8b-instant -> openai/gpt-oss-20b swap below) openai/gpt-oss-20b
+# (confirmed against Groq's published limits, not assumed, for the old
+# model — the 1000 figure for gpt-oss-20b is carried over unverified and
+# should be rechecked against Groq's published limits once it's live).
+# That averages
 # out to ~41 requests/hour, shared across real user chat, every scheduled
 # background job (predictive pre-caching, proactive insights, research),
 # and every health-check ping — and nothing tracked it before this.
@@ -284,7 +296,7 @@ def _rate_check() -> bool:
 _daily_call_times: dict = {}
 _DAILY_WINDOW = 86400  # seconds — rolling 24h, not a calendar-day reset
 _MODEL_DAILY_LIMITS = {
-    "llama-3.1-8b-instant":    1000,
+    "openai/gpt-oss-20b":      1000,
     "llama-3.3-70b-versatile": 1000,
 }
 _DEFAULT_DAILY_LIMIT = 1000  # conservative default for any model not explicitly listed
@@ -561,7 +573,7 @@ def chat(messages: list[dict], max_tokens: int = 1024,
                 # model being exhausted (e.g. llama-3.3-70b-versatile at
                 # its daily cap) shouldn't trip the circuit for every other
                 # Groq model too, including ones with plenty of budget left
-                # (e.g. llama-3.1-8b-instant, used by the threat classifier
+                # (e.g. openai/gpt-oss-20b, used by the threat classifier
                 # and simple-query routing).
                 circuit_key = f"groq:{model_id}"
                 if not cb.is_available(circuit_key):
@@ -790,8 +802,10 @@ def warm_cache():
 # force=True bypass anywhere, so the real ping-call frequency is bounded
 # by whichever TTL is set here. At 30s that's up to ~2,880 real "ping"
 # completions/day against Groq's actual 1,000-requests-per-day cap on
-# llama-3.1-8b-instant (confirmed via Groq's published limits, not
-# assumed) — pure health-check overhead competing with real chat traffic
+# openai/gpt-oss-20b (llama-3.1-8b-instant's replacement as of Groq's
+# 2026-08-16 decommission; the 1,000 figure was confirmed for the old
+# model, not independently reverified for gpt-oss-20b) — pure health-check
+# overhead competing with real chat traffic
 # for the same daily budget. Nothing here needs Groq's up/down status
 # fresher than a few minutes; it's a background indicator, not something
 # gating a live request.

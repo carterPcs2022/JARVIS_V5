@@ -268,8 +268,12 @@ Be the AI he needed you to be.
 JARVIS_PERSONALITY_ENHANCED = JARVIS_PERSONALITY + STARK_INTELLIGENCE_PROTOCOLS
 
 # ── LLM: Groq (primary) ───────────────────────────────────────────────────────
+# llama-3.1-8b-instant is decommissioned by Groq on 2026-08-16; switched the
+# default to openai/gpt-oss-20b, Groq's own recommended replacement (and
+# already a verified-live id in this codebase — see core/llm/router.py's
+# MODEL_REGISTRY "research" tier, which uses its 120b sibling).
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL     = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 
 # ── LLM: Ollama (fallback) ────────────────────────────────────────────────────
