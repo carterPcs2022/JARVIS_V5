@@ -397,6 +397,22 @@ GOOGLE_CALENDAR_CLIENT_SECRET = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", "")
 GOOGLE_CALENDAR_REDIRECT_URI  = os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "")
 GOOGLE_CALENDAR_REFRESH_TOKEN = os.getenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "")
 
+# ── Spotify, Plaid, CalDAV ──────────────────────────────────────────────────
+# services/spotify.py, services/finance.py, and services/calendar_intel.py
+# already read these directly via os.environ — defining them here too
+# doesn't change that (os.environ is process-global either way), it just
+# gives core/config_validator.py's paired-credential check something to
+# see. Before this, a half-set Plaid/Spotify/CalDAV pair failed silently
+# deep in a request instead of surfacing at startup like Twilio/Pushover/
+# Mac Bridge already do.
+SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+PLAID_CLIENT_ID       = os.getenv("PLAID_CLIENT_ID", "")
+PLAID_SECRET          = os.getenv("PLAID_SECRET", "")
+CALDAV_URL            = os.getenv("CALDAV_URL", "")
+CALDAV_USERNAME       = os.getenv("CALDAV_USERNAME", "")
+CALDAV_PASSWORD       = os.getenv("CALDAV_PASSWORD", "")
+
 # ── Voice ─────────────────────────────────────────────────────────────────────
 JARVIS_VOICE    = os.getenv("JARVIS_VOICE", "en-US-GuyNeural")
 WHISPER_MODEL   = os.getenv("WHISPER_MODEL", "base")

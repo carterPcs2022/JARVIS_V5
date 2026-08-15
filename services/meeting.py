@@ -25,13 +25,19 @@ class MeetingTranscriber:
         }
 
     def _transcribe(self, audio_path: str) -> str:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            return ""
         from groq import Groq
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        with open(audio_path, "rb") as f:
-            result = client.audio.transcriptions.create(
-                file=(audio_path, f.read()), model="whisper-large-v3-turbo", response_format="text",
-            )
-        return str(result)
+        client = Groq(api_key=api_key)
+        try:
+            with open(audio_path, "rb") as f:
+                result = client.audio.transcriptions.create(
+                    file=(audio_path, f.read()), model="whisper-large-v3-turbo", response_format="text",
+                )
+            return str(result)
+        except Exception:
+            return ""
 
     def _extract_summary(self, analysis: str) -> str:
         lines = analysis.split("\n")

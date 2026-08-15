@@ -40,6 +40,9 @@ _PAIRED_FIELDS = [
     ("PUSHOVER_USER_KEY", "PUSHOVER_API_TOKEN", "Pushover"),
     ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "Twilio"),
     ("MAC_BRIDGE_URL", "MAC_BRIDGE_TOKEN", "Mac Bridge"),
+    ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET", "Spotify"),
+    ("PLAID_CLIENT_ID", "PLAID_SECRET", "Plaid"),
+    ("CALDAV_URL", "CALDAV_USERNAME", "CalDAV"),
 ]
 
 # (env var, human label) for every setting that's a URL and must have a scheme.
