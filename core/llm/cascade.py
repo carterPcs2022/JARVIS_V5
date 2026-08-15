@@ -64,20 +64,30 @@ def route(intent: str, complexity: str = "moderate", private: bool = False) -> R
     complexity: "simple" | "moderate" | "complex"
     private:    True → prefer local Ollama, never send to cloud
     """
+    # Fallback literal below reads the same GROQ_MODEL env var as
+    # config/settings.py, but intentionally with a DIFFERENT hardcoded
+    # default — settings.GROQ_MODEL defaults to the small/cheap model
+    # (openai/gpt-oss-20b) for cheap generic calls elsewhere in the repo,
+    # while this route() is specifically for moderate/complex requests and
+    # has always wanted a stronger default than that (pre-existing design,
+    # not something introduced by this fix). Old default was
+    # llama-3.3-70b-versatile, decommissioned by Groq 2026-08-16; swapped
+    # to gpt-oss-120b, Groq's own recommended replacement (see
+    # core/llm/router.py's MODEL_REGISTRY for the fuller reasoning).
     if private:
         if _ollama_available():
             return RouteResult(Provider.OLLAMA, os.getenv("OLLAMA_MODEL", "llama3"), "private mode → local model")
-        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "private requested but Ollama unavailable")
+        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "private requested but Ollama unavailable")
 
     if complexity == "complex":
         if _anthropic_available():
             return RouteResult(Provider.ANTHROPIC, "claude-sonnet-5", "complex task → Claude Sonnet 5", cost_estimate=0.01)
         if _groq_available():
-            return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "complex fallback → Groq 70B")
+            return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "complex fallback → Groq gpt-oss-120b")
 
     # Default: Groq for speed/cost
     if _groq_available():
-        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "standard → Groq (fast+cheap)")
+        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "standard → Groq (fast+cheap)")
 
     if _ollama_available():
         return RouteResult(Provider.OLLAMA, os.getenv("OLLAMA_MODEL", "llama3"), "Groq unavailable → Ollama local")

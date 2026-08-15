@@ -546,8 +546,9 @@ def start():
         # Groq-rate-limit investigation: these two + health-check overhead
         # were the dominant contributors to burning through Groq's real
         # 1,000-requests/day cap on both openai/gpt-oss-20b (llama-3.1-8b-
-        # instant's replacement, decommissioned 2026-08-16) and
-        # llama-3.3-70b-versatile, running around the clock regardless of
+        # instant's replacement) and openai/gpt-oss-120b (llama-3.3-70b-
+        # versatile's replacement — both decommissioned by Groq 2026-08-16),
+        # running around the clock regardless of
         # actual usage. Kept both features rather than merging or dropping
         # either (explicit choice) — just running them less often.
         _add_llm_job(_stark_proactive_thinking, "interval", minutes=60, id="stark_proactive_thinking",
