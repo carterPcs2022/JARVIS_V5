@@ -846,6 +846,19 @@ class Executor:
         val      = validate(response, intent.raw)
         response = val["response"]
 
+        # Cognitive load calibration (core/cognitive_load.py) — was
+        # complete and importable but never actually called anywhere in
+        # the response pipeline, so late-night/short-query responses never
+        # got condensed the way it was built to do. Silent, no LLM call
+        # unless the response is actually long enough to be worth
+        # shortening (calibrate() only fires think() past the minimal
+        # level's 30-word threshold). Runs before persistence/voice so the
+        # calibrated version is what's saved and spoken too.
+        from core.cognitive_load import cog_load
+        from config.settings import now_local
+        level    = cog_load.assess(intent.raw, now_local().hour)
+        response = cog_load.calibrate(response, level)
+
         latency = round((time.time() - start) * 1000, 2)
 
         # Persist
@@ -870,11 +883,25 @@ class Executor:
                 try:
                     from core.state import state
                     from core.personality import get_voice_mode
-                    from services.elevenlabs_voice import speak_with_mode, generate_for_network
+                    from services.elevenlabs_voice import (
+                        speak_with_mode, generate_chunks_for_network, split_for_speech,
+                    )
                     mode = state.get("voice_mode") or get_voice_mode()
                     if VOICE_LOCAL_PLAYBACK:
-                        speak_with_mode(response, mode, play=True)
-                    generate_for_network(response)
+                        # speak_with_mode() cleans with clean_for_voice()'s default
+                        # 500-char cap, which *truncates* (mid-sentence, silently)
+                        # rather than splitting — a real JARVIS answer routinely
+                        # runs past that, which is what made him audibly stop
+                        # talking partway through a response. split_for_speech()
+                        # at the same 500-char width keeps each chunk under that
+                        # cap so speak_with_mode() doesn't re-truncate it, and
+                        # nothing past char 500 is ever dropped.
+                        for chunk in split_for_speech(response, max_chars=500):
+                            speak_with_mode(chunk, mode, play=True)
+                    # Same fix for the network/HUD audio path: generate_for_network()
+                    # truncates past 800 chars; generate_chunks_for_network() speaks
+                    # the whole response across multiple audio files instead.
+                    generate_chunks_for_network(response)
                 except Exception:
                     pass
 
@@ -1267,6 +1294,23 @@ class Brain:
             response = privacy_mode.private_think(user_input)
             return Result(response=response, model="ollama", provider="ollama-private")
 
+        # ── Translator mode: bypass the whole pipeline, relay a straight
+        # translation instead of a conversational reply. The exit phrase
+        # check comes first — otherwise there's no way to leave this mode
+        # from a chat-only channel (Discord/Telegram/SMS) once it's on.
+        from core.translator_mode import translator_mode
+        if translator_mode.is_active():
+            from core.memory import save_turn
+            if translator_mode.is_exit_phrase(user_input):
+                translator_mode.disable()
+                response = "Translator mode off, sir."
+                save_turn(user_input, response)
+                return Result(response=response, ok=True, provider="translator_mode_exit")
+
+            response = translator_mode.translate_turn(user_input)
+            save_turn(user_input, response)
+            return Result(response=response, ok=True, provider="translator")
+
         analyze_message(user_input)
         bus.chat("user", user_input)
         state.set("last_interaction", datetime.now().isoformat())
@@ -1275,11 +1319,25 @@ class Brain:
         # can never be delayed by a slow model call ──────────────────────────
         from config.settings import JARVIS_MAYDAY_PHRASE
         if JARVIS_MAYDAY_PHRASE in user_input.lower():
-            from services.notifications import critical
             from services.audit_log import audit_log
             from core.memory import save_turn
+            from core.event_bus import bus
 
-            critical("JARVIS MAYDAY", f"Mayday triggered at {datetime.now()}")
+            # bus.alert(..., severity="critical") is the same escalation
+            # chain lockdown/sentinel/dead-man's-switch already use —
+            # Pushover, email, spoken alert, Telegram, and a real Twilio
+            # call to the owner's own phone (MY_PHONE_NUMBER). Mayday used
+            # to call services.notifications.critical() directly, which is
+            # only the Pushover/macOS/HUD leg of that chain — a distress
+            # phrase never actually rang anyone's phone.
+            try:
+                from services.location import get_current_location
+                loc = get_current_location()
+            except Exception:
+                loc = "unknown"
+            distress_msg = f"JARVIS Mayday triggered. Location context: {loc}."
+            bus.alert(distress_msg, severity="critical", category="MAYDAY")
+
             audit_log.record("mayday", "jarvis",
                              {"query": user_input[:100], "mode": "MAYDAY"}, "triggered")
             try:
@@ -1288,6 +1346,15 @@ class Brain:
                                emotions=["urgent"], tags=["mayday", "security"])
             except Exception:
                 pass
+
+            # Real people who can judge whether this needs EMS — not an
+            # automated 911/dispatch call. See services/emergency_contacts.py
+            # for why that line is drawn there.
+            try:
+                from services.emergency_contacts import alert_all
+                alert_all(distress_msg, reason="mayday")
+            except Exception as e:
+                print(f"[Brain] Mayday emergency-contact alert failed: {e}")
 
             response = "Mayday received. What's happening, sir?"
             save_turn(user_input, response)

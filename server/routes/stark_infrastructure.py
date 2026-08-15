@@ -80,6 +80,53 @@ def phone_alert(body: dict):
     return phone.send_alert_call(body.get("message", ""), to_number)
 
 
+@router.post("/phone/call")
+def phone_call_someone(body: dict):
+    """Have JARVIS place a real call and speak a message — 'call X and tell
+    them Y', not an emergency-only path. Reuses the same Twilio call the
+    critical-alert escalation and emergency contacts use."""
+    from services.phone import phone
+    to_number = body.get("to", "")
+    message = body.get("message", "")
+    if not to_number or not message:
+        return {"error": "Both 'to' and 'message' are required"}
+    return phone.send_alert_call(message, to_number)
+
+
+# ── Emergency contacts ──────────────────────────────────────────────────────
+# Real people alerted on a Mayday trigger (see core/brain_v2.py) — not an
+# automated 911/dispatch integration. See services/emergency_contacts.py.
+
+@router.get("/emergency_contacts")
+def emergency_contacts_list():
+    from services.emergency_contacts import list_contacts
+    return {"contacts": list_contacts()}
+
+
+@router.post("/emergency_contacts")
+def emergency_contacts_add(body: dict):
+    from services.emergency_contacts import add_contact
+    return add_contact(
+        body.get("name", ""), body.get("phone", ""),
+        body.get("call", True), body.get("sms", True),
+    )
+
+
+@router.delete("/emergency_contacts/{name}")
+def emergency_contacts_remove(name: str):
+    from services.emergency_contacts import remove_contact
+    return remove_contact(name)
+
+
+@router.post("/emergency_contacts/alert")
+def emergency_contacts_alert_now(body: dict):
+    """Manual trigger — same alert_all() path Mayday uses, without needing
+    to speak/type the actual Mayday phrase."""
+    from services.emergency_contacts import alert_all
+    message = body.get("message", "JARVIS emergency alert triggered manually.")
+    return alert_all(message, reason=body.get("reason", "manual"))
+
+
 # ── Deep Research ─────────────────────────────────────────────────────────────
 
 @router.post("/research/start")

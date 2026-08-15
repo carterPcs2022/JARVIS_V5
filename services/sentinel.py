@@ -6,7 +6,7 @@ from collections import defaultdict
 import psutil
 from config.settings import SENTINEL_SCAN_INTERVAL, THREAT_LOG, ALERT_CPU, ALERT_RAM, ALERT_DISK
 
-WATCHED = ["core/brain.py","core/llm/router.py","server/api.py","config/settings.py","app.py"]
+WATCHED = ["core/brain_v2.py","core/llm/router.py","server/api.py","config/settings.py","app.py"]
 # 10000 is Render's default web service port — expected there, not a threat.
 EXPECTED_PORTS = {8000, 11434, 22, 80, 443, 10000}
 _running = False

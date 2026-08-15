@@ -2,8 +2,11 @@
 
 Each integration is fully optional: if the relevant credentials aren't set in
 .env, that channel simply doesn't start. All three route through the same
-brain.process_dict() pipeline JARVIS already uses everywhere else.
+brain.process_dict() pipeline JARVIS already uses everywhere else. Telegram
+and Discord also accept a picture or file attached to a message — see
+core/attachments.py for how that gets folded into the chat turn.
 """
+import asyncio
 import os
 from config.settings import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_AUTHORIZED_IDS,
@@ -35,31 +38,75 @@ class TelegramBot:
 
         app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self.handle_attachment))
         self._app = app
         app.run_polling(close_loop=False)
 
-    async def handle_message(self, update, context):
-        chat_id = str(update.effective_chat.id)
+    def _authorized(self, chat_id: str) -> bool:
+        return not TELEGRAM_AUTHORIZED_IDS or chat_id in TELEGRAM_AUTHORIZED_IDS
 
-        if TELEGRAM_AUTHORIZED_IDS and chat_id not in TELEGRAM_AUTHORIZED_IDS:
-            await update.message.reply_text("Unauthorized.")
-            return
-
-        text = update.message.text
-        from core.brain_v2 import brain
-        result = brain.process_dict(text)
-        response = result["response"]
-
+    async def _reply_with_voice(self, update, response: str):
         await update.message.reply_text(response)
-
         try:
             from services.elevenlabs_voice import generate_for_network
-            audio_path = generate_for_network(response)
+            audio_path = await asyncio.to_thread(generate_for_network, response)
             if audio_path and os.path.exists(audio_path):
                 with open(audio_path, "rb") as f:
                     await update.message.reply_voice(f)
         except Exception:
             pass
+
+    async def handle_message(self, update, context):
+        if not self._authorized(str(update.effective_chat.id)):
+            await update.message.reply_text("Unauthorized.")
+            return
+
+        text = update.message.text
+        from core.brain_v2 import brain
+        # Runs in a worker thread — handle_message executes on the same
+        # asyncio loop the whole Application (polling, other chats' updates)
+        # runs on, and process_dict() is a blocking call (LLM round-trip +
+        # memory/DB work) that would otherwise stall every other Telegram
+        # update until this one finishes.
+        result = await asyncio.to_thread(brain.process_dict, text)
+        await self._reply_with_voice(update, result["response"])
+
+    async def handle_attachment(self, update, context):
+        """A photo or document sent directly (not via a slash command) —
+        same compose_turn_with_attachment() path as the Discord /ask
+        attachment and the HUD web /stark/chat/upload route, so all three
+        surfaces handle an upload the same way."""
+        if not self._authorized(str(update.effective_chat.id)):
+            await update.message.reply_text("Unauthorized.")
+            return
+
+        message = update.message
+        if message.photo:
+            tg_file = await message.photo[-1].get_file()  # largest available size
+            filename = f"{tg_file.file_unique_id}.jpg"
+        elif message.document:
+            tg_file = await message.document.get_file()
+            filename = message.document.file_name or f"{tg_file.file_unique_id}"
+        else:
+            return
+
+        import tempfile
+        from pathlib import Path
+        from core.attachments import compose_turn_with_attachment
+
+        suffix = Path(filename).suffix
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            await tg_file.download_to_drive(tmp_path)
+            from core.brain_v2 import brain
+            composed = await asyncio.to_thread(
+                compose_turn_with_attachment, message.caption or "", tmp_path, filename)
+            result = await asyncio.to_thread(brain.process_dict, composed)
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+
+        await self._reply_with_voice(update, result["response"])
 
     async def send_alert(self, message: str, chat_id: str | None = None):
         """Push an alert to Telegram from anywhere in JARVIS."""
@@ -182,14 +229,46 @@ class JarvisDiscordBot:
         @tree.command(name="ask", description="Ask JARVIS anything")
         @app_commands.allowed_installs(guilds=True, users=True)
         @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-        @app_commands.describe(message="What do you want to ask JARVIS?")
-        async def ask(interaction: discord.Interaction, message: str):
+        @app_commands.describe(
+            message="What do you want to ask JARVIS?",
+            attachment="Optional image or file to attach",
+        )
+        async def ask(interaction: discord.Interaction, message: str = "",
+                      attachment: "discord.Attachment | None" = None):
             if not self._authorized(interaction.user.id):
                 await interaction.response.send_message("Unauthorized.", ephemeral=True)
                 return
+            if not message and not attachment:
+                await interaction.response.send_message(
+                    "Give me a message or an attachment, sir.", ephemeral=True)
+                return
             await interaction.response.defer()  # avoids the 3s interaction timeout
             from core.brain_v2 import brain
-            result = brain.process_dict(message)
+            # Off the gateway's event loop — process_dict() is a blocking
+            # LLM/DB call, and this is the same loop that carries Discord's
+            # heartbeat and every other concurrent interaction. Blocking it
+            # here is what made the bot feel slow/laggy under any real load:
+            # a second /ask (or the heartbeat itself) had to wait in line
+            # behind this one instead of running concurrently.
+            if attachment:
+                import tempfile
+                from pathlib import Path
+                from core.attachments import compose_turn_with_attachment
+
+                filename = attachment.filename or "upload"
+                suffix = Path(filename).suffix
+                content = await attachment.read()
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    tmp.write(content)
+                    tmp_path = tmp.name
+                try:
+                    composed = await asyncio.to_thread(
+                        compose_turn_with_attachment, message, tmp_path, filename)
+                    result = await asyncio.to_thread(brain.process_dict, composed)
+                finally:
+                    Path(tmp_path).unlink(missing_ok=True)
+            else:
+                result = await asyncio.to_thread(brain.process_dict, message)
             response = result["response"]
             # Discord hard-caps a single message at 2000 chars — brain
             # responses (status dumps, long reasoning) can exceed that, and

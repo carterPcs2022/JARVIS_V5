@@ -575,6 +575,8 @@ body::before {
 
     <div class="input-area">
       <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+      <button class="mic-btn" id="attach-btn" onclick="document.getElementById('file-input').click()" title="Attach a picture or file">📎</button>
+      <input type="file" id="file-input" accept="image/*,.pdf,.docx,.doc,.txt,.md,.csv,.json" style="display:none" onchange="sendAttachment(this.files[0])" />
       <input class="chat-input" id="chat-input" placeholder="Say 'JARVIS' or type here, sir..." autocomplete="off" />
       <button class="send-btn" onclick="sendMessage()">SEND</button>
     </div>
@@ -896,28 +898,45 @@ function sendMessage() {
 
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-// ── Drag-and-drop document analysis ─────────────────────────────────────────
-messagesEl.addEventListener('dragover', (e) => { e.preventDefault(); messagesEl.classList.add('drag-over'); });
-messagesEl.addEventListener('dragleave', () => messagesEl.classList.remove('drag-over'));
-messagesEl.addEventListener('drop', async (e) => {
-  e.preventDefault();
-  messagesEl.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
+// ── Picture / file attachments ──────────────────────────────────────────────
+// Both the attach button and drag-and-drop go through /stark/chat/upload —
+// a real turn in the conversation (brain.process_dict, saved to memory),
+// not the older isolated /stark/documents/analyze report. Images are
+// answered by the brain's vision pipeline; other files are summarized and
+// folded in as context. See core/attachments.py.
+async function sendAttachment(file) {
   if (!file) return;
+  const text = inputEl.value.trim();
+  inputEl.value = '';
+  addMessage('user', text ? `${text} [📎 ${file.name}]` : `[📎 ${file.name}]`);
+  showThinking();
+
   const form = new FormData();
   form.append('file', file);
-  addMessage('system', `Analyzing ${file.name}...`);
+  form.append('message', text);
   try {
-    const r = await fetch(`${API}/stark/documents/analyze`, {
+    const r = await fetch(`${API}/stark/chat/upload`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}` },
       body: form,
     });
     const data = await r.json();
-    addMessage('ai', data.analysis || data.error || 'Could not analyze file.');
+    hideThinking();
+    addMessage('ai', data.response || data.error || 'Could not process the attachment.', { model: data.model, latency: data.latency_ms });
   } catch (err) {
+    hideThinking();
     addMessage('system', `Upload failed: ${err}`);
+  } finally {
+    document.getElementById('file-input').value = '';
   }
+}
+
+messagesEl.addEventListener('dragover', (e) => { e.preventDefault(); messagesEl.classList.add('drag-over'); });
+messagesEl.addEventListener('dragleave', () => messagesEl.classList.remove('drag-over'));
+messagesEl.addEventListener('drop', (e) => {
+  e.preventDefault();
+  messagesEl.classList.remove('drag-over');
+  sendAttachment(e.dataTransfer.files[0]);
 });
 
 // ── Voice input (Web Speech API) ──────────────────────────────────────────────

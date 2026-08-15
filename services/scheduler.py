@@ -545,8 +545,10 @@ def start():
         # Both intervals stretched (30->60min, 5->15min) as part of the
         # Groq-rate-limit investigation: these two + health-check overhead
         # were the dominant contributors to burning through Groq's real
-        # 1,000-requests/day cap on both llama-3.1-8b-instant and
-        # llama-3.3-70b-versatile, running around the clock regardless of
+        # 1,000-requests/day cap on both openai/gpt-oss-20b (llama-3.1-8b-
+        # instant's replacement) and openai/gpt-oss-120b (llama-3.3-70b-
+        # versatile's replacement — both decommissioned by Groq 2026-08-16),
+        # running around the clock regardless of
         # actual usage. Kept both features rather than merging or dropping
         # either (explicit choice) — just running them less often.
         _add_llm_job(_stark_proactive_thinking, "interval", minutes=60, id="stark_proactive_thinking",
@@ -555,6 +557,21 @@ def start():
                      next_run_time=now + timedelta(seconds=240))
 
         _scheduler.start()
+
+        # Situational awareness loop (services/awareness.py) — a separate
+        # always-on background thread, not an APScheduler job, since it
+        # runs its own internal 60s loop rather than being re-triggered by
+        # a trigger schedule. Was built but never actually started anywhere
+        # (only its on-demand proactive_research()/get_awareness_level()
+        # pieces were reachable) — check_system()/check_time()/check_goals()
+        # never ran. Gated the same way _add_llm_job() gates LLM-touching
+        # jobs: narrate() calls think(), and a dev machine's own CPU load
+        # during real work could otherwise trigger a real API call on every
+        # local restart's first high-CPU moment.
+        if not _is_local_dev():
+            from services.awareness import awareness
+            awareness.start_awareness_loop()
+
         log.info("Scheduler started — email/15m, system/5m, LLM health/2m, "
                  "+ Protocols 19/24/25/28/29/30/31/32/35, weekly learning/neuro, "
                  "health trend check/daily 6:30, digest flush/daily 7:00, "
@@ -562,7 +579,8 @@ def start():
                  "secret scan/dead man's switch/canary replant, log/audio cleanup, "
                  "proactive screen check (local), proactive research/2h, "
                  "stark proactive thinking/60m, stark anticipate needs/15m, "
-                 "weekly model update check, weekly self-improvement cycle (queue-only)")
+                 "weekly model update check, weekly self-improvement cycle (queue-only), "
+                 "situational awareness loop/60s" + (" (skipped, local dev)" if _is_local_dev() else ""))
         return True
     except ImportError:
         log.warning("APScheduler not installed — run: pip3 install APScheduler --break-system-packages")

@@ -268,8 +268,12 @@ Be the AI he needed you to be.
 JARVIS_PERSONALITY_ENHANCED = JARVIS_PERSONALITY + STARK_INTELLIGENCE_PROTOCOLS
 
 # ── LLM: Groq (primary) ───────────────────────────────────────────────────────
+# llama-3.1-8b-instant is decommissioned by Groq on 2026-08-16; switched the
+# default to openai/gpt-oss-20b, Groq's own recommended replacement (and
+# already a verified-live id in this codebase — see core/llm/router.py's
+# MODEL_REGISTRY "research" tier, which uses its 120b sibling).
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL     = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 
 # ── LLM: Ollama (fallback) ────────────────────────────────────────────────────
@@ -392,6 +396,22 @@ GOOGLE_CALENDAR_CLIENT_ID     = os.getenv("GOOGLE_CALENDAR_CLIENT_ID", "")
 GOOGLE_CALENDAR_CLIENT_SECRET = os.getenv("GOOGLE_CALENDAR_CLIENT_SECRET", "")
 GOOGLE_CALENDAR_REDIRECT_URI  = os.getenv("GOOGLE_CALENDAR_REDIRECT_URI", "")
 GOOGLE_CALENDAR_REFRESH_TOKEN = os.getenv("GOOGLE_CALENDAR_REFRESH_TOKEN", "")
+
+# ── Spotify, Plaid, CalDAV ──────────────────────────────────────────────────
+# services/spotify.py, services/finance.py, and services/calendar_intel.py
+# already read these directly via os.environ — defining them here too
+# doesn't change that (os.environ is process-global either way), it just
+# gives core/config_validator.py's paired-credential check something to
+# see. Before this, a half-set Plaid/Spotify/CalDAV pair failed silently
+# deep in a request instead of surfacing at startup like Twilio/Pushover/
+# Mac Bridge already do.
+SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+PLAID_CLIENT_ID       = os.getenv("PLAID_CLIENT_ID", "")
+PLAID_SECRET          = os.getenv("PLAID_SECRET", "")
+CALDAV_URL            = os.getenv("CALDAV_URL", "")
+CALDAV_USERNAME       = os.getenv("CALDAV_USERNAME", "")
+CALDAV_PASSWORD       = os.getenv("CALDAV_PASSWORD", "")
 
 # ── Voice ─────────────────────────────────────────────────────────────────────
 JARVIS_VOICE    = os.getenv("JARVIS_VOICE", "en-US-GuyNeural")

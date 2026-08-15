@@ -1,8 +1,8 @@
 """server/routes/final_features.py — Wires the final major feature set into the API:
 webhooks, personal search, second brain, privacy mode, news anchor, decisions,
 tutor, legacy, fitness, content creation, visualization, emotional state,
-offline mode, language, and the SMS webhook."""
-from fastapi import APIRouter, Depends, Request
+offline mode, language, translator mode, audio intelligence, and the SMS webhook."""
+from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import FileResponse, PlainTextResponse
 from utils.security import verify_token
 
@@ -407,3 +407,70 @@ def language_translate(body: dict):
 def language_set(body: dict):
     from core.language import set_preferred_language
     return set_preferred_language(body.get("language", "en"))
+
+
+# ── Translator mode ────────────────────────────────────────────────────────────
+# Live relay mode: while active, JARVIS stops conversing and just translates
+# every message — one-way into target_language, or back-and-forth if
+# source_language is also given (see core/translator_mode.py). Say
+# "stop translating" (or similar) in chat to exit from a channel with no
+# REST/HUD access, e.g. Discord/Telegram/SMS.
+
+@protected.post("/translator/enable")
+def translator_enable(body: dict):
+    from core.translator_mode import translator_mode
+    return translator_mode.enable(body.get("target_language", ""), body.get("source_language"))
+
+
+@protected.post("/translator/disable")
+def translator_disable():
+    from core.translator_mode import translator_mode
+    return translator_mode.disable()
+
+
+@protected.get("/translator/status")
+def translator_status():
+    from core.translator_mode import translator_mode
+    return translator_mode.status()
+
+
+# ── Audio intelligence (services/audio_intel.py) ──────────────────────────────
+# Music mood matching, ambient sound, live audio visualizer, song ID via
+# ACRCloud. Was complete and importable but had no route anywhere in the
+# API, unlike its sibling Spotify integration (server/routes/spotify.py).
+
+@protected.post("/audio/mood")
+def audio_mood(body: dict):
+    from services.audio_intel import audio
+    return audio.music_mood_match(body.get("context", ""))
+
+
+@protected.post("/audio/ambient")
+def audio_ambient(body: dict):
+    from services.audio_intel import audio
+    return audio.ambient_sound(body.get("sound_type", "rain"))
+
+
+@protected.get("/audio/visualizer")
+def audio_visualizer():
+    from services.audio_intel import audio
+    return audio.audio_visualizer_data()
+
+
+@protected.post("/audio/identify")
+async def audio_identify(file: UploadFile = File(...)):
+    from services.audio_intel import audio
+    import tempfile, os
+
+    suffix = "." + (file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "mp3")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        path = tmp.name
+
+    try:
+        return audio.identify_song(path)
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass

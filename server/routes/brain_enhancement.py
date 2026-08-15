@@ -85,6 +85,26 @@ def reasoning_verify(body: dict):
     return reason_and_verify(body.get("question", ""), body.get("context", ""))
 
 
+@router.post("/reasoning/ensemble")
+def reasoning_ensemble(body: dict):
+    """core/ensemble.py — was complete and importable but had no route
+    anywhere, unlike its sibling reasoning techniques above. Multi-sample
+    reasoning with confidence weighting; costs n+2 LLM calls (n samples,
+    a score per sample, one synthesis), same "opt-in, not auto-triggered"
+    convention as the rest of this file."""
+    from core.ensemble import ensemble
+    return ensemble.reason(body.get("query", ""), body.get("context", ""), body.get("n", 3))
+
+
+@router.post("/reasoning/hierarchical-planning")
+def reasoning_hierarchical_planning(body: dict):
+    """core/hierarchical_planning.py — same situation as ensemble above:
+    complete, never had a route. Breaks a goal down from vision through
+    next physical action."""
+    from core.hierarchical_planning import hierarchical
+    return hierarchical.plan(body.get("goal", ""), body.get("depth", 4))
+
+
 # ── Reflexion (learned lessons) ───────────────────────────────────────────────
 
 @router.post("/reflexion/evaluate")
@@ -121,8 +141,15 @@ def memory_store_fact(body: dict):
                       body.get("source", "manual"), body.get("category", "general"))
 
 
-@router.get("/memory/facts")
+@router.get("/memory/facts/search")
 def memory_recall_facts(q: str, k: int = 5):
+    """Was registered at GET /memory/facts — collided with (and was
+    silently shadowed by, since server/routes/memory.py's bulk-export
+    /memory/facts is registered first in server/api.py) the endpoint
+    FRIDAY's training sync uses to pull the full facts list. Nothing
+    currently calls this exact path with a `q` param (checked), so
+    renaming to disambiguate is safe rather than actually changing
+    reachable behavior for anyone."""
     from core.memory import recall_facts
     return recall_facts(q, k)
 
