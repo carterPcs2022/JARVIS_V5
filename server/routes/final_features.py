@@ -1,8 +1,8 @@
 """server/routes/final_features.py — Wires the final major feature set into the API:
 webhooks, personal search, second brain, privacy mode, news anchor, decisions,
 tutor, legacy, fitness, content creation, visualization, emotional state,
-offline mode, language, translator mode, and the SMS webhook."""
-from fastapi import APIRouter, Depends, Request
+offline mode, language, translator mode, audio intelligence, and the SMS webhook."""
+from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import FileResponse, PlainTextResponse
 from utils.security import verify_token
 
@@ -432,3 +432,45 @@ def translator_disable():
 def translator_status():
     from core.translator_mode import translator_mode
     return translator_mode.status()
+
+
+# ── Audio intelligence (services/audio_intel.py) ──────────────────────────────
+# Music mood matching, ambient sound, live audio visualizer, song ID via
+# ACRCloud. Was complete and importable but had no route anywhere in the
+# API, unlike its sibling Spotify integration (server/routes/spotify.py).
+
+@protected.post("/audio/mood")
+def audio_mood(body: dict):
+    from services.audio_intel import audio
+    return audio.music_mood_match(body.get("context", ""))
+
+
+@protected.post("/audio/ambient")
+def audio_ambient(body: dict):
+    from services.audio_intel import audio
+    return audio.ambient_sound(body.get("sound_type", "rain"))
+
+
+@protected.get("/audio/visualizer")
+def audio_visualizer():
+    from services.audio_intel import audio
+    return audio.audio_visualizer_data()
+
+
+@protected.post("/audio/identify")
+async def audio_identify(file: UploadFile = File(...)):
+    from services.audio_intel import audio
+    import tempfile, os
+
+    suffix = "." + (file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "mp3")
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(await file.read())
+        path = tmp.name
+
+    try:
+        return audio.identify_song(path)
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass

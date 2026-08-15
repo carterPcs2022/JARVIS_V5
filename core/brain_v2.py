@@ -846,6 +846,19 @@ class Executor:
         val      = validate(response, intent.raw)
         response = val["response"]
 
+        # Cognitive load calibration (core/cognitive_load.py) — was
+        # complete and importable but never actually called anywhere in
+        # the response pipeline, so late-night/short-query responses never
+        # got condensed the way it was built to do. Silent, no LLM call
+        # unless the response is actually long enough to be worth
+        # shortening (calibrate() only fires think() past the minimal
+        # level's 30-word threshold). Runs before persistence/voice so the
+        # calibrated version is what's saved and spoken too.
+        from core.cognitive_load import cog_load
+        from config.settings import now_local
+        level    = cog_load.assess(intent.raw, now_local().hour)
+        response = cog_load.calibrate(response, level)
+
         latency = round((time.time() - start) * 1000, 2)
 
         # Persist

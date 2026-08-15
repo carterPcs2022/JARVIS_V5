@@ -29,10 +29,10 @@ _MEMORY_FILE = Path(__file__).parent.parent / "memory" / "mark_system.json"
 # Modules that are part of the JARVIS V5 suit
 _SUIT_MODULES: dict[str, str] = {
     "repulsor_left":        "core.llm.router",
-    "repulsor_right":       "core.llm.cascade",
+    "repulsor_right":       "core.llm.openai",
     "arc_reactor":          "core.event_bus",
     "friday_protocol":      "core.friday_fallback",
-    "neural_core":          "core.brain",
+    "neural_core":          "core.brain_v2",
     "memory_banks":         "core.memory",
     "tactical_display":     "core.context",
     "voice_module":         "services.voice",
