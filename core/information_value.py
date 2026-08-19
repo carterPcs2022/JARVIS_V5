@@ -21,3 +21,20 @@ class InformationValueEngine:
 
 
 info_value = InformationValueEngine()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class InfoValueStrategy(ReasoningStrategy):
+    name = "info_value"
+
+    def should_use(self, query: str) -> bool:
+        return info_value.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(info_value.most_valuable, query, context)
+        return ReasoningResult(answer=data["analysis"], strategy=self.name)

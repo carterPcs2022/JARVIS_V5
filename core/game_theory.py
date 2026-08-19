@@ -25,3 +25,20 @@ class GameTheoryReasoner:
 
 
 game_theory = GameTheoryReasoner()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class GameTheoryStrategy(ReasoningStrategy):
+    name = "game_theory"
+
+    def should_use(self, query: str) -> bool:
+        return game_theory.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(game_theory.analyze, query)
+        return ReasoningResult(answer=data["analysis"], strategy=self.name)

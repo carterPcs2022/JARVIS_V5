@@ -31,3 +31,24 @@ class PreMortem:
 
 
 premortem = PreMortem()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class PremortemStrategy(ReasoningStrategy):
+    name = "premortem"
+
+    def should_use(self, query: str) -> bool:
+        return premortem.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(premortem.analyze, query)
+        return ReasoningResult(
+            answer=data["mitigations"], strategy=self.name,
+            evidence=[data.get("failure_modes", "")],
+            metadata={"inversion": data.get("inversion", "")},
+        )

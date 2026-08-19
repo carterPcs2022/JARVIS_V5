@@ -36,3 +36,25 @@ class SixThinkingHats:
 
 
 six_hats = SixThinkingHats()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+# Named "six_hats" to match the engine name core/brain_v2.py's Planner/Executor
+# already use for this technique (see core/brain_v2.py's _REASONING_ENGINES).
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class SixHatsStrategy(ReasoningStrategy):
+    name = "six_hats"
+
+    def should_use(self, query: str) -> bool:
+        return six_hats.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(six_hats.think, query)
+        return ReasoningResult(
+            answer=data["synthesis"], strategy=self.name,
+            metadata={"hats": data.get("hats", {})},
+        )

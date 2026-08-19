@@ -93,10 +93,30 @@ def _build_registry() -> dict[str, ReasoningStrategy]:
     from core.self_consistency import SelfConsistencyStrategy
     from core.multi_agent import MixtureOfAgentsStrategy
 
+    # These eight are the "reasoning engines" core/brain_v2.py's Planner/
+    # Executor actually dispatch to in the live default chat path (see
+    # Planner._REASONING_ENGINES) — a completely different set from the
+    # eight above, which come from core/orchestrator.py's side-door-only
+    # dispatch. Named to match brain_v2's own engine-name strings exactly
+    # (e.g. "info_value" not "information_value", "constraint_solver" not
+    # "constraint_satisfaction") so Phase 2's redirect of
+    # Executor._reasoning_engine() can look them up by the same names.
+    from core.six_hats import SixHatsStrategy
+    from core.premortem import PremortemStrategy
+    from core.fermi import FermiStrategy
+    from core.first_principles import FirstPrinciplesStrategy
+    from core.constraint_satisfaction import ConstraintSolverStrategy
+    from core.game_theory import GameTheoryStrategy
+    from core.information_value import InfoValueStrategy
+    from core.mental_models import MentalModelsStrategy
+
     strategies: list[ReasoningStrategy] = [
         DirectStrategy(), ChainOfThoughtStrategy(), VerifiedReasoningStrategy(),
         ReActStrategy(), TreeOfThoughtStrategy(), GraphOfThoughtStrategy(),
         SelfConsistencyStrategy(), MixtureOfAgentsStrategy(),
+        SixHatsStrategy(), PremortemStrategy(), FermiStrategy(),
+        FirstPrinciplesStrategy(), ConstraintSolverStrategy(), GameTheoryStrategy(),
+        InfoValueStrategy(), MentalModelsStrategy(),
     ]
     return {s.name: s for s in strategies}
 
