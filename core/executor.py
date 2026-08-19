@@ -43,10 +43,29 @@ def execute_step(step: dict) -> str:
         })
 
     handler = dispatch.get(tool, _unknown_tool)
-    try:
-        return handler(args)
-    except Exception as e:
-        return json.dumps({"error": str(e), "tool": tool})
+
+    def _run() -> str:
+        try:
+            return handler(args)
+        except Exception as e:
+            return json.dumps({"error": str(e), "tool": tool})
+
+    # ── Verification + bounded retry (core/interfaces/verification.py) ─────────
+    # A Python-level "no exception" isn't the same as "this actually
+    # worked" — every core/tools/*.py handler that fails already reports it
+    # via {"error": ...} or a "[Xxx error: ...]" string (see that module's
+    # docstring); verify_tool_result() detects that convention. Retried,
+    # with a hard cap and backoff, ONLY for errors that look transient
+    # (timeout/connection/rate-limit) on tools marked reversible — a
+    # permanent failure (e.g. run_shell's allowlist rejection) or a
+    # non-reversible tool never auto-retries; it fails once and reports the
+    # real reason, same as before this existed.
+    from core.interfaces.verification import with_retry, verify_tool_result
+    reversible = spec.reversible if spec else True
+    result, _verdict = with_retry(
+        _run, verify=lambda r: verify_tool_result(r, reversible=reversible), max_attempts=3,
+    )
+    return result
 
 
 # ── Tool handlers ─────────────────────────────────────────────────────────────
