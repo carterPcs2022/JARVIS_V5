@@ -2,9 +2,9 @@
   "mcpServers": {
     "jarvis": {
       "command": "python3",
-      "args": ["/Users/kisha/Downloads/JARVIS_V5/services/mcp_server.py"],
+      "args": ["/absolute/path/to/JARVIS_V5/services/mcp_server.py"],
       "env": {
-        "JARVIS_API_TOKEN": "bD51aIIbxS_aThD9b6A1Ng4VByxzXkUHiahGYCfvCxA"
+        "JARVIS_API_TOKEN": "REPLACE_WITH_YOUR_JARVIS_API_TOKEN"
       }
     }
   }

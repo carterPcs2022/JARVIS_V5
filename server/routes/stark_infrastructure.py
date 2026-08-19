@@ -44,30 +44,40 @@ def security_attack_log(limit: int = 50):
 # ── Phone (Twilio) ────────────────────────────────────────────────────────────
 
 @phone_router.post("/call")
-async def phone_incoming_call():
+async def phone_incoming_call(request: Request):
+    from utils.security import verify_twilio_signature
     from services.phone import phone
+    form = await request.form()
+    verify_twilio_signature(request, dict(form))
     return Response(content=phone.handle_incoming_call(), media_type="text/xml")
 
 
 @phone_router.post("/respond")
 async def phone_respond(request: Request):
+    from utils.security import verify_twilio_signature
     from services.phone import phone
     form = await request.form()
+    verify_twilio_signature(request, dict(form))
     transcript = form.get("TranscriptionText") or "Hello JARVIS"
     return Response(content=phone.handle_response(transcript), media_type="text/xml")
 
 
 @phone_router.post("/transcribed")
-async def phone_transcribed():
+async def phone_transcribed(request: Request):
     """Twilio's async transcription callback — nothing to do, /respond
     already handled the turn with its own (faster) transcription."""
+    from utils.security import verify_twilio_signature
+    form = await request.form()
+    verify_twilio_signature(request, dict(form))
     return Response(content="", media_type="text/xml")
 
 
 @phone_router.post("/sms")
 async def phone_sms(request: Request):
+    from utils.security import verify_twilio_signature
     from services.phone import phone
     form = await request.form()
+    verify_twilio_signature(request, dict(form))
     phone.handle_sms(form.get("From", ""), form.get("Body", ""))
     return Response(content="<Response/>", media_type="text/xml")
 

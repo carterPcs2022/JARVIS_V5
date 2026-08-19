@@ -23,7 +23,6 @@ ALLOWED_FILES = [
     "core/bayesian.py",
     "core/abductive.py",
     "core/mental_models.py",
-    "core/emotional_simulation.py",
     "core/working_memory.py",
     "core/narrative.py",
     "core/uncertainty.py",

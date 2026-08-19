@@ -32,7 +32,7 @@ _SUIT_MODULES: dict[str, str] = {
     "repulsor_right":       "core.llm.cascade",
     "arc_reactor":          "core.event_bus",
     "friday_protocol":      "core.friday_fallback",
-    "neural_core":          "core.brain",
+    "neural_core":          "core.brain_v2",
     "memory_banks":         "core.memory",
     "tactical_display":     "core.context",
     "voice_module":         "services.voice",
