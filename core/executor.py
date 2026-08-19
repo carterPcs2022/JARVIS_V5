@@ -23,6 +23,25 @@ def execute_step(step: dict) -> str:
         "vision_analyze": _vision_analyze,
     }
 
+    # ── Confirmation gate (core/interfaces/tool.py) ────────────────────────────
+    # execute_step() runs inside autonomous, multi-step task execution
+    # (core/react.py, core/agentic_loop.py, core/agents/planner_agent.py) —
+    # unlike core/mac_dispatcher.py's dispatch() (called fresh per chat
+    # message, so there's a next turn to confirm on), there's no point in
+    # this call chain to pause and wait for a confirmation that can't
+    # arrive. A tool marked requires_confirmation=True (run_shell,
+    # write_file) fails closed here instead — refuses cleanly rather than
+    # either silently proceeding or hanging. A caller with a real
+    # confirmation channel can pass step["confirmed"]=True to bypass this;
+    # none of the current callers do.
+    spec = TOOLS.get(tool)
+    if spec and spec.requires_confirmation and not step.get("confirmed", False):
+        return json.dumps({
+            "error": f"'{tool}' requires explicit confirmation and can't run "
+                     f"unattended in this context.",
+            "tool": tool, "confirmation_required": True,
+        })
+
     handler = dispatch.get(tool, _unknown_tool)
     try:
         return handler(args)

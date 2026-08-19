@@ -323,6 +323,77 @@ def _execute_tool(tool: str, args: dict) -> str:
         return f"Tool '{tool}' failed: {e}"
 
 
+# ── Tool registry (core/interfaces/tool.py) ────────────────────────────────────
+# Risk metadata for all 27 tools above, keyed the same as TOOLS. Named
+# TOOL_REGISTRY (not TOOLS) since that name is already the plain
+# description dict used to build the LLM tool-selection prompt above.
+#
+# Only empty_trash is marked requires_confirmation=True: it's the one
+# genuinely hard-to-reverse action in this dispatcher with no existing
+# safety net. gmail_send/gmail_confirm_send/gmail_discard_draft are NOT
+# gated here even though sending mail is high-risk — they already
+# implement their own complete draft-then-confirm flow
+# (core/tools/gmail_send.py), and gating them again through this generic
+# mechanism would mean confirming a confirmation. Every other tool here is
+# either read-only or a routine, easily-reversible action (open an app,
+# skip a song, set the volume) — gating those behind a confirm turn would
+# make ordinary use slower for no real safety benefit.
+
+from core.interfaces.tool import Tool
+
+# (name, risk_level, requires_confirmation, reversible, permissions)
+_TOOL_META = [
+    ("open_app",            "low",    False, True,  ["execute"]),
+    ("quit_app",            "low",    False, True,  ["execute"]),
+    ("focus_app",           "low",    False, True,  ["execute"]),
+    ("list_running_apps",   "low",    False, True,  ["read"]),
+    ("set_volume",          "low",    False, True,  ["write"]),
+    ("get_volume",          "low",    False, True,  ["read"]),
+    ("mute",                "low",    False, True,  ["write"]),
+    ("unmute",              "low",    False, True,  ["write"]),
+    ("take_screenshot",     "low",    False, True,  ["read", "write"]),
+    ("lock_screen",         "low",    False, True,  ["execute"]),
+    ("empty_trash",         "high",   True,  False, ["destructive"]),
+    ("get_clipboard",       "low",    False, True,  ["read"]),
+    ("set_clipboard",       "low",    False, True,  ["write"]),
+    ("notify",              "low",    False, True,  ["write"]),
+    ("open_url",            "low",    False, True,  ["read", "network"]),
+    ("get_todays_events",   "low",    False, True,  ["read"]),
+    ("create_reminder",     "low",    False, True,  ["write"]),
+    ("spotify_play",        "low",    False, True,  ["write"]),
+    ("spotify_pause",       "low",    False, True,  ["write"]),
+    ("spotify_play_pause",  "low",    False, True,  ["write"]),
+    ("spotify_next",        "low",    False, True,  ["write"]),
+    ("spotify_prev",        "low",    False, True,  ["write"]),
+    ("spotify_volume",      "low",    False, True,  ["write"]),
+    ("spotify_current",     "low",    False, True,  ["read"]),
+    ("spotify_search",      "low",    False, True,  ["read", "write", "network"]),
+    ("gmail_inbox",         "low",    False, True,  ["read", "network"]),
+    ("gmail_search",        "low",    False, True,  ["read", "network"]),
+    # High risk, but self-gated by its own draft flow — see note above.
+    ("gmail_send",          "medium", False, True,  ["write", "network"]),
+    ("gmail_confirm_send",  "high",   False, False, ["write", "network", "destructive"]),
+    ("gmail_discard_draft", "low",    False, True,  ["write"]),
+    ("gmail_unread_count",  "low",    False, True,  ["read", "network"]),
+    ("chat",                "low",    False, True,  []),
+]
+
+TOOL_REGISTRY: dict[str, Tool] = {
+    name: Tool(
+        name=name, description=TOOLS[name]["desc"],
+        parameters={"type": "object", "properties": {a: {"type": "string"} for a in TOOLS[name]["args"]}},
+        handler=(lambda args, _name=name: _execute_tool(_name, args)),
+        risk_level=risk, requires_confirmation=confirm, reversible=reversible, permissions=perms,
+    )
+    for name, risk, confirm, reversible, perms in _TOOL_META
+}
+
+# ── Confirmation flow state ─────────────────────────────────────────────────────
+_CONFIRM_PHRASES = {"confirm", "yes", "yes confirm", "do it", "go ahead", "proceed"}
+_DISCARD_PHRASES = {"cancel", "no", "never mind", "nevermind", "stop", "don't", "abort"}
+_last_pending_id: str | None = None
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def dispatch(command: str) -> str:
@@ -339,6 +410,46 @@ def dispatch(command: str) -> str:
         args   = parsed["args"]
 
     print(f"[MacDispatcher] → {tool}({args})")
+
+    # ── Confirmation gate (core/interfaces/tool.py, core/interfaces/permissions.py) ──
+    # dispatch() runs fresh per user chat message, so — unlike
+    # core/executor.py's autonomous-task context — there IS a natural next
+    # turn to confirm on. Checked first: is there a pending action, and is
+    # this message an explicit confirmation of it?
+    global _last_pending_id
+    from core.interfaces import permissions as pending_store
+
+    low_command = command.lower().strip()
+    if _last_pending_id:
+        pending = pending_store.get_pending(_last_pending_id)
+        if pending:
+            if low_command in _CONFIRM_PHRASES:
+                confirmed_entry = pending_store.confirm(pending["id"])
+                _last_pending_id = None
+                result = _execute_tool(confirmed_entry["tool"], confirmed_entry["args"])
+                return f"Done, sir. {result}" if len(result) < 80 else result
+            # Anything else — an explicit "cancel", or the user simply
+            # moving on to something else — discards the pending action
+            # rather than leaving it live for up to
+            # permissions.EXPIRY_SECONDS waiting on a possibly-coincidental
+            # future "yes". Silence/topic-change is not consent.
+            pending_store.discard(pending["id"])
+            was_explicit_discard = low_command in _DISCARD_PHRASES
+            _last_pending_id = None
+            if was_explicit_discard:
+                return f"Cancelled, sir — {pending['tool'].replace('_', ' ')} not performed."
+            # else: fall through and process this message normally
+        else:
+            _last_pending_id = None   # expired
+
+    spec = TOOL_REGISTRY.get(tool)
+    if spec and spec.requires_confirmation:
+        pending = pending_store.propose(tool, args)
+        _last_pending_id = pending["id"]
+        readable = tool.replace("_", " ")
+        return (f"Are you sure, sir? This will {readable} and can't be undone. "
+                f"Say \"confirm\" to proceed, or \"cancel\" to back out.")
+
     result = _execute_tool(tool, args)
 
     # Wrap plain result in a JARVIS-style sentence if it's just a status
