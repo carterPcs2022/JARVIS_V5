@@ -51,3 +51,22 @@ class SelfConsistency:
 
 
 sc = SelfConsistency()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class SelfConsistencyStrategy(ReasoningStrategy):
+    name = "self_consistency"
+
+    def should_use(self, query: str) -> bool:
+        return sc.should_use_sc(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(sc.answer, query, context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.evidence = data.get("samples", [])
+        return result

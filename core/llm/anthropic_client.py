@@ -190,3 +190,36 @@ def call_anthropic_vision(image_b64: str, media_type: str, prompt: str,
     except Exception as e:
         print(f"[LLM] Anthropic vision error ({model}): {e}")
         return None
+
+
+# ── LLMProvider adapter (core/interfaces/llm_provider.py) ─────────────────────
+# The one provider whose real call signature actually matches GenerateRequest's
+# separate `system`/`effort` fields — the other three providers' adapters
+# fold `system` into `messages` and ignore `effort` instead.
+
+import asyncio
+from core.interfaces.llm_provider import LLMProvider, GenerateRequest, ModelResponse
+
+_DEFAULT_MODEL = "claude-sonnet-5"
+
+
+class AnthropicProvider(LLMProvider):
+    name = "anthropic"
+
+    def is_available(self) -> bool:
+        return bool(ANTHROPIC_API_KEY)
+
+    async def generate(self, request: GenerateRequest) -> ModelResponse:
+        model = request.model or _DEFAULT_MODEL
+        data = await asyncio.to_thread(
+            call_anthropic, request.messages, request.system, model,
+            request.max_tokens, request.effort,
+        )
+        if data is None:
+            raise RuntimeError(
+                f"Anthropic call failed or ANTHROPIC_API_KEY unset (model={model})"
+            )
+        return ModelResponse(
+            content=data["content"], model=data["model"], provider=self.name,
+            usage=data.get("usage", {}), thinking=data.get("thinking", ""), raw=data,
+        )

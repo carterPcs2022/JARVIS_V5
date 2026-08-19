@@ -186,3 +186,32 @@ def embed(text: str) -> list[float] | None:
     except Exception:
         pass
     return None
+
+
+# ── LLMProvider adapter (core/interfaces/llm_provider.py) ─────────────────────
+# Named GroqProvider (not OpenAIProvider) to match what this module actually
+# talks to — see the module docstring above.
+
+import asyncio
+from core.interfaces.llm_provider import LLMProvider, GenerateRequest, ModelResponse
+
+
+class GroqProvider(LLMProvider):
+    name = "groq"
+
+    def is_available(self) -> bool:
+        return bool(GROQ_API_KEY)
+
+    async def generate(self, request: GenerateRequest) -> ModelResponse:
+        # Groq is OpenAI-format: a system message (if any) belongs inline in
+        # `messages`, not passed separately like Anthropic's client expects.
+        messages = list(request.messages)
+        if request.system:
+            messages = [{"role": "system", "content": request.system}] + messages
+        data = await asyncio.to_thread(
+            chat, messages, request.max_tokens, request.temperature, request.model,
+        )
+        return ModelResponse(
+            content=data["content"], model=data["model"], provider=self.name,
+            usage=data.get("usage", {}), raw=data,
+        )

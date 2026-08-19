@@ -120,8 +120,8 @@ The proposed `jarvis/{app,cognitive,memory,agents,tools,perception,integrations,
 
 ## 9. Proposed phased plan
 
-1. **Phase 0 — critical security patches** (small, independent, do now): fix the unauthenticated file read, the shell-injection allowlist, AppleScript quote escaping, the phone/SMS webhook auth, CORS wildcard+credentials, and the `.jsonl` gitignore/dockerignore gap. Delete the confirmed-dead files (§4). No architectural change.
-2. **Phase 1 — interfaces**: introduce `ReasoningStrategy`, `LLMProvider`, `Tool`, `Agent` protocols without moving files yet; adapt existing modules to implement them in place.
+1. **Phase 0 — critical security patches** ✅ done (PR #5): fixed the unauthenticated file read, the shell-injection allowlist, AppleScript quote escaping, the phone/SMS webhook auth, CORS wildcard+credentials, and the `.jsonl` gitignore/dockerignore gap. Deleted the confirmed-dead files (§4). No architectural change.
+2. **Phase 1 — interfaces** ✅ done: introduced `ReasoningStrategy`, `LLMProvider`, `Tool`, `Agent` protocols in `core/interfaces/`, without moving any files; adapted existing modules to implement them in place. See §11 for exactly what this did and didn't cover.
 3. **Phase 2 — Cognitive Router**: build the router using `orchestrator.py`'s classify-and-dispatch as the base, wire it as the *only* entry point, retire `brain_v2.py`'s internal duplicate pipeline behind it.
 4. **Phase 3 — Tool Registry + permissions**: wrap `core/tools/*`/`core/executor.py` with risk-level/confirmation metadata; this is what actually closes the shell-injection and arbitrary-file-read *classes* of bug, not just the two instances found today.
 5. **Phase 4 — Verification Engine**: new subsystem; needed before autonomy/self-improvement phases mean anything.
@@ -135,6 +135,24 @@ Each phase ends with tests run, regressions fixed, docs updated, and a report of
 
 ## 10. What I need from you before proceeding
 
-- OK to execute Phase 0 now (it's security-critical and low-risk)?
-- For the committed token in `mcp_config.json`: do you want me to just remove it from HEAD and switch it to read from env (leaving history as-is), or also strip it from git history? I can't rotate the token itself — that has to happen wherever `JARVIS_API_TOKEN` is actually issued/deployed, if it's live anywhere.
-- For Phases 1-9: given the scope (this is realistically weeks of work across ~40k lines), do you want me to proceed phase-by-phase autonomously with a report after each, or check in with you at specific checkpoints (e.g. before Phase 2's router cutover, since that's the highest-risk step)?
+- ~~OK to execute Phase 0 now~~ — done, see §11.
+- ~~Committed token in `mcp_config.json`~~ — resolved: removed from HEAD, switched to placeholder; token rotation (if needed) is the user's, wherever `JARVIS_API_TOKEN` is actually issued.
+- ~~Pacing for Phases 1-9~~ — resolved: proceed phase-by-phase, checkpoint before Phase 2's router cutover and before final deprecation/deletion.
+
+## 11. Progress log
+
+### Phase 1 — interfaces (done)
+
+Added `core/interfaces/{reasoning,llm_provider,tool,agent}.py` — four protocols (`ReasoningStrategy`, `LLMProvider`, `Tool`, `Agent`), each with a lazily-built registry. Every existing module kept its original functions/classes and every existing caller (`core/orchestrator.py`, `server/routes/*.py`, `core/tool_calling.py`, ...) is untouched and still the live code path — these are purely additive adapter classes appended to the bottom of each file:
+
+- **ReasoningStrategy** (8 strategies): `DirectStrategy` (new, lives in the interface module itself — no existing module for the trivial single-call case), plus adapters in `core/reasoning.py` (`ChainOfThoughtStrategy`, `VerifiedReasoningStrategy`), `core/react.py` (`ReActStrategy`), `core/tree_of_thought.py` (`TreeOfThoughtStrategy`), `core/graph_of_thought.py` (`GraphOfThoughtStrategy`), `core/self_consistency.py` (`SelfConsistencyStrategy`), `core/multi_agent.py` (`MixtureOfAgentsStrategy`). `core/reflexion.py` deliberately has no adapter — it's a lesson-store/evaluator, not a query-answering strategy, and doesn't fit the interface.
+- **LLMProvider** (4 providers): adapters in `core/llm/openai.py` (`GroqProvider`), `core/llm/cerebras.py` (`CerebrasProvider`), `core/llm/ollama.py` (`OllamaProvider`), `core/llm/anthropic_client.py` (`AnthropicProvider`). `core/llm/router.py` (the real routing/fallback/caching logic) and `core/llm/cascade.py` (the unused sketch) are both untouched.
+- **Tool** (9 tools): `core/executor.py` gained a `TOOLS: dict[str, Tool]` registry over its existing dispatch table, with risk-level/confirmation/reversibility/permissions metadata per tool. `execute_step()` itself is untouched — nothing enforces this metadata yet (see below).
+- **Agent** (4 agents): adapters in `core/agents/coder.py` (`CoderAgent`), `core/agents/researcher.py` (`ResearcherAgent`), `core/agents/planner_agent.py` (`PlannerAgentAdapter`), `core/agents/deep_research.py` (`DeepResearchTaskAgent`, preserving its fire-and-forget/poll semantics — `run()` returns once the background research thread starts, not once the report is ready).
+
+**Verified** (clean venv, full dependency install): app boots with all 46 routes registered, no import regressions. All 4 registries build and `isinstance`-check correctly. All 8 reasoning strategies' `solve()` and all 4 providers' `generate()` were called end-to-end through real async execution — with no API keys configured in the verification environment they degraded exactly the way the rest of the codebase already does (`[JARVIS OFFLINE]` / clear exceptions naming the missing key), never crashing at the interface layer. `Tool.execute()` was run for real (`system_info`, `read_file`). Both `CoderAgent.run()` and `DeepResearchTaskAgent.run()` were run for real, including `success=False` correctly propagating when generated code fails its syntax check.
+
+**Explicitly not done in Phase 1** (deferred to the phases named in §9, not overlooked):
+- No permission/confirmation *enforcement* — `Tool.requires_confirmation`/`risk_level` are declared but nothing checks them before a tool runs. That's Phase 3.
+- Tool coverage is only `core/executor.py`'s 9 tools, not `core/tools/mac.py`/`gmail.py`/`google_calendar.py`/`spotify.py`/etc., and not reconciled with `core/tool_calling.py`'s separate `TOOLS_SCHEMA` (which uses different names for overlapping concepts, e.g. `system_info` vs `get_system_status`). Also Phase 3.
+- No routing changes — `core/orchestrator.py` still dispatches by its own `if/elif` on `query_type`, not through the new registries. That's Phase 2.

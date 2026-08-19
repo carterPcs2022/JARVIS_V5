@@ -88,3 +88,24 @@ class ReActEngine:
 
 
 react = ReActEngine()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class ReActStrategy(ReasoningStrategy):
+    name = "react"
+
+    def should_use(self, query: str) -> bool:
+        return react.should_use_react(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(react.reason_and_act, query, context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.evidence = [
+            f"{s['action']} -> {s['observation']}" for s in data.get("steps", []) if s.get("action")
+        ]
+        return result

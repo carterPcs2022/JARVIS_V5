@@ -103,3 +103,28 @@ def chat(messages: list[dict], max_tokens: int = 1024,
         "model":   data.get("model", CEREBRAS_MODEL),
         "usage":   data.get("usage", {}),
     }
+
+
+# ── LLMProvider adapter (core/interfaces/llm_provider.py) ─────────────────────
+
+import asyncio
+from core.interfaces.llm_provider import LLMProvider, GenerateRequest, ModelResponse
+
+
+class CerebrasProvider(LLMProvider):
+    name = "cerebras"
+
+    def is_available(self) -> bool:
+        return bool(CEREBRAS_API_KEY)
+
+    async def generate(self, request: GenerateRequest) -> ModelResponse:
+        messages = list(request.messages)
+        if request.system:
+            messages = [{"role": "system", "content": request.system}] + messages
+        data = await asyncio.to_thread(
+            chat, messages, request.max_tokens, request.temperature, request.model,
+        )
+        return ModelResponse(
+            content=data["content"], model=data["model"], provider=self.name,
+            usage=data.get("usage", {}), raw=data,
+        )

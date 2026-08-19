@@ -54,3 +54,26 @@ class GraphOfThought:
 
 
 got = GraphOfThought()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+# Named GraphOfThoughtStrategy here to avoid clashing with the GraphOfThought
+# class above; both live in this file, "in place" per the Phase 1 plan.
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class GraphOfThoughtStrategy(ReasoningStrategy):
+    name = "graph_of_thought"
+
+    def should_use(self, query: str) -> bool:
+        return got.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        # got.think() has no context parameter (see class above) — context
+        # is accepted here only for interface uniformity and is dropped.
+        data = await asyncio.to_thread(got.think, query)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.metadata["nodes_explored"] = data.get("nodes", 0)
+        return result

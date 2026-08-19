@@ -88,3 +88,29 @@ class TreeOfThought:
 
 
 tot = TreeOfThought()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class TreeOfThoughtStrategy(ReasoningStrategy):
+    name = "tree_of_thought"
+
+    def should_use(self, query: str) -> bool:
+        return tot.should_use_tot(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(tot.think, query, context=context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        if data.get("best_approach"):
+            result.assumptions = [data["best_approach"]]
+        # all_trees carries every scored branch, useful for debugging/audit
+        # but too large to surface directly — confidence proxies its
+        # top branch's own 0-10 self-evaluation score instead.
+        trees = data.get("all_trees") or []
+        if trees:
+            result.confidence = min(1.0, max(0.0, trees[0].get("score", 5.0) / 10))
+        return result

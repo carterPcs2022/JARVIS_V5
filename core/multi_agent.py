@@ -54,3 +54,23 @@ def needs_moa(query: str) -> bool:
         "opinion", "advice", "worth it", "help me decide", "pros and cons", "tradeoffs",
     ]
     return any(t in query.lower() for t in triggers)
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+# mixture_of_agents() is already async — solve() awaits it directly instead
+# of the asyncio.to_thread() wrapping the other (synchronous) strategies need.
+
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class MixtureOfAgentsStrategy(ReasoningStrategy):
+    name = "mixture_of_agents"
+
+    def should_use(self, query: str) -> bool:
+        return needs_moa(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await mixture_of_agents(query, context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.evidence = [f"[{a['agent']}] {a['response']}" for a in data.get("agents", [])]
+        return result

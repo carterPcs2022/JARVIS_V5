@@ -31,3 +31,29 @@ def _syntax_check(code: str, language: str) -> tuple[bool, str]:
         except SyntaxError as e:
             return False, str(e)
     return True, ""
+
+
+# ── Agent adapter (core/interfaces/agent.py) ───────────────────────────────────
+# This module has three entry points (generate/review/debug), not one — run()
+# picks between them via context["mode"], defaulting to generate() since
+# that's the common case (context also carries generate()'s `language`,
+# debug()'s `error`).
+
+import asyncio
+from core.interfaces.agent import Agent, AgentResult
+
+
+class CoderAgent(Agent):
+    name = "coder"
+
+    async def run(self, task: str, context: dict | None = None) -> AgentResult:
+        context = context or {}
+        mode = context.get("mode", "generate")
+        if mode == "review":
+            result = await asyncio.to_thread(review, task)
+        elif mode == "debug":
+            result = await asyncio.to_thread(debug, task, context.get("error", ""))
+        else:
+            result = await asyncio.to_thread(generate, task, context.get("language", "python"))
+        success = result.get("valid", True) and not result.get("error")
+        return AgentResult(output=result, success=success, metadata={"mode": mode})
