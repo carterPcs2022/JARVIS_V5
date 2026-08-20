@@ -215,6 +215,16 @@ body::before {
 .msg-model { font-size: 8px; letter-spacing: 1px; color: var(--muted); padding: 1px 6px; border: 1px solid var(--border2); border-radius: 1px; }
 .msg-latency { font-size: 8px; color: var(--muted); letter-spacing: 1px; }
 
+.choice-prompt { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.choice-question-text { font-size: 11px; letter-spacing: .5px; color: var(--accent2); margin-bottom: 6px; }
+.choice-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.choice-btn { padding: 7px 14px; background: rgba(95,216,255,0.05); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: inherit; font-size: 12px; letter-spacing: .3px; cursor: pointer; }
+.choice-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(95,216,255,0.1); }
+.choice-btn-selected { border-color: var(--accent); color: var(--accent); background: rgba(95,216,255,0.15); box-shadow: 0 0 8px rgba(95,216,255,0.2); }
+.choice-submit { align-self: flex-start; border-color: var(--gold); color: var(--gold); background: rgba(217,164,65,0.06); letter-spacing: 2px; font-size: 10px; }
+.choice-submit:hover:not(:disabled) { background: rgba(217,164,65,0.15); box-shadow: 0 0 10px rgba(217,164,65,0.2); }
+.choice-submit:disabled { opacity: .35; cursor: not-allowed; }
+
 .thinking { display: flex; align-items: center; gap: 10px; padding: 10px 14px; font-size: 10px; letter-spacing: 2px; color: var(--muted); border-left: 2px solid var(--accent); background: rgba(95,216,255,0.02); }
 .think-dots { display: flex; gap: 4px; }
 .think-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); animation: think-bounce 1.2s ease-in-out infinite; }
@@ -783,6 +793,78 @@ function addMessage(role, text, meta = {}) {
   return body;
 }
 
+function renderChoicePrompt(bodyEl, pendingChoice) {
+  // Renders JARVIS's ask_user_choice pending questions as clickable
+  // buttons under the message that asked them (see core/ask_user_choice.py
+  // and server/websocket.py's pending_choice field). One shared
+  // click-to-select + Submit flow covers both single questions
+  // (allow_multiple=false, one selection auto-clears any other) and
+  // multiple questions/multi-select — Submit sends every selected option
+  // across all questions as one comma-joined message, which
+  // core.ask_user_choice.resolve_reply() parses back apart server-side.
+  if (!pendingChoice || !Array.isArray(pendingChoice.questions) || !pendingChoice.questions.length) return;
+  const block = bodyEl.closest('.msg-block');
+  if (!block) return;
+
+  const wrap = document.createElement('div');
+  wrap.className = 'choice-prompt';
+  const selections = pendingChoice.questions.map(() => new Set());
+  let submitBtn;
+
+  pendingChoice.questions.forEach((q, qi) => {
+    const qDiv = document.createElement('div');
+    qDiv.className = 'choice-question';
+
+    const label = document.createElement('div');
+    label.className = 'choice-question-text';
+    label.textContent = q.question + (q.allow_multiple ? ' (pick one or more)' : '');
+    qDiv.appendChild(label);
+
+    const optsDiv = document.createElement('div');
+    optsDiv.className = 'choice-options';
+    (q.options || []).forEach((opt) => {
+      const btn = document.createElement('button');
+      btn.className = 'choice-btn';
+      btn.type = 'button';
+      btn.textContent = opt;
+      btn.addEventListener('click', () => {
+        const sel = selections[qi];
+        if (sel.has(opt)) {
+          sel.delete(opt);
+          btn.classList.remove('choice-btn-selected');
+        } else {
+          if (!q.allow_multiple) {
+            sel.clear();
+            optsDiv.querySelectorAll('.choice-btn-selected').forEach((b) => b.classList.remove('choice-btn-selected'));
+          }
+          sel.add(opt);
+          btn.classList.add('choice-btn-selected');
+        }
+        if (submitBtn) submitBtn.disabled = !selections.some((s) => s.size > 0);
+      });
+      optsDiv.appendChild(btn);
+    });
+    qDiv.appendChild(optsDiv);
+    wrap.appendChild(qDiv);
+  });
+
+  submitBtn = document.createElement('button');
+  submitBtn.className = 'choice-btn choice-submit';
+  submitBtn.type = 'button';
+  submitBtn.textContent = 'SUBMIT';
+  submitBtn.disabled = true;
+  submitBtn.addEventListener('click', () => {
+    const chosen = selections.flatMap((s) => Array.from(s));
+    if (!chosen.length) return;
+    wrap.remove();
+    sendText(chosen.join(', '));
+  });
+  wrap.appendChild(submitBtn);
+
+  block.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 function showThinking(text = 'PROCESSING...') {
   setVoiceStatus('processing');
   let el = messagesEl.querySelector('.thinking');
@@ -840,7 +922,10 @@ function handleWsMessage(data) {
     streamBubble.textContent += data.token;
     messagesEl.scrollTop = messagesEl.scrollHeight;
   } else if (data.type === 'stream_end') {
-    if (streamBubble) streamBubble.textContent = cleanText('ai', data.response ?? streamBubble.textContent);
+    if (streamBubble) {
+      streamBubble.textContent = cleanText('ai', data.response ?? streamBubble.textContent);
+      if (data.pending_choice) renderChoicePrompt(streamBubble, data.pending_choice);
+    }
     streamBubble = null;
     updateModel(data.model || '', '');
     // No fallback here — the server (server/websocket.py's _try_stream())
@@ -855,7 +940,8 @@ function handleWsMessage(data) {
     // thread writes the audio file but never sends audio_ready.
   } else if (data.type === 'response') {
     hideThinking();
-    addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+    const body = addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+    if (data.pending_choice) renderChoicePrompt(body, data.pending_choice);
     if (data.has_audio !== false) playLatestVoiceFallback();
   } else if (data.type === 'audio_ready') {
     // Exact filename(s) from the background TTS generation — no
@@ -874,10 +960,8 @@ function handleWsMessage(data) {
   }
 }
 
-function sendMessage() {
-  const text = inputEl.value.trim();
+function sendText(text) {
   if (!text) return;
-  inputEl.value = '';
   addMessage('user', text);
   showThinking();
 
@@ -886,12 +970,20 @@ function sendMessage() {
   } else {
     jarvisPost('/stark/chat', { message: text }).then(data => {
       hideThinking();
-      addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+      const body = addMessage('ai', data.response || '(no response)', { model: data.model, latency: data.latency_ms });
+      if (data.pending_choice) renderChoicePrompt(body, data.pending_choice);
     }).catch(() => {
       hideThinking();
       addMessage('system', 'Connection error.');
     });
   }
+}
+
+function sendMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  inputEl.value = '';
+  sendText(text);
 }
 
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });

@@ -208,6 +208,17 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
         # surfaced this.
         return False
 
+    # If there's a pending ask_user_choice, don't take the fast streaming
+    # shortcut — fall through to the real Brain.process() pipeline (via
+    # the caller's brain.process_dict() fallback), which is the one place
+    # resolution + clearing the pending state happens. This path never
+    # calls Brain.process() at all for a streamed reply, so it can't
+    # resolve a pending choice itself without duplicating (and risking
+    # double-clearing) that logic.
+    from core.ask_user_choice import get_pending
+    if get_pending() is not None:
+        return False
+
     from core.llm.openai import stream_chat
     from core.brain_v2 import Reasoner, Validator
     from core.context import build_context, build_system
@@ -287,6 +298,28 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
 
         latency = round((time.time() - start) * 1000, 2)
 
+        # ── ask_user_choice marker detection ────────────────────────────────
+        # This streamed the raw tokens live as they arrived, so a trailing
+        # ```ask_user_choice block (the model is instructed to only ever put
+        # one at the very end of a response, never lead with or interleave
+        # it) may have flashed briefly as raw text before this strips it —
+        # a known, accepted tradeoff of the fast token-streaming path rather
+        # than something worth buffering the whole response to avoid, since
+        # this marker is meant to be rare. stream_end below carries the
+        # corrected text, which is what actually gets persisted/rendered as
+        # the final message.
+        pending_choice = None
+        try:
+            from core.ask_user_choice import extract_marker, format_fallback_text, propose
+            clean_text, parsed = extract_marker(full_txt)
+            full_txt = clean_text
+            if parsed is not None:
+                pending_choice = propose(parsed.get("questions", []))
+                if pending_choice is not None:
+                    full_txt = f"{full_txt}\n\n{format_fallback_text(pending_choice)}".strip()
+        except Exception:
+            pass
+
         # Persist turn
         await loop.run_in_executor(None, _persist, msg, full_txt)
 
@@ -317,6 +350,7 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
             "provider": "groq",
             "latency_ms": latency,
             "has_audio": has_audio,
+            "pending_choice": pending_choice,
             "meta": {
                 "action":        intent.action,
                 "complexity":    intent.complexity,

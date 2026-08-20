@@ -54,6 +54,17 @@ TOOLS = {
                              "args": []},
     "gmail_unread_count":{"desc":"Get number of unread Gmail messages", "args": []},
 
+    # Disambiguation — use ONLY when the command is genuinely ambiguous
+    # between real, distinct options (e.g. which of several named scenes
+    # was meant). Never use this for routine clarifying questions, and
+    # never when there's enough information to just act — guessing
+    # reasonably and letting the user correct you is almost always
+    # better than stopping to ask.
+    "ask_user_choice":  {"desc": "Ask the user to pick between 2-4 short options when a command is "
+                                  "genuinely ambiguous between real choices — not for questions you "
+                                  "could just answer or a command you could reasonably act on directly",
+                          "args": ["question", "options", "allow_multiple"]},
+
     # Fallback
     "chat":             {"desc": "No tool matches — answer conversationally", "args": ["response"]},
 }
@@ -82,6 +93,8 @@ _EXAMPLE = """Examples:
   "cancel that email" / "don't send it" / "discard the draft" → {"tool":"gmail_discard_draft","args":{}}
   "remind me to call mom in 30 minutes" → {"tool":"create_reminder","args":{"title":"Call mom","due_in_minutes":30}}
   "take a screenshot"      → {"tool":"take_screenshot","args":{}}
+  "turn on the mood lighting" (ambiguous between several real named scenes) →
+      {"tool":"ask_user_choice","args":{"question":"Which scene did you mean?","options":["Movie","Focus","Reading","Night"]}}
 """
 
 
@@ -311,6 +324,22 @@ def _execute_tool(tool: str, args: dict) -> str:
                 return "Gmail not configured."
             count = gm.get_unread_count()
             return f"You have {count} unread email(s) in your inbox."
+
+        # ── Disambiguation ────────────────────────────────────────────────────
+        elif tool == "ask_user_choice":
+            from core.ask_user_choice import format_fallback_text, propose
+            question = {
+                "question": args.get("question", ""),
+                "options": args.get("options", []),
+                "allow_multiple": bool(args.get("allow_multiple", False)),
+            }
+            pending = propose([question])
+            if pending is None:
+                # Validation dropped it (e.g. fewer than 2 real options) —
+                # degrade to just asking conversationally rather than
+                # silently doing nothing.
+                return args.get("question", "Which did you mean?")
+            return format_fallback_text(pending)
 
         # ── Fallback ──────────────────────────────────────────────────────────
         elif tool == "chat":
