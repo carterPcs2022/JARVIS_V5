@@ -320,7 +320,12 @@ def _execute_tool(tool: str, args: dict) -> str:
             return f"Unknown tool: {tool}"
 
     except Exception as e:
-        return f"Tool '{tool}' failed: {e}"
+        # Bracket-error convention (matches core/tools/*.py's own
+        # "[Xxx error: ...]" style) rather than a bespoke string — this is
+        # what core/interfaces/verification.py's verify_tool_result()
+        # detects to know a call actually failed, e.g. for the Phase 8
+        # metrics wired into dispatch() below.
+        return f"[Tool error: {tool} failed: {e}]"
 
 
 # ── Tool registry (core/interfaces/tool.py) ────────────────────────────────────
@@ -451,6 +456,14 @@ def dispatch(command: str) -> str:
                 f"Say \"confirm\" to proceed, or \"cancel\" to back out.")
 
     result = _execute_tool(tool, args)
+
+    try:
+        from core.interfaces.verification import verify_tool_result
+        from services.metrics import record_tool_execution
+        verdict = verify_tool_result(result)
+        record_tool_execution(tool, spec.risk_level if spec else "unknown", verdict.success)
+    except Exception:
+        pass
 
     # Wrap plain result in a JARVIS-style sentence if it's just a status
     if len(result) < 80 and not result.startswith(("You have","Today","Found","Running","Clipboard")):

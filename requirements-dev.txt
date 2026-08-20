@@ -1,0 +1,7 @@
+# Test/dev tooling only — not needed to run JARVIS itself, only to run
+# tests/. Install with: pip install -r requirements-dev.txt (on top of
+# requirements.txt or requirements-local.txt).
+-r requirements.txt
+
+pytest>=8.0.0
+pytest-asyncio>=0.24.0

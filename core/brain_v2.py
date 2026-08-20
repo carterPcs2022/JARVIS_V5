@@ -1031,6 +1031,14 @@ class Executor:
             # Matches the exact provider string the old if/elif branch
             # built: f"mental_model_{used_model}".
             provider = f"mental_model_{result.metadata.get('used_model', '')}"
+
+        try:
+            from core.interfaces.verification import verify_tool_result
+            from services.metrics import record_reasoning_strategy
+            record_reasoning_strategy(engine, verify_tool_result(result.answer).success)
+        except Exception:
+            pass
+
         return result.answer, "", provider
 
     def _local_file_command(self, intent: Intent) -> str:

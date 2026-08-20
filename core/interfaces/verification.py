@@ -150,6 +150,19 @@ def with_retry(
         result = fn()
         verdict = verify(result)
         if verdict.success or verdict.recommended_action != "retry" or attempt == max_attempts:
+            _record_outcome(verdict.success)
             return result, verdict
+        _record_outcome(None)   # retry — distinct from the final success/failure below
         time.sleep(backoff_base * (2 ** (attempt - 1)))
-    return result, verdict  # pragma: no cover — loop always returns above
+    _record_outcome(verdict.success)  # pragma: no cover — loop always returns above
+    return result, verdict
+
+
+def _record_outcome(success: bool | None):
+    """success=None means "retrying" — a distinct outcome from the final
+    success/failure recorded once the loop actually stops."""
+    try:
+        from services.metrics import record_verification
+        record_verification("retry" if success is None else ("success" if success else "failure"))
+    except Exception:
+        pass

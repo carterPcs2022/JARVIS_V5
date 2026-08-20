@@ -62,9 +62,14 @@ def execute_step(step: dict) -> str:
     # real reason, same as before this existed.
     from core.interfaces.verification import with_retry, verify_tool_result
     reversible = spec.reversible if spec else True
-    result, _verdict = with_retry(
+    result, verdict = with_retry(
         _run, verify=lambda r: verify_tool_result(r, reversible=reversible), max_attempts=3,
     )
+    try:
+        from services.metrics import record_tool_execution
+        record_tool_execution(tool, spec.risk_level if spec else "unknown", verdict.success)
+    except Exception:
+        pass
     return result
 
 
