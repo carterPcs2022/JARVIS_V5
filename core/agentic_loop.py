@@ -125,3 +125,28 @@ class AgenticLoop:
 
 
 agentic = AgenticLoop()
+
+
+# ── Agent adapter (core/interfaces/agent.py) ───────────────────────────────────
+# AgenticLoop.run() is already synchronous and blocking (no background
+# thread, unlike deep_research) so this wraps it in asyncio.to_thread the
+# same way the Phase 1 agent adapters wrap their own synchronous engines.
+
+import asyncio
+from core.interfaces.agent import Agent, AgentResult
+
+
+class AgenticLoopAgent(Agent):
+    name = "agentic_loop"
+
+    async def run(self, task: str, context: dict | None = None) -> AgentResult:
+        context = context or {}
+        result = await asyncio.to_thread(
+            agentic.run, task, context.get("context", ""),
+            context.get("max_iterations", MAX_ITERATIONS),
+            context.get("step_tier", "reasoning"), context.get("final_tier", "opus"),
+        )
+        return AgentResult(
+            output=result, success=result.get("success", False),
+            metadata={"iterations": result.get("iterations"), "tools_used": result.get("tools_used")},
+        )

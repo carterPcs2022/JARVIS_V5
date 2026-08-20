@@ -126,7 +126,7 @@ The proposed `jarvis/{app,cognitive,memory,agents,tools,perception,integrations,
 4. **Phase 3 — Tool Registry + permissions** ✅ done: found there are three independent tool dispatchers, not one registry with gaps — see §11 for scope and what's real enforcement vs. still deferred.
 5. **Phase 4 — Verification Engine** ✅ done: see §11 for scope (a real, if intentionally bounded, first version — not exhaustive per-tool verification).
 6. **Phase 5 — Memory unification** ✅ done, re-scoped: `core/memory.py` already implements the working/episodic/semantic/procedural/emotional/prospective split cleanly — this line's premise was wrong. See §11 for what was actually missing and fixed.
-7. **Phase 6 — Agent standardization**: shared `Agent.run()` over the existing four agents.
+7. **Phase 6 — Agent standardization** ✅ done: mostly already shipped in Phase 1; found and added one more real agent (`core/agentic_loop.py`). See §11.
 8. **Phase 7 — Security hardening pass 2**: consolidate the security/crypto clusters under `security/`, wire the adaptive rate limiter, replace `core/sandbox.py`'s process-only isolation if real containerization is available in the target deploy environment.
 9. **Phase 8 — Observability + testing + benchmark suite**.
 10. **Phase 9 — Deprecation cleanup**: remove what Phase 1-8 superseded, once nothing depends on it.
@@ -223,3 +223,12 @@ What genuinely was missing, found by the same read-it-in-full pass: `core/workin
 **Explicitly not done in Phase 5** (deferred, not overlooked): no file splitting (the existing organization is already correct); no changes to episodic/semantic/procedural/emotional/prospective (already wired, or — for procedural/emotional/prospective — correctly left unwired since nothing writes to them, per the existing code's own comment); no session-boundary clearing of working memory (no session concept exists elsewhere in the codebase to hook it to; natural capacity-based eviction already bounds it).
 
 **Verified**: full app boots with the same 46 routes as Phase 4 (no regression). Behavioral tests confirmed: `save_turn()` actually populates working memory; `working_memory_as_context()` retrieves content-relevant turns (not just recent ones) and correctly returns nothing for an unrelated query; capacity eviction holds at exactly 7 items after 10 turns. `build_context()` integration tests confirmed: empty working memory doesn't crash or add a stray section; a relevant working-memory entry actually appears in the assembled context; a near-zero token budget still doesn't crash (working memory correctly gets trimmed out first when there's no room). Re-ran the full Phase 3 and Phase 4 test suites against the Phase-5-modified files — all still pass.
+
+### Phase 6 — Agent standardization (done, mostly already shipped)
+
+Most of this phase's stated goal ("shared `Agent.run()` over the existing four agents") was already delivered in Phase 1, before this phase was formally reached — `core/agents/{coder,researcher,planner_agent,deep_research}.py` all implement `Agent` already. What remained: confirm nothing was missed, and check the directive's "agents should not randomly call each other — use controlled orchestration" rule actually holds.
+
+- Grepped every `core/agents/*` import across the repo: no agent imports or calls another agent directly. Only external orchestrators (`core/brain_v2.py`, `core/tool_calling.py`, `core/protocols.py`) call into individual agents. The rule already held without needing a fix.
+- Found one genuine agent Phase 1 missed: `core/agentic_loop.py`'s `AgenticLoop` — a real iterative try/observe/adjust loop with deliberately restricted tool access (read-only/informational tools only; an autonomous loop deciding to run shell commands or write files is explicitly called out in its own docstring as "a different risk class"). Added `AgenticLoopAgent`, registered as `"agentic_loop"` — the registry is now 5 agents.
+
+**Verified**: full app boots with the same 46 routes as Phase 5 (no regression). Registry validated at 5 agents, all `isinstance`-checked. Ran `AgenticLoopAgent.run()` for real end-to-end — degrades gracefully with no API keys configured, `success=False` correctly reflects hitting the iteration cap without completing.
