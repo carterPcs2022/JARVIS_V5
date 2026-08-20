@@ -129,7 +129,7 @@ The proposed `jarvis/{app,cognitive,memory,agents,tools,perception,integrations,
 7. **Phase 6 — Agent standardization** ✅ done: mostly already shipped in Phase 1; found and added one more real agent (`core/agentic_loop.py`). See §11.
 8. **Phase 7 — Security hardening pass 2** ✅ done, re-scoped: 2 of 3 original line items turned out to be wrong/inadvisable on inspection; replaced with 4 real, previously-identified-but-unfixed findings from the original audit. See §11.
 9. **Phase 8 — Observability + testing + benchmark suite** ✅ done. Found `services/metrics.py`'s existing Prometheus counters were defined but never incremented anywhere — a real, pre-existing gap. See §11 for what shipped.
-10. **Phase 9 — Deprecation cleanup**: remove what Phase 1-8 superseded, once nothing depends on it.
+10. **Phase 9 — Deprecation cleanup** ✅ done. Re-swept the whole repo rather than assuming — found 2 more genuinely dead files Phase 0 missed, confirmed nothing Phases 1-8 built actually needs deleting. See §11.
 
 Each phase ends with tests run, regressions fixed, docs updated, and a report of what changed — per the directive's rules.
 
@@ -263,3 +263,24 @@ Replaced with 4 real, concrete findings from the original audit's §5 that Phase
 **Benchmark suite.** Added `benchmarks/run_benchmark.py` — explicit in its own docstring about being a first, bounded version, not the full scope of the master directive's §21 (task success rate against real model outputs, memory retrieval quality, and cost all need live API credentials and/or real usage history this environment doesn't have). Measures what's deterministically measurable without either: reasoning-strategy selection accuracy (24 cases against each strategy's real `should_use()` heuristic), verification/error-detection accuracy (6 cases), tool-registry consistency (a static invariant check — anything `requires_confirmation` should also be `reversible=False`; nothing `risk_level="destructive"` should be ungated), and interface-layer registry-build latency.
 
 **Verified**: full app boots with the same 46 routes as Phase 7 (no regression). Ran the actual pytest suite in a clean venv — all 58 tests pass. Ran the benchmark harness for real — caught a genuine bug in the harness's own first draft (a test case's phrase didn't match `six_hats`' real trigger keyword, "all angles" vs. the case's "every angle"), fixed it, re-ran clean: all 4 benchmark categories pass. A dedicated end-to-end test used FastAPI's `TestClient` to make a real HTTP request and confirmed `REQUESTS_TOTAL`/`RESPONSE_TIME` actually increment on `/metrics` for that real request, and that the new V6 interface metric families are registered and exported.
+
+### Phase 9 — Deprecation cleanup (done)
+
+The master directive's own deprecation rule is cautious: "mark as deprecated first... verify nothing depends on them... then remove in a controlled cleanup phase" — not "delete anything that looks old." Checked what Phases 1-8 actually made removable before touching anything, rather than assuming a large cleanup was owed:
+
+- **`core/orchestrator.py`, individual reasoning modules (`six_hats.py`, `premortem.py`, etc.), `core/agents/*.py`**: not removable — these are the *real implementations* Phase 1/2's adapter classes wrap, not superseded duplicates. Deleting them would delete the actual logic.
+- **The interface registries themselves** (`core/interfaces/{reasoning,llm_provider,tool,agent}.py` and everything they wrap) and **`core/cognitive_router.py`**: intentionally still side-door/inert in places by design (documented in each phase), not dead code — this is forward-looking groundwork, not something to remove.
+- **`core/llm/cascade.py`**: confirmed still fully unused (only reference anywhere is a cosmetic status-label string in `services/mark_system.py`). Not deleted — its `Provider`/`RouteResult` shape is a cleaner sketch than `router.py`'s procedural style and has real value if `router.py` is ever refactored toward it (per Phase 1's own note). Added an explicit `DEPRECATED` docstring notice explaining why it's kept and what would need to change to actually use it (it's also missing Cerebras from its `Provider` enum, so it isn't even complete as-is).
+
+Rather than trust the assumption that nothing new was missed, ran a scripted whole-repo scan (same rigor as Phase 0's original dead-code sweep) for any `core/`/`services/` module with zero references anywhere else in the repo. Found 4 candidates, verified each individually rather than trusting the script:
+
+- `core/cognitive_router.py`, `services/mcp_server.py` — false positives, already-documented intentional cases (this migration's own new entry point; a standalone CLI entry point run outside the FastAPI app).
+- **`core/cognitive_load.py`** (`CognitiveLoadManager` — response-length calibration) and **`core/tools/voice.py`** (a thin wrapper delegating to `services/voice.py`) — genuinely dead, confirmed with a precise follow-up grep (not just the script), zero references anywhere including status-label strings. Phase 0's original sweep missed both. Deleted.
+
+**Verified**: full app boots with the same 46 routes as Phase 8 (no regression). Full pytest suite (58 tests) and the benchmark harness both re-run clean after the two deletions.
+
+---
+
+## 12. Migration summary
+
+All ten phases from §9's plan are complete. Every phase that touched live behavior was verified with real, executed tests — not just import checks — and every phase where the original plan's premise turned out to be wrong (Phase 2's `brain_v2.py`, Phase 5's memory architecture, Phase 7's rate-limiter/crypto-cluster items) was re-scoped honestly rather than forced through, in most cases after checking the re-scope with the user first. The codebase now has: a documented architecture and migration history (this file), four core protocols with working registries, real (if intentionally bounded) tool permission enforcement and outcome verification, working memory actually wired into context assembly, real observability wired into the request path, a permanent 58-test pytest suite where none existed before, and a first benchmark harness. What remains open and explicitly deferred, not forgotten: reconciling the `web_search` naming collision between the executor and tool_calling registries; extending tool/verification coverage beyond the live chokepoints already wired; decomposing `Brain.process()`'s early-exit gauntlet into named pipeline stages; real containerized sandbox isolation (infrastructure-blocked in this deployment); and migrating any of the 16 existing `brain.process_dict()` call sites to `core/cognitive_router.py` (deliberately not attempted — see Phase 2).
