@@ -1,0 +1,8 @@
+# jarvis_mcp_server's own dependency, on top of the main repo's
+# requirements.txt (this server imports core/ and services/ directly, so
+# it needs that whole dependency set too — see README.md "Running locally").
+#
+# mcp bundles starlette + uvicorn + httpx already; pinned below 2.0 since
+# the FastMCP API this server uses (mcp.server.fastmcp) moved/reorganized
+# in the 2.0.0 pre-release available on PyPI at the time this was written.
+mcp>=1.9.0,<2.0.0

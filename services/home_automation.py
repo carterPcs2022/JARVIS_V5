@@ -94,6 +94,39 @@ def _ha_call(domain: str, service: str, data: dict) -> dict:
         return {"ok": False, "error": str(e)}
 
 
+def list_devices() -> dict:
+    """List entities Home Assistant currently knows about, via its
+    /api/states endpoint. Read-only — same not_configured guard and httpx
+    pattern as every other function in this module."""
+    if not _ha_configured():
+        return {"status": "not_configured"}
+    import httpx
+    try:
+        r = httpx.get(
+            f"{HOME_ASSISTANT_URL.rstrip('/')}/api/states",
+            headers={"Authorization": f"Bearer {HOME_ASSISTANT_TOKEN}"},
+            timeout=5,
+        )
+        if r.status_code != 200:
+            return {"ok": False, "status": r.status_code}
+        states = r.json()
+        return {
+            "ok": True,
+            "count": len(states),
+            "devices": [
+                {
+                    "entity_id": s.get("entity_id"),
+                    "state": s.get("state"),
+                    "name": (s.get("attributes") or {}).get("friendly_name", s.get("entity_id")),
+                }
+                for s in states
+            ],
+        }
+    except Exception as e:
+        log.debug("Home Assistant list_devices failed: %s", e)
+        return {"ok": False, "error": str(e)}
+
+
 def set_lights(**config) -> dict:
     if not _ha_configured():
         return {"status": "not_configured", "requested": config}
