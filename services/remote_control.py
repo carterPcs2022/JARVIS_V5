@@ -35,7 +35,12 @@ class RemoteMacControl:
 
         # Running on a hosted server with no local Mac access → SSH over Tailscale
         if IS_HEADLESS_CLOUD and TAILSCALE_IP and MAC_USERNAME:
-            ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=no",
+            # accept-new (not the old "no"): trusts the host key on first
+            # connection (normal for a fresh Tailscale pairing, no manual
+            # known_hosts setup needed) but verifies it matches on every
+            # call after that — "no" accepted ANY host key on EVERY call,
+            # silently trusting a hijacked/spoofed host indefinitely.
+            ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=accept-new",
                       f"{MAC_USERNAME}@{TAILSCALE_IP}", cmd]
             try:
                 result = subprocess.run(ssh_cmd, capture_output=True, text=True, timeout=10)

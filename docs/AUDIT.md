@@ -127,7 +127,7 @@ The proposed `jarvis/{app,cognitive,memory,agents,tools,perception,integrations,
 5. **Phase 4 — Verification Engine** ✅ done: see §11 for scope (a real, if intentionally bounded, first version — not exhaustive per-tool verification).
 6. **Phase 5 — Memory unification** ✅ done, re-scoped: `core/memory.py` already implements the working/episodic/semantic/procedural/emotional/prospective split cleanly — this line's premise was wrong. See §11 for what was actually missing and fixed.
 7. **Phase 6 — Agent standardization** ✅ done: mostly already shipped in Phase 1; found and added one more real agent (`core/agentic_loop.py`). See §11.
-8. **Phase 7 — Security hardening pass 2**: consolidate the security/crypto clusters under `security/`, wire the adaptive rate limiter, replace `core/sandbox.py`'s process-only isolation if real containerization is available in the target deploy environment.
+8. **Phase 7 — Security hardening pass 2** ✅ done, re-scoped: 2 of 3 original line items turned out to be wrong/inadvisable on inspection; replaced with 4 real, previously-identified-but-unfixed findings from the original audit. See §11.
 9. **Phase 8 — Observability + testing + benchmark suite**.
 10. **Phase 9 — Deprecation cleanup**: remove what Phase 1-8 superseded, once nothing depends on it.
 
@@ -232,3 +232,20 @@ Most of this phase's stated goal ("shared `Agent.run()` over the existing four a
 - Found one genuine agent Phase 1 missed: `core/agentic_loop.py`'s `AgenticLoop` — a real iterative try/observe/adjust loop with deliberately restricted tool access (read-only/informational tools only; an autonomous loop deciding to run shell commands or write files is explicitly called out in its own docstring as "a different risk class"). Added `AgenticLoopAgent`, registered as `"agentic_loop"` — the registry is now 5 agents.
 
 **Verified**: full app boots with the same 46 routes as Phase 5 (no regression). Registry validated at 5 agents, all `isinstance`-checked. Ran `AgenticLoopAgent.run()` for real end-to-end — degrades gracefully with no API keys configured, `success=False` correctly reflects hitting the iteration cap without completing.
+
+### Phase 7 — Security hardening pass 2 (done, re-scoped)
+
+Two of the three original line items didn't survive contact with the actual code:
+
+- **"Wire the adaptive rate limiter"**: `services/adaptive_ratelimit.py`'s own docstring explicitly explains why it's deliberately *not* wired as blocking middleware — the risk score it reads can rise on the owner's own legitimate bursty usage before a baseline is established, and its "critical" tier allows only 1 request/minute, severe enough to lock the owner out of their own assistant on a false positive. Wiring it in would have directly contradicted a reasoned decision already made in the code, for no offsetting benefit. Left as-is.
+- **"Consolidate the security/crypto clusters"**: two of the three modules this referred to (`crypto_security.py`, `quantum_crypto.py`) were already deleted as dead code in Phase 0. The third (`zero_knowledge.py`) is — like the rate limiter — deliberately not wired as primary auth, for its own documented reasons. Nothing left to consolidate.
+- **"Replace sandbox's process-only isolation"**: this deployment (Render/Railway, per `config/settings.py`) has no real containerization primitive available to a running app process — doing this for real needs infrastructure outside the repo (a separate sandboxing service, gVisor, Firecracker), not a code change. Not attempted; noted as still open.
+
+Replaced with 4 real, concrete findings from the original audit's §5 that Phase 0 didn't get to (Phase 0 covered the headline/critical items only):
+
+1. **`services/dev_intel.py`**: `explain_file()`/`review_file()`/`index_project()`/`error_log_analysis()`/`dependency_audit()` all took a caller-supplied path with zero restriction — `explain_file`/`review_file` are reachable via `POST /stark/code/{review,explain}` (token-gated, but the token gates the whole API, not filesystem access outside this project). Added `_safe_path()` (same resolve+`relative_to` pattern as Phase 0's `voice.py` fix) and applied it to all five methods.
+2. **`services/remote_control.py`**: SSH to the user's Mac over Tailscale used `StrictHostKeyChecking=no` — accepts *any* host key on *every* call. Switched to `accept-new` (trusts the key on first connection, same zero-setup convenience, but verifies it matches on every call after that).
+3. **`services/voice.py`**: `os.system(f"afplay '{path}' ... || aplay '{path}' ...")` — the same anti-pattern already fixed in `core/tools/{system,mac}.py` during Phase 0. Replaced with list-args `subprocess.run()`, trying `afplay` then falling back to `aplay`, matching the original's fallback behavior without a shell.
+4. **`services/stark_security.py::block_ip()`**: list-args `subprocess.run(["ufw", "deny", "from", ip])` was never shell-injectable, but `ip` also was never validated as looking like a real IP before being passed to `ufw`. Added `ipaddress.ip_address(ip)` validation up front.
+
+**Verified**: full app boots with the same 46 routes as Phase 6 (no regression). Behavioral tests confirmed: `dev_intel`'s path restriction rejects both relative traversal (`../../../etc/passwd`) and absolute paths outside the project, while legitimate in-project files still work and `index_project()` pointed outside the project indexes nothing; `remote_control` builds its SSH command with `accept-new` and never `no`; `voice._play()` calls `subprocess.run(["afplay", ...])` and never touches `os.system`; `block_ip()` rejects a malformed/injection-shaped string with a clean error while still working for a real IP.

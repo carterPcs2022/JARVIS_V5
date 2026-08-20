@@ -5,7 +5,7 @@ TTS cascade:
 2. edge-tts (free, neural voice, Microsoft)
 3. pyttsx3 (offline, robotic but always works)
 """
-import os, re, asyncio, tempfile, wave
+import os, re, asyncio, tempfile, wave, subprocess
 from config.settings import (
     JARVIS_VOICE, JARVIS_EDGE_VOICE, WHISPER_MODEL, VOICE_ENABLED, IS_RAILWAY,
     PYTTSX3_AVAILABLE,
@@ -130,7 +130,21 @@ def _play(path: str):
             pygame.time.Clock().tick(10)
         return
     except Exception: pass
-    os.system(f"afplay '{path}' 2>/dev/null || aplay '{path}' 2>/dev/null")
+    # list-args subprocess.run (no shell=True) instead of the previous
+    # os.system(f"afplay '{path}' ... || aplay '{path}' ...") — `path` is
+    # always internally generated (tempfile.mktemp()) today, not
+    # attacker-controlled, but os.system+f-string is a command-injection
+    # anti-pattern regardless of current call sites; same fix already
+    # applied to core/tools/{system,mac}.py. Tries afplay first, falls
+    # back to aplay on failure or if it isn't installed, same as the
+    # original shell `||`.
+    for player in ("afplay", "aplay"):
+        try:
+            result = subprocess.run([player, path], capture_output=True)
+            if result.returncode == 0:
+                return
+        except FileNotFoundError:
+            continue
 
 def listen(seconds: int = 6) -> str:
     try:
