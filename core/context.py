@@ -3,7 +3,8 @@ core/context.py — JARVIS context assembler.
 Pulls short-term memory, long-term recall, web search, and personality
 into a single coherent context string for any LLM call.
 """
-from core.memory import get_context_string, recall_as_context, facts_as_context, episodes_as_context
+from core.memory import (get_context_string, recall_as_context, facts_as_context,
+                          episodes_as_context, working_memory_as_context)
 from core.personality import build_system_prompt
 from config.settings import JARVIS_PERSONALITY
 
@@ -75,6 +76,14 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
     # Short-term conversation history — always included, highest priority
     short = get_context_string(n=8)
 
+    # Working memory (core/working_memory.py, via core.memory's facade) —
+    # same "built but unwired" gap facts/episodes below already had:
+    # salience-ranked recent turns actually relevant to `user_input`, not
+    # just the last N in raw order like `short` above. High priority,
+    # right after short-term, since it's about the current session's
+    # active attention rather than durable long-term knowledge.
+    working = working_memory_as_context(user_input)
+
     # Known facts (semantic memory) — item C of the reasoning-quality
     # investigation. Real data already accumulates here (core.orchestrator,
     # core.stark_intelligence, services.reading_memory all write facts) but
@@ -100,17 +109,23 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
     def _tok_est(s: str) -> int:
         return int(len(s.split()) * 1.3)  # rough words-to-tokens estimate
 
-    # Reserve budget in priority order (short-term, facts, web, ltm,
-    # episodes) but assemble the final string in the original relative
+    # Reserve budget in priority order (short-term, working, facts, web,
+    # ltm, episodes) but assemble the final string in the original relative
     # ordering (facts/episodes framed as supporting knowledge, short-term
     # stays closest to the actual user question) — short-term stays last,
     # which tends to help recency-weighted attention.
     budget = MAX_CONTEXT_TOKENS
-    include = {"short": "", "facts": "", "web": "", "ltm": "", "episodes": ""}
+    include = {"short": "", "working": "", "facts": "", "web": "", "ltm": "", "episodes": ""}
 
     if short:
         include["short"] = short
         budget -= _tok_est(short)
+
+    if working and budget > 0:
+        working_trimmed = _trim_to_budget(working, budget)
+        if working_trimmed:
+            include["working"] = working_trimmed
+            budget -= _tok_est(working_trimmed)
 
     if facts and budget > 0:
         facts_trimmed = _trim_to_budget(facts, budget)
@@ -135,7 +150,8 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
         if episodes_trimmed:
             include["episodes"] = episodes_trimmed
 
-    parts = [include["facts"], include["ltm"], include["web"], include["episodes"], include["short"]]
+    parts = [include["facts"], include["ltm"], include["web"], include["episodes"],
+             include["working"], include["short"]]
     return "\n\n".join(p for p in parts if p)
 
 

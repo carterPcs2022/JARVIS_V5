@@ -116,6 +116,23 @@ def save_turn(user: str, ai: str):
     except Exception:
         pass
 
+    # Working memory (core/working_memory.py) — active per-turn attention,
+    # a salience-ranked scratchpad get_relevant(query) can search by
+    # content, distinct from get_context_string()'s FIFO "last N raw
+    # turns" above. save_turn() is the same real choke point already used
+    # for fact extraction, for the same reason (every real turn passes
+    # through here exactly once). No LLM call, matching
+    # core/working_memory.py's own "Free" design — importance is a cheap
+    # heuristic (longer messages tend to carry more substance than a bare
+    # "ok"/"thanks"), not a judgment call worth spending a model call on.
+    try:
+        from core.working_memory import working_mem
+        key = f"turn_{datetime.now().strftime('%H%M%S%f')}"
+        importance = min(1.0, 0.3 + len(user.split()) / 40)
+        working_mem.hold(key, user, importance=importance)
+    except Exception:
+        pass
+
 
 def _auto_extract_facts(user_text: str):
     try:
@@ -424,6 +441,22 @@ def episodes_as_context(query: str) -> str:
     for e in hits:
         lines.append(f"  [{e['ts'][:10]}] {e['event']}")
     return "\n".join(lines)
+
+
+def working_memory_as_context(query: str) -> str:
+    """core/working_memory.py's salience-ranked scratchpad, now actually
+    populated (save_turn() above holds each turn) — same "built but
+    unwired" gap facts_as_context()/episodes_as_context() already closed
+    for their own stores, closed here for this one. Distinct from
+    get_context_string() above: that's the last N turns in raw order;
+    this is whichever recent turns are actually relevant to `query`,
+    content-matched, and only the still-salient ones (least-important
+    items get evicted at 7 held)."""
+    try:
+        from core.working_memory import working_mem
+        return working_mem.get_relevant(query)
+    except Exception:
+        return ""
 
 
 # ── 3. Semantic Memory — discrete facts about the world ──────────────────────
@@ -811,4 +844,3 @@ def search_notes(query: str, k: int = 5) -> list[dict]:
     scored = [(_tfidf_score(q_tokens, n.get("tokens", [])), n) for n in notes]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [n for score, n in scored[:k] if score > 0]
-    return clips[-limit:]
