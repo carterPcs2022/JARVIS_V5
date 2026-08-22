@@ -4,7 +4,9 @@ Each integration is fully optional: if the relevant credentials aren't set in
 .env, that channel simply doesn't start. All three route through the same
 brain.process_dict() pipeline JARVIS already uses everywhere else.
 """
+import asyncio
 import os
+import time
 from config.settings import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_AUTHORIZED_IDS,
     TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE, MY_PHONE_NUMBER,
@@ -139,6 +141,9 @@ def handle_incoming_sms(from_number: str, body: str) -> str:
 class JarvisDiscordBot:
     def __init__(self):
         self._client = None
+        self._loop = None  # captured in on_ready() — the bot's own running
+                            # event loop, needed to schedule send_alert_sync's
+                            # coroutine from synchronous/other-thread code
 
     def is_configured(self) -> bool:
         return bool(DISCORD_BOT_TOKEN)
@@ -163,79 +168,244 @@ class JarvisDiscordBot:
             print("[Discord] discord.py not installed.")
             return
 
-        # No message_content intent — slash commands don't need it, and a
-        # user-installed app can't read message content in guilds it
-        # doesn't own anyway, so requesting it here would be a no-op at
-        # best and a misleading permission ask at worst.
-        intents = discord.Intents.default()
-        client = discord.Client(intents=intents)
-        tree = app_commands.CommandTree(client)
-        self._client = client
+        def _build_client():
+            # A discord.Client can't be safely reused after client.run()
+            # exits or raises — it tears down internal state that assumes
+            # one connection per instance. The retry loop below needs a
+            # fresh Client + CommandTree (and every command re-registered
+            # on it) for each attempt, so this whole construction lives in
+            # a function called once per retry rather than once per
+            # start() call.
 
-        # allowed_installs / allowed_contexts are separate stacking
-        # decorators in this discord.py version (2.7.x) — not kwargs on
-        # .command() itself, confirmed against the installed version
-        # rather than assumed. installs(users=True) is what actually lifts
-        # the "only in servers it's invited to" limitation this rewrite
-        # exists to fix; contexts opens it up to guilds, DMs, and group DMs.
+            # No message_content intent — slash commands don't need it, and
+            # a user-installed app can't read message content in guilds it
+            # doesn't own anyway, so requesting it here would be a no-op at
+            # best and a misleading permission ask at worst.
+            intents = discord.Intents.default()
+            client = discord.Client(intents=intents)
+            tree = app_commands.CommandTree(client)
+            self._client = client
 
-        @tree.command(name="ask", description="Ask JARVIS anything")
-        @app_commands.allowed_installs(guilds=True, users=True)
-        @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-        @app_commands.describe(message="What do you want to ask JARVIS?")
-        async def ask(interaction: discord.Interaction, message: str):
-            if not self._authorized(interaction.user.id):
-                await interaction.response.send_message("Unauthorized.", ephemeral=True)
-                return
-            await interaction.response.defer()  # avoids the 3s interaction timeout
-            from core.brain_v2 import brain
-            result = brain.process_dict(message)
-            response = result["response"]
-            # Discord hard-caps a single message at 2000 chars — brain
-            # responses (status dumps, long reasoning) can exceed that, and
-            # an unguarded send would just raise and silently drop the
-            # reply. Chunk instead of truncating so nothing gets lost.
-            chunks = [response[i:i + 2000] for i in range(0, len(response), 2000)] or [""]
-            await interaction.followup.send(chunks[0])
-            for chunk in chunks[1:]:
-                await interaction.channel.send(chunk)
+            # allowed_installs / allowed_contexts are separate stacking
+            # decorators in this discord.py version (2.7.x) — not kwargs on
+            # .command() itself, confirmed against the installed version
+            # rather than assumed. installs(users=True) is what actually
+            # lifts the "only in servers it's invited to" limitation this
+            # rewrite exists to fix; contexts opens it up to guilds, DMs,
+            # and group DMs.
 
-        @tree.command(name="status", description="JARVIS system status check")
-        @app_commands.allowed_installs(guilds=True, users=True)
-        @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
-        async def status(interaction: discord.Interaction):
-            if not self._authorized(interaction.user.id):
-                await interaction.response.send_message("Unauthorized.", ephemeral=True)
-                return
-            await interaction.response.defer()
+            # Every command below defers immediately, then runs JARVIS's
+            # actual (synchronous, often network-bound) work via
+            # asyncio.to_thread rather than calling it inline. Calling a
+            # blocking function directly inside one of these async handlers
+            # would freeze this bot's ENTIRE event loop for as long as that
+            # call takes — no gateway heartbeats, and every other
+            # concurrent interaction (any user, any command) stalls behind
+            # it too. server/websocket.py already avoids this same trap the
+            # same way (loop.run_in_executor around brain.process_dict);
+            # to_thread is the asyncio-native equivalent. This is the
+            # actual fix for slow/unresponsive-feeling commands, not a
+            # smaller LLM — the LLM call itself is unchanged.
+
+            @tree.command(name="ask", description="Ask JARVIS anything")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            @app_commands.describe(message="What do you want to ask JARVIS?")
+            async def ask(interaction: discord.Interaction, message: str):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                await interaction.response.defer()  # avoids the 3s interaction timeout
+                from core.brain_v2 import brain
+                result = await asyncio.to_thread(brain.process_dict, message)
+                response = result["response"]
+                # Discord hard-caps a single message at 2000 chars — brain
+                # responses (status dumps, long reasoning) can exceed that,
+                # and an unguarded send would just raise and silently drop
+                # the reply. Chunk instead of truncating so nothing is lost.
+                chunks = [response[i:i + 2000] for i in range(0, len(response), 2000)] or [""]
+                await interaction.followup.send(chunks[0])
+                for chunk in chunks[1:]:
+                    await interaction.channel.send(chunk)
+
+            @tree.command(name="status", description="JARVIS system status check")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            async def status(interaction: discord.Interaction):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                try:
+                    from core.tools.system import snapshot
+                    from core.state import state as _state
+                    s = await asyncio.to_thread(snapshot)
+                    groq_ok = _state.any_model_available("groq")
+                    text = (
+                        f"**JARVIS Status**\n"
+                        f"CPU: {s['cpu_percent']}%  |  RAM: {s['ram_used_pct']}%  |  "
+                        f"Disk: {s['disk_used_pct']}%\n"
+                        f"Uptime: {s['uptime_hours']:.1f}h\n"
+                        f"Groq: {'✓ online' if groq_ok else '✗ unavailable'}"
+                    )
+                except Exception as e:
+                    text = f"Status check failed: {e}"
+                await interaction.followup.send(text)
+
+            @tree.command(name="memory", description="Search JARVIS's memory")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            @app_commands.describe(query="What to search for in memory")
+            async def memory(interaction: discord.Interaction, query: str):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                try:
+                    # Same four-source fan-out as jarvis_mcp_server's
+                    # jarvis_memory_search tool (core/memory.py has no
+                    # single unified search — each memory type is its own
+                    # store).
+                    from core.memory import recall, recall_facts, recall_episodes, search_notes
+                    conversations, facts, episodes, notes = await asyncio.gather(
+                        asyncio.to_thread(recall, query, 3),
+                        asyncio.to_thread(recall_facts, query, 3),
+                        asyncio.to_thread(recall_episodes, query, 3),
+                        asyncio.to_thread(search_notes, query, 3),
+                    )
+                    lines = [f"**Memory search: \"{query}\"**"]
+                    if conversations:
+                        lines.append("\n__Conversations__")
+                        lines += [f"[{h['ts'][:10]}] {h['user']} → {h['ai'][:100]}" for h in conversations]
+                    if facts:
+                        lines.append("\n__Facts__")
+                        lines += [f"• {f['fact']}" for f in facts]
+                    if episodes:
+                        lines.append("\n__Episodes__")
+                        lines += [f"• {e['event']}" for e in episodes]
+                    if notes:
+                        lines.append("\n__Notes__")
+                        lines += [f"• {n.get('title') or n['text'][:60]}" for n in notes]
+                    if len(lines) == 1:
+                        text = f"No memory results found for \"{query}\"."
+                    else:
+                        text = "\n".join(lines)
+                except Exception as e:
+                    text = f"Memory search failed: {e}"
+                chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)] or [""]
+                await interaction.followup.send(chunks[0])
+                for chunk in chunks[1:]:
+                    await interaction.channel.send(chunk)
+
+            @tree.command(name="remember", description="Save a note to JARVIS's memory")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            @app_commands.describe(content="What should JARVIS remember?")
+            async def remember(interaction: discord.Interaction, content: str):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                try:
+                    from core.memory import store_note
+                    note = await asyncio.to_thread(store_note, content)
+                    label = note.get("title") or content[:60]
+                    text = f"Remembered: \"{label}\""
+                except Exception as e:
+                    text = f"Couldn't save that: {e}"
+                await interaction.followup.send(text)
+
+            @tree.command(name="home", description="Activate a JARVIS home automation scene")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            @app_commands.describe(scene="e.g. morning, movie, focus, night, away, red_alert, workout, reading")
+            async def home(interaction: discord.Interaction, scene: str):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                await interaction.response.defer()
+                try:
+                    from services.home_automation import activate_scene
+                    result = await asyncio.to_thread(activate_scene, scene)
+                    if "error" in result:
+                        text = result["error"]
+                    elif any(r.get("status") == "not_configured" for r in result.get("results", {}).values()):
+                        text = f"{scene.capitalize()} scene requested, sir, but Home Assistant isn't configured yet."
+                    else:
+                        text = f"{scene.capitalize()} scene activated, sir."
+                except Exception as e:
+                    text = f"Scene activation failed: {e}"
+                await interaction.followup.send(text)
+
+            @client.event
+            async def on_ready():
+                # Slash commands need an explicit sync before Discord will
+                # show them — without this, they silently never appear in
+                # the picker even though the code registering them ran
+                # fine.
+                self._loop = asyncio.get_running_loop()
+                try:
+                    synced = await tree.sync()
+                    print(f"[Discord] Synced {len(synced)} slash command(s).")
+                except Exception as e:
+                    print(f"[Discord] Command sync failed: {e}")
+
+            return client
+
+        # client.run() blocks until the bot disconnects/errors, then raises
+        # if that wasn't a clean shutdown. Production logs show this dying
+        # on discord.errors.HTTPException: 429 Too Many Requests — not
+        # Discord's own rate limiting but Cloudflare (which fronts
+        # discord.com) temporarily blocking the login request, seen
+        # correlating with how often the host process itself restarts
+        # (each restart = a fresh login attempt from this thread). Before
+        # this retry loop, that exception had no handler at all: it killed
+        # this daemon thread silently, and Discord stayed dead for the rest
+        # of that process's life — the only way it came back was the next
+        # unrelated full app restart. Retrying with backoff here means a
+        # transient block recovers within the same run instead of needing
+        # an external restart. A bad/revoked token (LoginFailure) is a real
+        # misconfiguration, not transient, so that one isn't retried.
+        backoff = 60
+        max_backoff = 900
+        while True:
+            client = _build_client()
             try:
-                from core.tools.system import snapshot
-                from core.state import state as _state
-                s = snapshot()
-                groq_ok = _state.any_model_available("groq")
-                text = (
-                    f"**JARVIS Status**\n"
-                    f"CPU: {s['cpu_percent']}%  |  RAM: {s['ram_used_pct']}%  |  "
-                    f"Disk: {s['disk_used_pct']}%\n"
-                    f"Uptime: {s['uptime_hours']:.1f}h\n"
-                    f"Groq: {'✓ online' if groq_ok else '✗ unavailable'}"
-                )
+                client.run(DISCORD_BOT_TOKEN)
+                return  # clean shutdown (e.g. client.close() called)
+            except discord.errors.LoginFailure:
+                print("[Discord] Login failed — DISCORD_BOT_TOKEN is invalid or revoked. Not retrying.")
+                return
             except Exception as e:
-                text = f"Status check failed: {e}"
-            await interaction.followup.send(text)
+                print(f"[Discord] client.run() failed ({e}) — retrying in {backoff}s.")
+                self._client = None
+                self._loop = None
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
-        @client.event
-        async def on_ready():
-            # Slash commands need an explicit sync before Discord will show
-            # them — without this, /ask and /status silently never appear
-            # in the picker even though the code registering them ran fine.
-            try:
-                synced = await tree.sync()
-                print(f"[Discord] Synced {len(synced)} slash command(s).")
-            except Exception as e:
-                print(f"[Discord] Command sync failed: {e}")
+    def send_alert_sync(self, message: str, user_id: str | None = None):
+        """Push an alert as a Discord DM, mirroring TelegramBot.send_alert_sync.
+        Fire-and-forget from synchronous code (e.g. core/event_bus.py) —
+        unlike Telegram (a fresh short-lived Bot() per call is fine),
+        Discord needs the one long-lived, already-connected Client this
+        instance is running, so the coroutine is scheduled onto that
+        client's own event loop via run_coroutine_threadsafe rather than
+        opening a new connection per alert."""
+        if not self.is_configured() or self._client is None or self._loop is None:
+            return
+        target = user_id or (DISCORD_AUTHORIZED_IDS[0] if DISCORD_AUTHORIZED_IDS else None)
+        if not target:
+            return
 
-        client.run(DISCORD_BOT_TOKEN)
+        async def _send():
+            user = await self._client.fetch_user(int(target))
+            await user.send(f"⚡ JARVIS: {message}")
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(_send(), self._loop)
+            future.result(timeout=10)
+        except Exception as e:
+            print(f"[Discord] send_alert_sync failed: {e}")
 
 
 discord_bot = JarvisDiscordBot()

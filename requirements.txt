@@ -26,8 +26,13 @@ twilio>=9.0.0
 prometheus-client>=0.20.0
 
 # Messaging (optional — services/messaging.py's bots no-op at runtime if
-# their token env var is unset)
-discord.py>=2.4.0
+# their token env var is unset). >=2.7.0 because the Discord integration's
+# user-installable app support (app_commands.allowed_installs/
+# allowed_contexts) was only confirmed against 2.7.x — the previous
+# >=2.4.0 floor already resolved to 2.7.1 in practice, this just makes
+# that floor match what the code actually assumes instead of relying on
+# pip picking a version newer than what was tested.
+discord.py>=2.7.0
 
 # Scheduling
 APScheduler>=3.10.0
