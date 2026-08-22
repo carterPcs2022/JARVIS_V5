@@ -22,3 +22,24 @@ class ConstraintSolver:
 
 
 constraint_solver = ConstraintSolver()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+# Named "constraint_solver" to match core/brain_v2.py's engine name for this
+# technique (not "constraint_satisfaction", the module's own filename).
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class ConstraintSolverStrategy(ReasoningStrategy):
+    name = "constraint_solver"
+
+    def should_use(self, query: str) -> bool:
+        return constraint_solver.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        # core/brain_v2.py always calls solve(raw, []) — no constraint list
+        # is ever actually extracted from the intent — matched here.
+        data = await asyncio.to_thread(constraint_solver.solve, query, [])
+        return ReasoningResult(answer=data["solution"], strategy=self.name)

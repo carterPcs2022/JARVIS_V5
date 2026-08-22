@@ -20,23 +20,26 @@ If it doesn't exist yet, create it.
 
 Copy the contents of [`mcp_config.json`](../mcp_config.json) in this project
 into that file's `mcpServers` object (merge with any other servers already
-listed — don't overwrite them):
+listed — don't overwrite them), then fill in your own values:
 
 ```json
 {
   "mcpServers": {
     "jarvis": {
       "command": "python3",
-      "args": ["/Users/kisha/Downloads/JARVIS_V5/services/mcp_server.py"],
+      "args": ["/absolute/path/to/JARVIS_V5/services/mcp_server.py"],
       "env": {
-        "JARVIS_API_TOKEN": "bD51aIIbxS_aThD9b6A1Ng4VByxzXkUHiahGYCfvCxA"
+        "JARVIS_API_TOKEN": "<your JARVIS_API_TOKEN, same value as in .env>"
       }
     }
   }
 }
 ```
 
-Adjust the path if your JARVIS_V5 folder ever moves.
+Set `args` to the actual absolute path of your local JARVIS_V5 checkout, and
+`JARVIS_API_TOKEN` to the same value configured in your `.env` — this is the
+same token that gates every other JARVIS endpoint, so treat it as a secret:
+don't commit a filled-in copy of this config anywhere.
 
 ## 4. Restart Claude Desktop
 

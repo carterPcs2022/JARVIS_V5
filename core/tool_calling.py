@@ -159,6 +159,37 @@ TOOL_HANDLERS = {
 }
 
 
+# ── Tool registry (core/interfaces/tool.py) ────────────────────────────────────
+# Neither run_task nor mac_control need requires_confirmation of their own:
+# run_task's downstream execute_step() calls are individually gated (see
+# core/executor.py), and mac_control's core.mac_dispatcher.dispatch() already
+# enforces its own confirm flow (empty_trash) internally — gating either
+# wrapper here too would double-confirm the same underlying action.
+
+from core.interfaces.tool import Tool
+
+# (name, risk_level, permissions)
+_TOOL_META = [
+    ("web_search",        "low",    ["read", "network"]),
+    ("get_system_status", "low",    ["read"]),
+    ("memory_recall",     "low",    ["read"]),
+    ("run_task",          "medium", ["execute"]),
+    ("mac_control",       "medium", ["execute"]),
+    ("calendar_check",    "low",    ["read", "network"]),
+    ("generate_code",     "low",    ["read"]),
+]
+_SCHEMA_BY_NAME = {t["function"]["name"]: t["function"] for t in TOOLS_SCHEMA}
+
+TOOL_OBJECTS: dict[str, Tool] = {
+    name: Tool(
+        name=name, description=_SCHEMA_BY_NAME[name]["description"],
+        parameters=_SCHEMA_BY_NAME[name]["parameters"], handler=TOOL_HANDLERS[name],
+        risk_level=risk, requires_confirmation=False, reversible=True, permissions=perms,
+    )
+    for name, risk, perms in _TOOL_META
+}
+
+
 def think_with_tools(user_input: str, context: str = "", system: str | None = None) -> dict:
     """
     Full tool-use pipeline: JARVIS decides which tool(s) to call (if any),

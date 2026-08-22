@@ -29,13 +29,15 @@ def open_app(name: str) -> dict:
 
 def quit_app(name: str) -> dict:
     """Quit an application."""
-    result = run_applescript(f'tell application "{name}" to quit')
+    safe = name.replace('"', '\\"')
+    result = run_applescript(f'tell application "{safe}" to quit')
     return {"ok": True, "message": f"Quit {name}", "detail": result}
 
 
 def focus_app(name: str) -> dict:
     """Bring an application to the foreground."""
-    result = run_applescript(f'tell application "{name}" to activate')
+    safe = name.replace('"', '\\"')
+    result = run_applescript(f'tell application "{safe}" to activate')
     return {"ok": True, "message": f"Focused {name}", "detail": result}
 
 
@@ -47,7 +49,8 @@ def list_running_apps() -> list[str]:
 
 
 def is_app_running(name: str) -> bool:
-    script = f'tell application "System Events" to (name of every process) contains "{name}"'
+    safe = name.replace('"', '\\"')
+    script = f'tell application "System Events" to (name of every process) contains "{safe}"'
     return run_applescript(script).lower() == "true"
 
 
@@ -184,9 +187,10 @@ def get_todays_events() -> list[dict]:
 def create_reminder(title: str, due_in_minutes: int = 60) -> dict:
     from datetime import datetime, timedelta
     due = datetime.now() + timedelta(minutes=due_in_minutes)
+    safe_title = title.replace('"', '\\"')
     script = f'''
         tell application "Reminders"
-            set newReminder to make new reminder with properties {{name:"{title}", due date:date "{due.strftime('%B %d, %Y %H:%M:%S')}"}}
+            set newReminder to make new reminder with properties {{name:"{safe_title}", due date:date "{due.strftime('%B %d, %Y %H:%M:%S')}"}}
         end tell
     '''
     run_applescript(script)

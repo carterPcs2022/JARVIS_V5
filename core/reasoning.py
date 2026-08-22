@@ -101,3 +101,39 @@ def second_order_think(query: str, first_answer: str) -> str:
         f"Think like a chess player, not a checkers player.",
         force_model="reasoning",
     )
+
+
+# ── ReasoningStrategy adapters (core/interfaces/reasoning.py) ─────────────────
+# Wrap reason()/reason_and_verify() above for the uniform interface. Doesn't
+# change their existing direct callers (core/orchestrator.py, server/routes/*).
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class ChainOfThoughtStrategy(ReasoningStrategy):
+    name = "chain_of_thought"
+
+    def should_use(self, query: str) -> bool:
+        return needs_reasoning(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(reason, query, context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.reasoning_trace = data.get("reasoning")
+        return result
+
+
+class VerifiedReasoningStrategy(ReasoningStrategy):
+    """Three-pass reasoning (draft -> challenge -> synthesize) — higher
+    confidence than the single-pass ChainOfThoughtStrategy since the
+    answer has already survived one round of self-critique."""
+    name = "verify"
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(reason_and_verify, query, context)
+        result = ReasoningResult.from_legacy(self.name, data)
+        result.confidence = 0.75
+        if data.get("challenge"):
+            result.evidence = [data["challenge"]]
+        return result

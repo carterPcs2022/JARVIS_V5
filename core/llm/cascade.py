@@ -1,4 +1,21 @@
-"""SmartRouter — routes requests to the best available LLM based on task type, cost, and availability."""
+"""SmartRouter — routes requests to the best available LLM based on task type, cost, and availability.
+
+DEPRECATED (docs/AUDIT.md Phase 9): confirmed unused across the whole
+repo — the only reference anywhere is a cosmetic status-label string in
+services/mark_system.py, not an import. core/llm/router.py is the real,
+live routing/fallback/caching logic and has been since before this
+module existed; this file's Provider enum + RouteResult dataclass were
+kept (not deleted in Phase 0 or Phase 1) as a cleaner sketch of a
+provider-abstraction shape than router.py's procedural style, worth
+reusing if router.py is ever refactored toward it — see
+core/interfaces/llm_provider.py's module docstring, which explains the
+same reasoning. Not removed outright per the master directive's own
+deprecation rule ("mark first... remove in a controlled cleanup phase") —
+nothing currently breaks by its presence, and the design sketch has real
+value for that future refactor. Also incomplete as a Provider abstraction
+today: it only names three providers (GROQ, ANTHROPIC, OLLAMA), missing
+Cerebras, which core/llm/router.py and core/interfaces/llm_provider.py's
+registry both already support."""
 from __future__ import annotations
 import os, time, logging
 from enum import Enum

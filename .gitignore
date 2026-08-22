@@ -5,6 +5,7 @@ venv/
 .venv/
 memory/*.json
 logs/*.json
+logs/*.jsonl
 backups/
 *.mp3
 *.wav
@@ -12,3 +13,7 @@ jarvis_*.json
 budget.json
 .DS_Store
 build.log
+
+# Stray accidental commit (zip archive of an old source snapshot, not
+# meant to be tracked) — kept locally, no longer tracked by git.
+/n

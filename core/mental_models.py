@@ -57,3 +57,27 @@ class MentalModelsEngine:
 
 
 mental_models = MentalModelsEngine()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class MentalModelsStrategy(ReasoningStrategy):
+    name = "mental_models"
+
+    def should_use(self, query: str) -> bool:
+        return mental_models.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(mental_models.apply, query, context)
+        # core/brain_v2.py's Executor._reasoning_engine() builds its
+        # "provider" string as f"mental_model_{used_model}" — the used_model
+        # value is preserved in metadata so that redirect can still do that.
+        return ReasoningResult(
+            answer=data["response"], strategy=self.name,
+            metadata={"used_model": data.get("used_model"),
+                     "description": data.get("description", "")},
+        )

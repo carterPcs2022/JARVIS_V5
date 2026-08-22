@@ -175,3 +175,30 @@ class DeepResearchAgent:
 
 
 deep_research = DeepResearchAgent()
+
+
+# ── Agent adapter (core/interfaces/agent.py) ───────────────────────────────────
+# Named DeepResearchTaskAgent (not DeepResearchAgent, already taken by the
+# class above) to avoid a collision.
+#
+# deep_research.research() starts a background thread and returns
+# immediately with a research_id — it does not block until the report is
+# ready (that can take up to 2 hours at "comprehensive" depth, see
+# _DEPTH_BUDGETS). run() below preserves that: success=True here means
+# "the research job started", not "the report is done" — callers poll
+# get_status(research_id)/get_report(research_id) for the real outcome,
+# exactly as every existing caller of deep_research.research() already does.
+
+from core.interfaces.agent import Agent, AgentResult
+
+
+class DeepResearchTaskAgent(Agent):
+    name = "deep_research"
+
+    async def run(self, task: str, context: dict | None = None) -> AgentResult:
+        depth = (context or {}).get("depth", "standard")
+        result = deep_research.research(task, depth)
+        return AgentResult(
+            output=result, success=True,
+            metadata={"status": "started", "research_id": result.get("research_id")},
+        )

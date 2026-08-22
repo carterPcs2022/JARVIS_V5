@@ -55,3 +55,25 @@ def _log(entry: dict):
     log.append(entry)
     with open(TASK_LOG, "w") as f:
         json.dump(log[-200:], f, indent=2)
+
+
+# ── Agent adapter (core/interfaces/agent.py) ───────────────────────────────────
+# Named PlannerAgentAdapter (not PlannerAgent) since this module already
+# exposes its API as free functions (run/run_parallel), not a class — no
+# name to collide with, but this keeps "Agent" reserved for the interface.
+
+import asyncio
+from core.interfaces.agent import Agent, AgentResult
+
+
+class PlannerAgentAdapter(Agent):
+    name = "planner"
+
+    async def run(self, task: str, context: dict | None = None) -> AgentResult:
+        context = context or {}
+        n_agents = context.get("n_agents")
+        if n_agents:
+            result = await asyncio.to_thread(run_parallel, task, n_agents)
+        else:
+            result = await asyncio.to_thread(run, task)
+        return AgentResult(output=result, success=bool(result.get("final")))

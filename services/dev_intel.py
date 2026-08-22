@@ -12,6 +12,22 @@ _SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "dist", "b
 _CODE_EXT  = {".py", ".js", ".ts", ".tsx", ".jsx"}
 
 
+def _safe_path(path: str) -> Path | None:
+    """Restricts explain_file()/review_file() to files inside this project
+    (BASE_DIR) — both are reachable via POST /stark/code/{review,explain}
+    with a raw, caller-supplied path and no other restriction, so an
+    unrestricted Path(path).read_text() would let any authenticated caller
+    read anything on the server (e.g. .env, config/settings.py). Returns
+    None on any attempt to escape BASE_DIR, same convention as
+    core/tools/files.py's _safe_path()."""
+    try:
+        p = Path(path).resolve()
+        p.relative_to(BASE_DIR.resolve())
+        return p
+    except (ValueError, OSError):
+        return None
+
+
 def _load_json(path: Path, default):
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.stat().st_size > 0:
@@ -32,7 +48,13 @@ def _save_json(path: Path, data):
 class DeveloperIntelligence:
 
     def _walk_files(self, path: str):
-        root = Path(path)
+        # index_project() is reachable via GET /stark/code/index?path=... —
+        # token-gated, but the token gates the whole API, not filesystem
+        # access outside this project specifically; restrict for the same
+        # reason as _safe_path() above.
+        root = _safe_path(path)
+        if root is None:
+            return
         for p in root.rglob("*"):
             if p.is_dir():
                 continue
@@ -91,7 +113,9 @@ class DeveloperIntelligence:
         return hits
 
     def explain_file(self, path: str) -> str:
-        p = Path(path)
+        p = _safe_path(path)
+        if p is None:
+            return f"Path outside allowed area: {path}"
         if not p.exists():
             return f"File not found: {path}"
         try:
@@ -109,7 +133,9 @@ class DeveloperIntelligence:
         """Deep code review — bugs, security issues, performance, missing
         error handling. Uses fable (deepest scrutiny tier) since a review
         is exactly the kind of task that benefits from it."""
-        p = Path(file_path)
+        p = _safe_path(file_path)
+        if p is None:
+            return {"error": f"Path outside allowed area: {file_path}"}
         if not p.exists():
             return {"error": f"File not found: {file_path}"}
         try:
@@ -192,7 +218,9 @@ class DeveloperIntelligence:
             return {"ok": False, "error": str(e)}
 
     def error_log_analysis(self, log_path: str) -> dict:
-        p = Path(log_path)
+        p = _safe_path(log_path)
+        if p is None:
+            return {"error": f"Path outside allowed area: {log_path}"}
         if not p.exists():
             return {"error": "log file not found"}
         lines = p.read_text(errors="ignore").splitlines()
@@ -205,7 +233,9 @@ class DeveloperIntelligence:
         return {"total_errors": len(error_lines), "top_patterns": top}
 
     def dependency_audit(self, requirements_path: str = "requirements.txt") -> dict:
-        p = Path(requirements_path)
+        p = _safe_path(requirements_path)
+        if p is None:
+            return {"error": f"Path outside allowed area: {requirements_path}"}
         if not p.exists():
             return {"error": "requirements.txt not found"}
         deps = [l.strip() for l in p.read_text().splitlines() if l.strip() and not l.startswith("#")]

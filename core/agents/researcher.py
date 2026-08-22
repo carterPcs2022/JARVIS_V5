@@ -14,3 +14,18 @@ def research(topic: str, depth: int = 3) -> dict:
         f"Synthesize these sources into a clear, factual answer about: {topic}\n\nSources:\n{combined}"
     )
     return {"topic": topic, "synthesis": synthesis, "sources_used": len(sources)}
+
+
+# ── Agent adapter (core/interfaces/agent.py) ───────────────────────────────────
+
+import asyncio
+from core.interfaces.agent import Agent, AgentResult
+
+
+class ResearcherAgent(Agent):
+    name = "researcher"
+
+    async def run(self, task: str, context: dict | None = None) -> AgentResult:
+        depth = (context or {}).get("depth", 3)
+        result = await asyncio.to_thread(research, task, depth)
+        return AgentResult(output=result, success=result.get("sources_used", 0) > 0)

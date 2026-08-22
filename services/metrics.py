@@ -34,6 +34,29 @@ if _AVAILABLE:
     RAM_USAGE = Gauge("jarvis_ram_percent", "RAM usage")
     DISK_USAGE = Gauge("jarvis_disk_percent", "Disk usage")
 
+    # V6 migration (docs/AUDIT.md Phase 8) — observability for the
+    # core/interfaces/ protocols. Wired at each interface's one real, live
+    # call site (core/brain_v2.py's Executor._reasoning_engine() for
+    # reasoning, core/executor.py's execute_step() and
+    # core/mac_dispatcher.py's dispatch() for tools,
+    # core/interfaces/verification.py's with_retry() for verification) —
+    # not at every individual strategy/tool implementation, since most of
+    # those are still side-door/inert (same reasoning Phase 1-2 already
+    # documented for why the registries themselves don't force full
+    # wiring). Agent metrics deliberately not added: the Agent registry has
+    # no live call site yet (still fully inert, per Phase 1's own
+    # docstring) — instrumenting it now would just be dead counters that
+    # never increment on real traffic.
+    REASONING_STRATEGY_CALLS = Counter(
+        "jarvis_reasoning_strategy_total", "ReasoningStrategy.solve() calls", ["strategy", "outcome"]
+    )
+    TOOL_EXECUTIONS = Counter(
+        "jarvis_tool_executions_total", "Tool executions", ["tool", "risk_level", "outcome"]
+    )
+    VERIFICATION_OUTCOMES = Counter(
+        "jarvis_verification_total", "Verification outcomes", ["outcome"]
+    )
+
 
 def update_system_metrics():
     if not _AVAILABLE:
@@ -43,5 +66,34 @@ def update_system_metrics():
         CPU_USAGE.set(psutil.cpu_percent())
         RAM_USAGE.set(psutil.virtual_memory().percent)
         DISK_USAGE.set(psutil.disk_usage("/").percent)
+    except Exception:
+        pass
+
+
+def record_reasoning_strategy(strategy: str, success: bool):
+    if not _AVAILABLE:
+        return
+    try:
+        REASONING_STRATEGY_CALLS.labels(strategy=strategy, outcome="success" if success else "failure").inc()
+    except Exception:
+        pass
+
+
+def record_tool_execution(tool: str, risk_level: str, success: bool):
+    if not _AVAILABLE:
+        return
+    try:
+        TOOL_EXECUTIONS.labels(tool=tool, risk_level=risk_level,
+                               outcome="success" if success else "failure").inc()
+    except Exception:
+        pass
+
+
+def record_verification(outcome: str):
+    """outcome: "success" | "retry" | "failure"."""
+    if not _AVAILABLE:
+        return
+    try:
+        VERIFICATION_OUTCOMES.labels(outcome=outcome).inc()
     except Exception:
         pass

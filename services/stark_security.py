@@ -99,7 +99,16 @@ class StarkSecurity:
 
     def block_ip(self, ip: str) -> dict:
         """Block an IP via UFW. Only works on a Linux host with ufw and root
-        privileges (e.g. the Stark Server deploy) — silently no-ops elsewhere."""
+        privileges (e.g. the Stark Server deploy) — silently no-ops elsewhere.
+        list-args subprocess (no shell=True), so `ip` was never a shell-
+        injection vector, but it also wasn't validated as looking like an
+        IP at all before being passed through as a bare CLI argument —
+        reject anything that isn't a real IPv4/IPv6 address up front."""
+        import ipaddress
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            return {"blocked": False, "ip": ip, "error": "Not a valid IP address"}
         try:
             result = subprocess.run(["ufw", "deny", "from", ip], capture_output=True, text=True, timeout=5)
             return {"blocked": result.returncode == 0, "ip": ip}

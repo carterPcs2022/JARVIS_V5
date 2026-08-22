@@ -984,39 +984,62 @@ class Executor:
 
         return "I couldn't tell what you wanted done with your calendar, sir.", "", "calendar"
 
+    @staticmethod
+    def _run_async(coro):
+        """Runs `coro` to completion from synchronous code, whether or not
+        an event loop is already running on this thread.
+
+        Most callers of Executor.execute() (server/routes/chat.py's
+        ThreadPoolExecutor, server/websocket.py's run_in_executor) run it in
+        a plain worker thread with no event loop, where plain asyncio.run()
+        is fine. But server/api.py's POST /stark/chat/simple calls
+        brain.process_dict() directly from inside an `async def` route —
+        i.e. from a thread that already has a running loop — where
+        asyncio.run() would raise "cannot be called from a running event
+        loop". Detect that case and run the coroutine on a fresh loop in a
+        separate thread instead."""
+        import asyncio
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+        else:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                return ex.submit(asyncio.run, coro).result()
+
     def _reasoning_engine(self, plan: Plan) -> tuple[str, str, str]:
         """Dispatch to whichever core/*.py reasoning technique Planner
-        selected (see Planner._select_reasoning_engine). Each engine returns
-        a dict of intermediate reasoning steps — pull out the final answer."""
-        engine  = plan.steps[0]["args"]["engine"]
-        intent  = plan.intent
-        if engine == "six_hats":
-            from core.six_hats import six_hats
-            return six_hats.think(intent.raw)["synthesis"], "", "six_hats"
-        if engine == "premortem":
-            from core.premortem import premortem
-            return premortem.analyze(intent.raw)["mitigations"], "", "premortem"
-        if engine == "fermi":
-            from core.fermi import fermi
-            r = fermi.estimate(intent.raw)
-            return f"{r['decomposition']}\n\n{r['sanity_check']}", "", "fermi"
-        if engine == "first_principles":
-            from core.first_principles import first_principles
-            return first_principles.reason(intent.raw)["solution"], "", "first_principles"
-        if engine == "constraint_solver":
-            from core.constraint_satisfaction import constraint_solver
-            return constraint_solver.solve(intent.raw, [])["solution"], "", "constraint_solver"
-        if engine == "game_theory":
-            from core.game_theory import game_theory
-            return game_theory.analyze(intent.raw)["analysis"], "", "game_theory"
-        if engine == "info_value":
-            from core.information_value import info_value
-            return info_value.most_valuable(intent.raw, intent.context)["analysis"], "", "info_value"
+        selected (see Planner._select_reasoning_engine), via the shared
+        ReasoningStrategy registry (core/interfaces/reasoning.py) instead of
+        a local if/elif per engine. Each engine's adapter class (added
+        alongside it — e.g. core/fermi.py's FermiStrategy) reproduces the
+        exact same answer text this function used to build by hand, so this
+        redirect is a pure refactor: same 8 engines, same Planner selection,
+        same output — just routed through one shared interface."""
+        from core.interfaces.reasoning import get_strategy
+
+        engine = plan.steps[0]["args"]["engine"]
+        intent = plan.intent
+        strategy = get_strategy(engine)
+        if strategy is None:
+            return self._direct(intent)
+
+        result = self._run_async(strategy.solve(intent.raw, intent.context))
+        provider = engine
         if engine == "mental_models":
-            from core.mental_models import mental_models
-            r = mental_models.apply(intent.raw, intent.context)
-            return r["response"], "", f"mental_model_{r.get('used_model', '')}"
-        return self._direct(intent)
+            # Matches the exact provider string the old if/elif branch
+            # built: f"mental_model_{used_model}".
+            provider = f"mental_model_{result.metadata.get('used_model', '')}"
+
+        try:
+            from core.interfaces.verification import verify_tool_result
+            from services.metrics import record_reasoning_strategy
+            record_reasoning_strategy(engine, verify_tool_result(result.answer).success)
+        except Exception:
+            pass
+
+        return result.answer, "", provider
 
     def _local_file_command(self, intent: Intent) -> str:
         """Best-effort shell command the user can run locally for a

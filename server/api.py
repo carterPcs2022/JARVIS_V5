@@ -143,6 +143,16 @@ _include(
 @app.middleware("http")
 async def security_gate_middleware(request: Request, call_next):
     from services.honeypot import honeypot
+    import time as _time
+
+    # REQUESTS_TOTAL/RESPONSE_TIME (services/metrics.py) had the same gap
+    # behavioral_security.record_request() did below — real Prometheus
+    # metric objects, defined and exported via /metrics, but nothing ever
+    # incremented/observed them (confirmed by grep — zero callers). This is
+    # the single request-level choke point every response already passes
+    # through, so it's the right place, same reasoning as the
+    # behavioral_security wiring already here.
+    _metrics_start = _time.time()
 
     ip = request.client.host if request.client else "unknown"
     if honeypot.is_blocked(ip):
@@ -178,7 +188,25 @@ async def security_gate_middleware(request: Request, call_next):
     except Exception:
         pass
 
-    return await call_next(request)
+    response = await call_next(request)
+
+    try:
+        # REQUESTS_TOTAL/RESPONSE_TIME only exist as module attributes when
+        # prometheus_client is installed (see services/metrics.py's
+        # `if _AVAILABLE:` block) — importing them raises ImportError
+        # otherwise, caught here same as every other optional-dependency
+        # degradation in this codebase.
+        from services.metrics import REQUESTS_TOTAL, RESPONSE_TIME
+        REQUESTS_TOTAL.labels(
+            endpoint=request.url.path, method=request.method, status=str(response.status_code),
+        ).inc()
+        RESPONSE_TIME.labels(
+            endpoint=request.url.path, model="",
+        ).observe(_time.time() - _metrics_start)
+    except Exception:
+        pass
+
+    return response
 
 
 # ── Honeypot fake endpoints ────────────────────────────────────────────────────

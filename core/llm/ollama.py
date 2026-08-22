@@ -57,3 +57,38 @@ def pull_model(model: str) -> bool:
             return r.status_code == 200
     except Exception:
         return False
+
+
+# ── LLMProvider adapter (core/interfaces/llm_provider.py) ─────────────────────
+
+import asyncio
+from core.interfaces.llm_provider import LLMProvider, GenerateRequest, ModelResponse
+
+
+class OllamaProvider(LLMProvider):
+    name = "ollama"
+
+    def is_available(self) -> bool:
+        # Unlike the API-key-gated providers, availability here means "is a
+        # local server actually reachable" — cascade.py's _ollama_available()
+        # does a real request for the same reason; mirrored rather than
+        # imported to avoid this module depending on the (otherwise unused)
+        # cascade.py.
+        try:
+            import urllib.request
+            urllib.request.urlopen(OLLAMA_BASE_URL, timeout=2)
+            return True
+        except Exception:
+            return False
+
+    async def generate(self, request: GenerateRequest) -> ModelResponse:
+        # chat() below has no `model` param — it always uses OLLAMA_MODEL
+        # from config/settings.py, so request.model is ignored here.
+        messages = list(request.messages)
+        if request.system:
+            messages = [{"role": "system", "content": request.system}] + messages
+        data = await asyncio.to_thread(chat, messages, request.max_tokens, request.temperature)
+        return ModelResponse(
+            content=data["content"], model=data["model"], provider=self.name,
+            usage=data.get("usage", {}), raw=data,
+        )

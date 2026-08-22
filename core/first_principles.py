@@ -34,3 +34,24 @@ class FirstPrinciples:
 
 
 first_principles = FirstPrinciples()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class FirstPrinciplesStrategy(ReasoningStrategy):
+    name = "first_principles"
+
+    def should_use(self, query: str) -> bool:
+        return first_principles.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(first_principles.reason, query)
+        return ReasoningResult(
+            answer=data["solution"], strategy=self.name,
+            assumptions=[data.get("assumptions", "")],
+            metadata={"fundamentals": data.get("fundamentals", "")},
+        )

@@ -200,5 +200,13 @@ def rate_limit(request: Request):
     _rate_store[ip].append(now)
 
 def add_cors(app):
+    # allow_credentials=True + a wildcard origin lets Starlette reflect
+    # *any* requesting Origin back with Access-Control-Allow-Credentials:
+    # true — effectively "any website may make credentialed requests,"
+    # which defeats the point of restricting origins at all. Auth here is
+    # a bearer token, not a cookie, so credentialed cross-origin requests
+    # aren't needed when the origin list hasn't been explicitly narrowed;
+    # only turn credentials on once ALLOWED_ORIGINS names real origins.
+    wildcard = ALLOWED_ORIGINS == ["*"]
     app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
-                       allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+                       allow_credentials=not wildcard, allow_methods=["*"], allow_headers=["*"])

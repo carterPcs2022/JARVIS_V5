@@ -6,6 +6,7 @@ __pycache__
 .gitignore
 *.md
 *.log
+*.jsonl
 backups/
 data/patterns.json
 memory/

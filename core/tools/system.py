@@ -1,5 +1,5 @@
 """core/tools/system.py — System telemetry and safe shell."""
-import psutil, datetime, socket, subprocess, platform
+import psutil, datetime, socket, subprocess, platform, shlex
 
 
 ALLOWED_CMDS = ("ls","pwd","df","du","uptime","uname","whoami","date",
@@ -100,16 +100,30 @@ def snapshot() -> dict:
 
 
 def run_shell(command: str, timeout: int = 10) -> dict:
-    cmd = command.strip().lower()
+    """Runs `command` with shell=False (argv list, no shell metacharacter
+    interpretation) so a string like "ls; rm -rf ~" can't smuggle a second
+    command past the prefix allowlist below — the ";" and everything after
+    it just become literal (harmless, rejected-by-the-target-program)
+    argv tokens instead of being interpreted by a shell."""
+    try:
+        tokens = shlex.split(command)
+    except ValueError as e:
+        return {"error": f"Could not parse command: {e}"}
+    if not tokens:
+        return {"error": "Empty command"}
+
+    cmd = " ".join(tokens).lower()
     if not any(cmd.startswith(p) for p in ALLOWED_CMDS):
         return {"error": f"Command not in allowlist: '{command}'"}
     try:
-        r = subprocess.run(command, shell=True, capture_output=True,
+        r = subprocess.run(tokens, shell=False, capture_output=True,
                            text=True, timeout=timeout)
         return {"stdout": r.stdout.strip(), "stderr": r.stderr.strip(),
                 "returncode": r.returncode}
     except subprocess.TimeoutExpired:
         return {"error": "Timed out"}
+    except FileNotFoundError:
+        return {"error": f"Command not found: {tokens[0]}"}
     except Exception as e:
         return {"error": str(e)}
 

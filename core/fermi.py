@@ -27,3 +27,24 @@ class FermiEstimator:
 
 
 fermi = FermiEstimator()
+
+
+# ── ReasoningStrategy adapter (core/interfaces/reasoning.py) ──────────────────
+
+import asyncio
+from core.interfaces.reasoning import ReasoningStrategy, ReasoningResult
+
+
+class FermiStrategy(ReasoningStrategy):
+    name = "fermi"
+
+    def should_use(self, query: str) -> bool:
+        return fermi.should_use(query)
+
+    async def solve(self, query: str, context: str = "") -> ReasoningResult:
+        data = await asyncio.to_thread(fermi.estimate, query)
+        # core/brain_v2.py's Executor._reasoning_engine() combines these two
+        # fields into one answer string this same way — preserved here so
+        # routing this engine through the registry doesn't change its output.
+        answer = f"{data['decomposition']}\n\n{data['sanity_check']}"
+        return ReasoningResult(answer=answer, strategy=self.name)

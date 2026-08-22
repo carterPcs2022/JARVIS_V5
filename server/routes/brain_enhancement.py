@@ -121,8 +121,13 @@ def memory_store_fact(body: dict):
                       body.get("source", "manual"), body.get("category", "general"))
 
 
-@router.get("/memory/facts")
+@router.get("/memory/facts/search")
 def memory_recall_facts(q: str, k: int = 5):
+    """Semantic-search variant of GET /stark/memory/facts (server/routes/memory.py,
+    which lists the n most recent facts). Kept at its own path — both routers
+    share the /stark prefix, and registering the same path in two routers meant
+    FastAPI always resolved the first-registered one, leaving this handler
+    dead/unreachable."""
     from core.memory import recall_facts
     return recall_facts(q, k)
 

@@ -273,7 +273,22 @@ async def voice_audio(file: str = ""):
         from core.state import state
         target = state.get("latest_audio_file", "")
 
-    path = static_dir / target if target else None
+    # target is untrusted (query param on an intentionally unauthenticated
+    # endpoint — see docstring). Strip any path components so it can only
+    # ever name a file directly inside static_dir; reject `..`/absolute
+    # paths outright rather than trying to sanitize them.
+    path = None
+    if target:
+        safe_name = os.path.basename(target)
+        if safe_name in ("", ".", "..") or safe_name != target:
+            return {"error": "invalid file"}
+        candidate = (static_dir / safe_name).resolve()
+        try:
+            candidate.relative_to(static_dir.resolve())
+        except ValueError:
+            return {"error": "invalid file"}
+        path = candidate
+
     if not path or not path.exists():
         # Legacy fallback for anything still expecting the old fixed file
         legacy = BASE_DIR / "static_voice.mp3"
