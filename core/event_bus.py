@@ -152,6 +152,17 @@ class EventBus:
             except Exception:
                 pass
 
+            # Also push to Discord, if configured
+            try:
+                import threading
+                from services.messaging import discord_bot
+                if discord_bot.is_configured():
+                    threading.Thread(
+                        target=discord_bot.send_alert_sync, args=(message,), daemon=True
+                    ).start()
+            except Exception:
+                pass
+
         # Critical alerts also place an actual phone call, if Twilio is
         # configured — a Telegram push or HUD toast is easy to miss;
         # "JARVIS is calling you" is not.
