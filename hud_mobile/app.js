@@ -223,6 +223,74 @@
     playNext();
   }
 
+  // Renders JARVIS's ask_user_choice pending questions as clickable
+  // buttons under the bubble that asked them (see core/ask_user_choice.py,
+  // server/websocket.py's pending_choice field) — mirrors desktop.html's
+  // renderChoicePrompt() exactly, adapted to this file's addBubble()/send()
+  // instead of desktop.html's addMessage()/sendMessage(). One shared
+  // click-to-select + Submit flow covers both single questions
+  // (allow_multiple=false, one selection auto-clears any other) and
+  // multiple questions/multi-select — Submit sends every selected option
+  // across all questions as one comma-joined message, which
+  // core.ask_user_choice.resolve_reply() parses back apart server-side.
+  function renderChoicePrompt(bubbleEl, pendingChoice) {
+    if (!pendingChoice || !Array.isArray(pendingChoice.questions) || !pendingChoice.questions.length) return;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'choice-prompt';
+    const selections = pendingChoice.questions.map(() => new Set());
+    let submitBtn;
+
+    pendingChoice.questions.forEach((q, qi) => {
+      const label = document.createElement('div');
+      label.className = 'choice-question-text';
+      label.textContent = q.question + (q.allow_multiple ? ' (pick one or more)' : '');
+      wrap.appendChild(label);
+
+      const optsDiv = document.createElement('div');
+      optsDiv.className = 'choice-options';
+      (q.options || []).forEach((opt) => {
+        const btn = document.createElement('button');
+        btn.className = 'choice-btn';
+        btn.type = 'button';
+        btn.textContent = opt;
+        btn.addEventListener('click', () => {
+          const sel = selections[qi];
+          if (sel.has(opt)) {
+            sel.delete(opt);
+            btn.classList.remove('choice-btn-selected');
+          } else {
+            if (!q.allow_multiple) {
+              sel.clear();
+              optsDiv.querySelectorAll('.choice-btn-selected').forEach((b) => b.classList.remove('choice-btn-selected'));
+            }
+            sel.add(opt);
+            btn.classList.add('choice-btn-selected');
+          }
+          if (submitBtn) submitBtn.disabled = !selections.some((s) => s.size > 0);
+        });
+        optsDiv.appendChild(btn);
+      });
+      wrap.appendChild(optsDiv);
+    });
+
+    submitBtn = document.createElement('button');
+    submitBtn.className = 'choice-btn choice-submit';
+    submitBtn.type = 'button';
+    submitBtn.textContent = 'SUBMIT';
+    submitBtn.disabled = true;
+    submitBtn.addEventListener('click', () => {
+      const chosen = selections.flatMap((s) => Array.from(s));
+      if (!chosen.length) return;
+      wrap.remove();
+      send(chosen.join(', '));
+    });
+    wrap.appendChild(submitBtn);
+
+    bubbleEl.appendChild(wrap);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
   function updatePanels(d) {
     if (d.model)             valModel.textContent    = d.model;
     if (d.provider)          valProvider.textContent = d.provider.toUpperCase();
@@ -248,17 +316,25 @@
           break;
         case 'stream_start': startStream(); addEvent('system', 'Streaming…'); break;
         case 'token':        appendToken(msg.token); break;
-        case 'stream_end':   endStream(msg); addEvent('ok', `Done · ${msg.latency_ms||0} ms`); break;
-        case 'response':
+        case 'stream_end': {
+          const bubble = streamBubble;
+          endStream(msg);
+          addEvent('ok', `Done · ${msg.latency_ms||0} ms`);
+          if (msg.pending_choice && bubble) renderChoicePrompt(bubble, msg.pending_choice);
+          break;
+        }
+        case 'response': {
           endStream(null);
-          addBubble('assistant', msg.response || '');
+          const bubble = addBubble('assistant', msg.response || '');
           updatePanels(msg);
           sendBtn.disabled = false; input.focus();
           addEvent('ok', `Response · ${msg.latency_ms||0} ms`);
           // Only the non-streaming fallback path lacks a reliable
           // audio_ready event — see playLatestVoice()'s comment.
           if (msg.has_audio !== false) playLatestVoice();
+          if (msg.pending_choice) renderChoicePrompt(bubble, msg.pending_choice);
           break;
+        }
         case 'audio_ready':
           // Exact filename(s) from the background TTS generation — no
           // guessing, and (unlike playLatestVoice()) correctly plays every
