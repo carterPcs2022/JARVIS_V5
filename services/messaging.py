@@ -5,6 +5,7 @@ Each integration is fully optional: if the relevant credentials aren't set in
 brain.process_dict() pipeline JARVIS already uses everywhere else.
 """
 import os
+import time
 from config.settings import (
     TELEGRAM_BOT_TOKEN, TELEGRAM_AUTHORIZED_IDS,
     TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE, MY_PHONE_NUMBER,
@@ -235,7 +236,33 @@ class JarvisDiscordBot:
             except Exception as e:
                 print(f"[Discord] Command sync failed: {e}")
 
-        client.run(DISCORD_BOT_TOKEN)
+        # client.run() blocks until the bot disconnects/errors, then raises
+        # if that wasn't a clean shutdown. Production logs show this dying
+        # on discord.errors.HTTPException: 429 Too Many Requests — not
+        # Discord's own rate limiting but Cloudflare (which fronts
+        # discord.com) temporarily blocking the login request, seen
+        # correlating with how often the host process itself restarts
+        # (each restart = a fresh login attempt from this thread). Before
+        # this retry loop, that exception had no handler at all: it killed
+        # this daemon thread silently, and Discord stayed dead for the rest
+        # of that process's life — the only way it came back was the next
+        # unrelated full app restart. Retrying with backoff here means a
+        # transient block recovers within the same run instead of needing
+        # an external restart. A bad/revoked token (LoginFailure) is a real
+        # misconfiguration, not transient, so that one isn't retried.
+        backoff = 60
+        max_backoff = 900
+        while True:
+            try:
+                client.run(DISCORD_BOT_TOKEN)
+                return  # clean shutdown (e.g. client.close() called)
+            except discord.errors.LoginFailure:
+                print("[Discord] Login failed — DISCORD_BOT_TOKEN is invalid or revoked. Not retrying.")
+                return
+            except Exception as e:
+                print(f"[Discord] client.run() failed ({e}) — retrying in {backoff}s.")
+                time.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
 
 discord_bot = JarvisDiscordBot()
