@@ -84,17 +84,17 @@ def route(intent: str, complexity: str = "moderate", private: bool = False) -> R
     if private:
         if _ollama_available():
             return RouteResult(Provider.OLLAMA, os.getenv("OLLAMA_MODEL", "llama3"), "private mode → local model")
-        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "private requested but Ollama unavailable")
+        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "private requested but Ollama unavailable")
 
     if complexity == "complex":
         if _anthropic_available():
             return RouteResult(Provider.ANTHROPIC, "claude-sonnet-5", "complex task → Claude Sonnet 5", cost_estimate=0.01)
         if _groq_available():
-            return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "complex fallback → Groq 70B")
+            return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "complex fallback → Groq 70B")
 
     # Default: Groq for speed/cost
     if _groq_available():
-        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"), "standard → Groq (fast+cheap)")
+        return RouteResult(Provider.GROQ, os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), "standard → Groq (fast+cheap)")
 
     if _ollama_available():
         return RouteResult(Provider.OLLAMA, os.getenv("OLLAMA_MODEL", "llama3"), "Groq unavailable → Ollama local")

@@ -1,7 +1,7 @@
 """services/threat_detector.py — contextual threat classifier for combat mode.
 
 Runs on every incoming chat message, routed through core/llm/router.py's
-chat() (force_model="instant" -> Groq's llama-3.1-8b-instant) rather than
+chat() (force_model="instant" -> Groq's openai/gpt-oss-20b) rather than
 calling core.llm.openai.chat() directly — this reuses router.py's existing
 client-side rate limiter and circuit breaker instead of firing an
 uncoordinated second Groq call per message that the rest of the app's rate

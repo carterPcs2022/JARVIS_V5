@@ -64,12 +64,20 @@ def _instant_response(query: str) -> str | None:
 # All three are decommissioned; using them would 404 on every call. Only
 # models actually present in Groq's live catalog are listed here.
 MODEL_REGISTRY = {
+    # llama-3.1-8b-instant and llama-3.3-70b-versatile were both sunset by
+    # Groq (June 2026) — confirmed against Groq's current docs, not
+    # guessed. Mirrors "reasoning" (qwen/qwen3.6-27b) and "research"
+    # (openai/gpt-oss-120b) below, which had already been manually
+    # migrated for the same reason — ModelUpdater's automatic same-family
+    # check only ever catches a version bump within an unchanged model
+    # line, never a model vanishing outright (see services/model_updater.py's
+    # own docstring on why it deliberately doesn't auto-guess a replacement).
     "instant": {
-        "id": "llama-3.1-8b-instant", "max_tokens": 1024,
+        "id": "openai/gpt-oss-20b", "max_tokens": 1024,
         "best_for": ["greeting", "simple_fact", "time", "status"],
     },
     "standard": {
-        "id": "llama-3.3-70b-versatile", "max_tokens": 2048,
+        "id": "openai/gpt-oss-120b", "max_tokens": 2048,
         "best_for": ["chat", "analysis", "planning", "general"],
     },
     "reasoning": {
@@ -88,7 +96,7 @@ MODEL_REGISTRY = {
         "best_for": ["research", "synthesis", "long_document", "comparison"],
     },
     "coder": {
-        "id": "llama-3.3-70b-versatile", "max_tokens": 4096,
+        "id": "openai/gpt-oss-120b", "max_tokens": 4096,
         "best_for": ["code_generation", "code_review", "debugging"],
         "system_suffix": "\nYou are operating in code mode. Prioritize "
                          "correctness, efficiency, and clean code above all else.",
@@ -270,8 +278,12 @@ def _rate_check() -> bool:
 # ── Daily request-cap awareness ────────────────────────────────────────────
 # _rate_check() above only guards Groq's 30-requests-per-minute figure — it
 # has no idea about the separate, much easier to exhaust cap: 1,000
-# requests/day on both llama-3.1-8b-instant and llama-3.3-70b-versatile
-# (confirmed against Groq's published limits, not assumed). That averages
+# requests/day on both models this used to be pinned to. Kept as the
+# same conservative 1000/day default for their gpt-oss replacements below
+# (June 2026 model migration, see MODEL_REGISTRY's comment) — not
+# reconfirmed against Groq's current published per-model limits, so
+# treat this as a cautious carry-over, not a verified number for the
+# new models. That averages
 # out to ~41 requests/hour, shared across real user chat, every scheduled
 # background job (predictive pre-caching, proactive insights, research),
 # and every health-check ping — and nothing tracked it before this.
@@ -284,8 +296,8 @@ def _rate_check() -> bool:
 _daily_call_times: dict = {}
 _DAILY_WINDOW = 86400  # seconds — rolling 24h, not a calendar-day reset
 _MODEL_DAILY_LIMITS = {
-    "llama-3.1-8b-instant":    1000,
-    "llama-3.3-70b-versatile": 1000,
+    "openai/gpt-oss-20b":  1000,
+    "openai/gpt-oss-120b": 1000,
 }
 _DEFAULT_DAILY_LIMIT = 1000  # conservative default for any model not explicitly listed
 _DAILY_SAFETY_MARGIN = 0.9   # background calls stop at 90% of the real daily cap
