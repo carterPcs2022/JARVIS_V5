@@ -434,7 +434,13 @@ class ThreatPlaybook:
             return f"Token rotation failed: {exc}"
 
     def _action_block_ip(self, ip: str, context: dict) -> str:
-        """Append the IP to memory/blocked_ips.json."""
+        """Record the block in memory/blocked_ips.json (audit trail) AND
+        actually add a permanent ufw rule via services.stark_security —
+        this used to only do the former, meaning any trigger that ran this
+        action logged an IP as "blocked" without anything ever really
+        blocking it. Kept fully bracket-guarded: a broken/no-op firewall
+        call here shouldn't stop the audit-trail write, which is cheap
+        and always useful."""
         if not ip:
             ip = context.get("ip", "unknown")
         entry = {
@@ -442,6 +448,16 @@ class ThreatPlaybook:
             "blocked_at": _now(),
             "reason":    context.get("trigger", context.get("threat_type", "playbook")),
         }
+        firewall_note = ""
+        try:
+            from services.stark_security import stark_security
+            result = stark_security.block_ip(ip)
+            entry["firewall_blocked"] = result.get("blocked", False)
+            if not result.get("blocked"):
+                firewall_note = f" (firewall block failed: {result.get('error', 'unknown')})"
+        except Exception as exc:
+            entry["firewall_blocked"] = False
+            firewall_note = f" (firewall block failed: {exc})"
         try:
             blocked = _load_json(_BLOCKED_IP_FILE, default=[])
             if not isinstance(blocked, list):
@@ -450,9 +466,9 @@ class ThreatPlaybook:
             if not any(b.get("ip") == ip for b in blocked):
                 blocked.append(entry)
                 _save_json(_BLOCKED_IP_FILE, blocked)
-                log.warning("Blocked IP: %s", ip)
-                return f"IP {ip} added to block list"
-            return f"IP {ip} already in block list"
+                log.warning("Blocked IP: %s%s", ip, firewall_note)
+                return f"IP {ip} added to block list{firewall_note}"
+            return f"IP {ip} already in block list{firewall_note}"
         except Exception as exc:
             return f"block_ip failed for {ip}: {exc}"
 

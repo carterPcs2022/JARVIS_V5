@@ -26,6 +26,21 @@ FAILURE_WINDOW     = 300   # seconds — 5 minutes
 BLOCK_DURATION      = 900  # seconds — 15 minutes
 _blocked_ips: dict = {}    # ip -> unblock timestamp
 
+# ── Permanent firewall escalation for repeat offenders ───────────────────────
+# The temporary block above is deliberately soft (in-memory, time-boxed,
+# never needs manual unblocking) — right for a one-off. An IP that keeps
+# coming back and re-triggering it isn't a one-off. This adds one further,
+# separate tier: after ESCALATION_THRESHOLD distinct temporary-block
+# transitions, actually call services.stark_security.block_ip() — a real,
+# permanent `ufw deny` rule. This is the first place in this codebase that
+# automatically executes a live firewall command; kept narrow and separate
+# from services/playbook.py's "brute_force" playbook (which also rotates
+# JARVIS_API_TOKEN) specifically so this can't auto-rotate a live credential
+# with no human in the loop — only the firewall rule escalates automatically.
+ESCALATION_THRESHOLD = 3
+_escalation_counts: dict = defaultdict(int)
+_escalated_ips: set = set()
+
 def _hash(path: str) -> str | None:
     try:
         with open(path, "rb") as f:
@@ -202,6 +217,29 @@ def record_failed_auth(ip: str):
                       f"{BLOCK_DURATION // 60} minutes.")
             except Exception:
                 pass
+
+            _escalation_counts[ip] += 1
+            if _escalation_counts[ip] >= ESCALATION_THRESHOLD and ip not in _escalated_ips:
+                _escalated_ips.add(ip)
+                try:
+                    from services.stark_security import stark_security
+                    result = stark_security.block_ip(ip)
+                    from services.notifications import critical
+                    if result.get("blocked"):
+                        critical("Permanent firewall block",
+                                  f"{ip} re-triggered the temporary brute-force block "
+                                  f"{_escalation_counts[ip]} times — added a permanent "
+                                  f"ufw rule.")
+                    else:
+                        # ufw not available on this host (e.g. not Linux, or
+                        # not root) — the temporary block above still holds;
+                        # this just couldn't add the permanent layer on top.
+                        critical("Firewall escalation failed",
+                                  f"{ip} hit the escalation threshold but the permanent "
+                                  f"ufw block failed: {result.get('error', 'unknown')}. "
+                                  f"Temporary block still active.")
+                except Exception as e:
+                    print(f"[Sentinel] Firewall escalation failed for {ip}: {e}")
 
 
 def is_blocked(ip: str) -> bool:

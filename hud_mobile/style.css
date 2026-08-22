@@ -329,6 +329,52 @@ body::before {
   font-size: 11px;
 }
 
+/* ask_user_choice — mirrors desktop.html's .choice-prompt pattern, using
+   this file's own color variables (--ok/--dim/--arc instead of
+   desktop.html's --accent/--accent2/--gold) */
+.choice-prompt {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.choice-question-text {
+  font-size: 11px;
+  color: var(--ok);
+  margin-bottom: 4px;
+}
+.choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.choice-btn {
+  padding: 7px 12px;
+  background: rgba(0,255,136,.06);
+  border: 1px solid rgba(0,255,136,.2);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.choice-btn:hover { border-color: var(--ok); color: var(--ok); }
+.choice-btn-selected {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: rgba(0,255,136,.15);
+}
+.choice-submit {
+  align-self: flex-start;
+  border-color: var(--arc2);
+  color: var(--arc);
+  background: rgba(204,85,0,.08);
+  letter-spacing: 1px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.choice-submit:disabled { opacity: .35; cursor: not-allowed; }
+
 /* Streaming cursor */
 .cursor {
   display: inline-block;

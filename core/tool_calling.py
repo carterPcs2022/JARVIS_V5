@@ -15,8 +15,10 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
-            "name": "web_search",
-            "description": "Search the web for current information",
+            "name": "web_search_raw",
+            "description": "Search the web for current information (raw multi-provider "
+                            "search results — for a synthesized answer with page fetching, "
+                            "see core/executor.py's separate 'web_search' tool instead)",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,7 +151,7 @@ def _handle_generate_code(args: dict):
 
 
 TOOL_HANDLERS = {
-    "web_search":        _handle_web_search,
+    "web_search_raw":    _handle_web_search,
     "get_system_status": _handle_system_status,
     "memory_recall":     _handle_memory_recall,
     "run_task":          _handle_run_task,
@@ -170,7 +172,7 @@ from core.interfaces.tool import Tool
 
 # (name, risk_level, permissions)
 _TOOL_META = [
-    ("web_search",        "low",    ["read", "network"]),
+    ("web_search_raw",    "low",    ["read", "network"]),
     ("get_system_status", "low",    ["read"]),
     ("memory_recall",     "low",    ["read"]),
     ("run_task",          "medium", ["execute"]),
