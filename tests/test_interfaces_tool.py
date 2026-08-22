@@ -3,10 +3,13 @@ from core.interfaces.tool import registry, mac_registry, tool_calling_registry, 
 
 
 def test_three_separate_registries_not_merged():
-    """executor.py and tool_calling.py both define a tool literally named
-    "web_search" backed by different implementations (core.deep_search vs
-    core.tools.search.SearchCascade) -- registry() must stay scoped to
-    executor.py's only, never silently merged with the other two."""
+    """executor.py's "web_search" (core.deep_search -- synthesized answer,
+    page-fetching) and tool_calling.py's "web_search_raw"
+    (core.tools.search.SearchCascade -- raw multi-provider results) are
+    genuinely different capabilities that used to collide on the same
+    name; tool_calling.py's was renamed to reconcile that. registry() must
+    still stay scoped to executor.py's only, never silently merged with
+    the other two."""
     executor_tools = registry()
     mac_tools = mac_registry()
     tc_tools = tool_calling_registry()
@@ -16,9 +19,9 @@ def test_three_separate_registries_not_merged():
     assert len(tc_tools) == 7
 
     assert "web_search" in executor_tools
-    assert "web_search" in tc_tools
+    assert "web_search_raw" in tc_tools
+    assert "web_search" not in tc_tools
     assert get_tool("web_search") is executor_tools["web_search"]
-    assert get_tool("web_search") is not tc_tools["web_search"]
 
 
 def test_every_tool_isinstance_and_self_named():

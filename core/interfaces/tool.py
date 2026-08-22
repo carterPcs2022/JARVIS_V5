@@ -14,11 +14,16 @@ dispatchers in this codebase, not one registry with gaps:
 These are kept as three SEPARATE registries (registry(), from
 core.executor.TOOLS; mac_registry(), from core.mac_dispatcher.TOOLS;
 tool_calling_registry(), from core.tool_calling.TOOLS), not flattened into
-one dict, because #1 and #3 both define a tool literally named
-"web_search" backed by two different implementations
-(core.deep_search vs core.tools.search.SearchCascade) — a flat merge would
-silently let one clobber the other. Reconciling that naming collision is
-real future work, not attempted here.
+one dict — #1 and #3 used to both define a tool literally named
+"web_search" (core.deep_search vs core.tools.search.SearchCascade,
+genuinely different capabilities: deep synthesis with page-fetching vs.
+a raw multi-provider search cascade with a mode parameter, not
+duplicates of each other). core/tool_calling.py's has since been renamed
+to "web_search_raw" to reconcile the collision; kept as separate
+registries regardless, since a flat merge would still be the wrong
+model for two dispatchers with genuinely different confirmation/context
+semantics (see core/executor.py's execute_step() vs
+core/mac_dispatcher.py's dispatch(), below).
 
 Enforcement: Tool.execute() now takes `confirmed`. When
 requires_confirmation=True and confirmed=False, it does NOT run the
