@@ -298,7 +298,19 @@ JARVIS_PERSONALITY_ENHANCED = JARVIS_PERSONALITY + STARK_INTELLIGENCE_PROTOCOLS
 
 # ── LLM: Groq (primary) ───────────────────────────────────────────────────────
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL     = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+# llama-3.1-8b-instant was sunset by Groq (June 2026), along with
+# llama-3.3-70b-versatile, qwen3-32b, and llama-guard-4-12b — Groq is
+# pushing everyone to their GPT-OSS models instead. Confirmed exact IDs
+# from Groq's current docs, not guessed (this codebase's own
+# services/model_updater.py deliberately never auto-guesses a
+# replacement for a model that's vanished entirely, specifically
+# because a past incident here came from trusting a listing outright —
+# same caution applies to a manual fix). gpt-oss-20b keeps this default
+# on the small/fast model llama-3.1-8b-instant was, matching what
+# server/websocket.py's primary chat streaming path (_try_stream())
+# actually wants — real-time token generation, not just "instant" tier
+# classification traffic.
+GROQ_MODEL     = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 
 # ── LLM: Ollama (fallback) ────────────────────────────────────────────────────
