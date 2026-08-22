@@ -1,4 +1,5 @@
 .env
+.env_token_update
 __pycache__/
 *.pyc
 venv/
