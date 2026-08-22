@@ -444,6 +444,7 @@ class Result:
     issues:       list = field(default_factory=list)
     raw_plan:     Plan | None = None
     confidence:   int = 0   # metadata only — never rendered into the response text
+    pending_choice: dict | None = None  # see core/ask_user_choice.py
 
 
 # ── Reasoner ─────────────────────────────────────────────────────────────────
@@ -1316,6 +1317,22 @@ class Brain:
             save_turn(user_input, response)
             return Result(response=response, ok=True, provider="mayday")
 
+        # ── Resolve a pending ask_user_choice from the previous turn ──────────
+        # Any reply consumes it — matched or not — so a stale question can
+        # never keep intercepting unrelated later turns. Must run before the
+        # quick-command short-circuits below so e.g. replying "2" to a
+        # pending question doesn't get misread as a Spotify/scene command.
+        try:
+            from core.ask_user_choice import clear_pending, get_pending, resolve_reply
+            _pending_choice = get_pending()
+            if _pending_choice is not None:
+                _resolved = resolve_reply(_pending_choice, user_input)
+                clear_pending()
+                if _resolved:
+                    user_input = f"{user_input}\n\n[{_resolved}]"
+        except Exception:
+            pass
+
         # ── Predictive cache — free lookup, instant response if pre-loaded ────
         try:
             from services.predictor import predictor_engine
@@ -1742,6 +1759,29 @@ class Brain:
         plan   = self.planner.create(intent)
         result = self.executor.execute(plan)
 
+        # ── ask_user_choice marker detection ────────────────────────────────
+        # If the model emitted a ```ask_user_choice block in its own text,
+        # strip it from what the user sees and store the parsed pending
+        # choice. If no marker was found but mac_dispatcher's own
+        # ask_user_choice tool already called propose() earlier in this same
+        # turn, attach that instead — get_pending() only ever returns
+        # something from THIS turn here, since any leftover pending from a
+        # previous turn was already consumed above before Reasoner/Planner
+        # ever ran.
+        try:
+            from core.ask_user_choice import extract_marker, format_fallback_text, get_pending, propose
+            clean_text, parsed = extract_marker(result.response)
+            result.response = clean_text
+            if parsed is not None:
+                result.pending_choice = propose(parsed.get("questions", []))
+            else:
+                result.pending_choice = get_pending()
+            if result.pending_choice is not None:
+                fallback = format_fallback_text(result.pending_choice)
+                result.response = f"{result.response}\n\n{fallback}".strip()
+        except Exception:
+            pass
+
         # ── Confidence scoring ────────────────────────────────────────────────
         try:
             from core.validator import score_confidence, add_confidence_marker
@@ -1811,10 +1851,11 @@ class Brain:
             pass
 
         return {
-            "response":      r.response,
-            "model":         r.model,
-            "provider":      r.provider,
-            "latency_ms":    r.latency_ms,
+            "response":       r.response,
+            "model":          r.model,
+            "provider":       r.provider,
+            "latency_ms":     r.latency_ms,
+            "pending_choice": r.pending_choice,
             "meta": {
                 "action":        r.raw_plan.intent.action if r.raw_plan else "unknown",
                 "complexity":    r.raw_plan.intent.complexity if r.raw_plan else "unknown",
