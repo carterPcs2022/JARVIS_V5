@@ -32,8 +32,34 @@ ANTHROPIC_SETTING_NAMES = {
 def _base_family(model_id: str) -> str:
     """Strip version numbers so different releases of the same model
     line compare equal, e.g. llama-3.1-70b-versatile and
-    llama-3.3-70b-versatile both become llama-.-b-versatile."""
-    return re.sub(r"\d+", "", model_id.lower())
+    llama-3.3-70b-versatile both become llama-.-70b-versatile.
+
+    Only digit runs NOT immediately followed by a letter are stripped —
+    a trailing letter (8b, 20b, 70b, 120b) marks a parameter-count/size
+    suffix, not a version number, and must stay literal in the family
+    string. Without this distinction, openai/gpt-oss-20b and
+    openai/gpt-oss-120b both reduced to "openai/gpt-oss-b" and compared
+    as if 120b were merely a newer *version* of 20b, when they're
+    actually two different-sized sibling models. _is_newer() would then
+    treat the size jump as a legitimate upgrade and check_and_apply()
+    auto-patches + auto-commits + auto-pushes it with no human review —
+    silently swapping in a materially different (far larger/slower/
+    costlier) model under a tier that was deliberately pinned small
+    (e.g. a low-latency threat classifier).
+
+    Checking the lookahead only after the full greedy \\d+ run (via a
+    match callback, not a regex lookahead assertion) matters here: a
+    lookahead assertion backtracks \\d+ down to a partial run to satisfy
+    itself -- e.g. "20b" would regex-backtrack \\d+ to just "2" (since
+    "0" right after it isn't a letter), stripping half the size token
+    instead of leaving it intact."""
+    model_id = model_id.lower()
+
+    def _strip_unless_size_suffix(m: re.Match) -> str:
+        next_char = model_id[m.end():m.end() + 1]
+        return m.group(0) if next_char.isalpha() else ""
+
+    return re.sub(r"\d+", _strip_unless_size_suffix, model_id)
 
 
 def _version_tuple(model_id: str) -> list[int]:
