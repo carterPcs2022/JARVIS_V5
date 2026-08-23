@@ -126,3 +126,52 @@ def test_block_ip_still_works_for_real_ip():
         mock_run.return_value = mock.Mock(returncode=0)
         result = stark_security.block_ip("203.0.113.7")
         assert result["blocked"] is True
+
+
+# ── core/sandbox.py rollback() allowlist/lockfile enforcement ───────────────
+# rollback() used to write backup content straight to `BASE_DIR / filepath`
+# with no ALLOWED_FILES/LOCKED_FILES check at all -- unlike deploy(), which
+# enforces that check via validate_code(). The HTTP route (server/routes/
+# sandbox.py POST /stark/sandbox/rollback) passes filepath straight from the
+# request body with nothing upstream enforcing the allowlist either.
+
+def test_rollback_refuses_locked_file():
+    from core.sandbox import jarvis_sandbox
+    with mock.patch("services.audit_log.audit_log.record"), \
+         mock.patch("utils.git_ops.commit_and_push") as mock_push:
+        result = jarvis_sandbox.rollback("core/sandbox.py", "/tmp/whatever")
+        assert result["success"] is False
+        assert "allowlist" in result["error"]
+        mock_push.assert_not_called()
+
+
+def test_rollback_refuses_file_outside_allowlist():
+    from core.sandbox import jarvis_sandbox
+    with mock.patch("services.audit_log.audit_log.record"), \
+         mock.patch("utils.git_ops.commit_and_push") as mock_push:
+        result = jarvis_sandbox.rollback("/etc/passwd", "/tmp/whatever")
+        assert result["success"] is False
+        assert "allowlist" in result["error"]
+        mock_push.assert_not_called()
+
+
+def test_rollback_still_works_for_allowlisted_file():
+    import core.sandbox as sandbox_mod
+    from core.sandbox import jarvis_sandbox
+
+    backup_file = sandbox_mod.BACKUP_DIR / "jarvis_test_rollback_backup.py"
+    sandbox_mod.BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    backup_file.write_text("# restored content\n")
+    target = sandbox_mod.BASE_DIR / "services" / "spotify.py"
+    original = target.read_text()
+
+    try:
+        with mock.patch("services.audit_log.audit_log.record"), \
+             mock.patch("utils.git_ops.commit_and_push") as mock_push:
+            result = jarvis_sandbox.rollback("services/spotify.py", str(backup_file))
+            assert result["success"] is True
+            assert target.read_text() == "# restored content\n"
+            mock_push.assert_called_once()
+    finally:
+        target.write_text(original)
+        backup_file.unlink(missing_ok=True)

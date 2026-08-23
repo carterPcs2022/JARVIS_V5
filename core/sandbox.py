@@ -268,8 +268,28 @@ print("ALL_TESTS_PASSED")
                 "persisted": False}
 
     def rollback(self, filepath: str, backup_path: str) -> dict:
-        """Roll back a deployment from its backup."""
+        """Roll back a deployment from its backup.
+
+        deploy() only ever writes to a file that passed validate_code()'s
+        ALLOWED_FILES/LOCKED_FILES check; rollback() must enforce the same
+        guard on its own, independently, rather than trusting that whatever
+        got this far already went through deploy() — server/routes/
+        sandbox.py's /rollback endpoint takes filepath as a raw string
+        straight from the request body, with no such check upstream. Without
+        this, a caller could restore *any* backup's content (rollback
+        doesn't check that the backup even corresponds to filepath) into a
+        LOCKED_FILES target like core/sandbox.py or config/settings.py, or
+        into a path outside ALLOWED_FILES entirely (BASE_DIR / filepath
+        resolves to just filepath when filepath is absolute -- a plain
+        Python pathlib join, not a containment check) -- and it would be
+        auto-committed and pushed immediately, no approval step. This is
+        exactly the "no Ultron scenarios" guarantee core/self_analysis.py's
+        ALLOWED_FILES/LOCKED_FILES split exists for."""
         from services.audit_log import audit_log
+        from core.self_analysis import ALLOWED_FILES, LOCKED_FILES
+
+        if filepath not in ALLOWED_FILES or filepath in LOCKED_FILES:
+            return {"success": False, "error": f"Cannot roll back file outside the allowlist: {filepath}"}
 
         try:
             backup = Path(backup_path)
