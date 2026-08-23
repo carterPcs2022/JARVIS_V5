@@ -183,6 +183,29 @@
     // audio_ready now drives instead.
   }
 
+  // iOS WebKit (and in particular in-app browsers embedding it, e.g. an
+  // app's own WebView) only allows audio.play() to succeed when it's called
+  // synchronously inside a real user gesture (tap/click/keydown) — a
+  // .play() triggered later from an async WebSocket 'audio_ready' message,
+  // even one that followed a message the user just sent, no longer counts.
+  // WebKit rejects it with NotAllowedError, which every .catch(() => {})
+  // below used to swallow completely — audio silently never played, with
+  // no error anywhere the user could see. unlockAudio() plays+pauses a
+  // silent clip synchronously inside the gesture handlers that call send()
+  // and toggleVoice() (see their call sites below), which "unlocks" the
+  // page for the rest of the session per the same trick every JS audio
+  // library uses for this exact WebKit restriction — after that, later
+  // async .play() calls succeed normally.
+  let _audioUnlocked = false;
+  function unlockAudio() {
+    if (_audioUnlocked) return;
+    _audioUnlocked = true;
+    try {
+      const a = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+      a.play().then(() => a.pause()).catch(() => { _audioUnlocked = false; });
+    } catch { _audioUnlocked = false; }
+  }
+
   // Fallback ONLY for the non-streaming 'response' path (brain.process_dict(),
   // which doesn't consistently emit audio_ready the way the streaming path
   // does) — same "guess and fetch latest" approach as before, same
@@ -197,7 +220,7 @@
     lastVoicePlay = now;
     setTimeout(() => {
       const audio = new Audio(`${API}/stark/voice/audio?t=${Date.now()}`);
-      audio.play().catch(() => {});
+      audio.play().catch(e => console.warn('[JARVIS] voice playback blocked:', e.name, e.message));
     }, 400);
   }
 
@@ -218,7 +241,7 @@
       const audio = new Audio(`${API}/stark/voice/audio?file=${encodeURIComponent(filename)}&t=${Date.now()}`);
       audio.addEventListener('ended', playNext);
       audio.addEventListener('error', playNext);
-      audio.play().catch(playNext);
+      audio.play().catch(e => { console.warn('[JARVIS] voice playback blocked:', e.name, e.message); playNext(); });
     }
     playNext();
   }
@@ -409,6 +432,7 @@
 
   // ── Send ───────────────────────────────────────────────────────────────────
   function send(text) {
+    unlockAudio();
     text = (text || input.value).trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
     addBubble('user', text);
@@ -448,7 +472,7 @@
       const blob  = new Blob([bytes], {type: 'audio/mpeg'});
       const url   = URL.createObjectURL(blob);
       const a     = new Audio(url);
-      a.play().catch(() => {});
+      a.play().catch(e => console.warn('[JARVIS] voice playback blocked:', e.name, e.message));
       a.onended = () => URL.revokeObjectURL(url);
     } catch (e) { addEvent('error', `Audio: ${e.message}`); }
   }
@@ -493,6 +517,7 @@
   }
 
   async function toggleVoice() {
+    unlockAudio();
     if (mediaRec && mediaRec.state === 'recording') {
       mediaRec.stop();
       voiceBtn.classList.remove('recording');
@@ -563,7 +588,16 @@
   // ── Live metrics polling ───────────────────────────────────────────────────
   async function pollMetrics() {
     try {
-      const r = await fetch(`${API}/stark/telemetry`);
+      // Missing Authorization header used to make this a guaranteed 401
+      // every 30s (server/routes/telemetry.py requires verify_token same
+      // as every other route) -- five of those trips sentinel's brute-
+      // force threshold (services/sentinel.py's 15-minute IP block),
+      // which then 403s EVERY request from this IP, including an
+      // otherwise-correct WebSocket token. Confirmed live: this is what
+      // was actually behind "the token stopped working" on production.
+      const r = await fetch(`${API}/stark/telemetry`, {
+        headers: getToken() ? {Authorization: `Bearer ${getToken()}`} : {}
+      });
       const d = await r.json();
       if (d.cpu  != null) setArc(arcCpu,  valCpu,  d.cpu);
       if (d.ram  != null) setArc(arcRam,  valRam,  d.ram);

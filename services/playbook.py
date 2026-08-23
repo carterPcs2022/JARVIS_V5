@@ -416,8 +416,25 @@ class ThreatPlaybook:
 
     def _action_rotate_api_token(self, context: dict) -> str:
         """
-        Generate a new secure token and save it to .env_token_update
-        in the project root for manual inspection/application.
+        Generate a new secure token, write it to .env_token_update for
+        local inspection, and email it immediately.
+
+        The file alone isn't durable: it's on Render's ephemeral
+        filesystem, wiped by the very next redeploy, with nothing else
+        recording what value was generated. A silent rotation that never
+        reaches the human anywhere durable is worse than no rotation at
+        all — it invalidates the master API token with no way to recover
+        the new value once that container is gone. This happened for
+        real (see docs/AUDIT.md's Aug 22 rotation entry) and locked the
+        owner out of JARVIS's own API.
+
+        Deliberately uses send_alert_email() directly rather than
+        bus.alert() — bus.alert() fans a "high" severity out to Pushover,
+        voice, Telegram, and Discord too, all of which either persist the
+        raw secret indefinitely in a third-party chat history or have no
+        business receiving a bearer token at all (reading a 43-character
+        token aloud is useless). Email is the one channel here that's
+        already used for this kind of durable, semi-private delivery.
         """
         new_token = secrets.token_urlsafe(32)
         token_file = Path(__file__).parent.parent / ".env_token_update"
@@ -427,11 +444,43 @@ class ThreatPlaybook:
                     f"# JARVIS auto-generated token rotation — {_now()}\n"
                     f"JARVIS_API_TOKEN={new_token}\n"
                 )
-            log.warning("New API token written to %s — apply manually.", token_file)
-            return f"New token generated and saved to {token_file.name}"
         except OSError as exc:
             log.error("Token rotation write failed: %s", exc)
             return f"Token rotation failed: {exc}"
+
+        log.warning("New API token written to %s — apply manually.", token_file)
+
+        email_result = {"ok": False, "error": "not attempted"}
+        try:
+            from services.alert_email import send_alert_email
+            # The token deliberately isn't in the first 80 characters --
+            # that's roughly what a lock-screen notification preview or
+            # send_alert_email's own subject line (truncated to 80 chars
+            # there) would show, and a bearer token has no business
+            # appearing in either.
+            message = (
+                "JARVIS_API_TOKEN was just rotated. Apply the new value below in "
+                "Render's dashboard (Environment tab) and redeploy -- the master "
+                "token stops working the moment this takes effect, and this is "
+                "the only durable copy of the new value once this container's "
+                f"disk is gone.\n\nJARVIS_API_TOKEN={new_token}"
+            )
+            email_result = send_alert_email("high", "TOKEN_ROTATION", message)
+        except Exception as exc:
+            email_result = {"ok": False, "error": str(exc)}
+
+        if not email_result.get("ok"):
+            log.error(
+                "Token rotation email failed (%s) -- the only copy of the new "
+                "token is %s, which will not survive a redeploy.",
+                email_result.get("error"), token_file,
+            )
+            return (f"New token generated and saved to {token_file.name}, but "
+                    f"the durability email failed ({email_result.get('error')}) "
+                    f"-- apply it manually before the next redeploy.")
+
+        bus.system("JARVIS_API_TOKEN rotated -- new value emailed for durable delivery.")
+        return f"New token generated, saved to {token_file.name}, and emailed for durable delivery."
 
     def _action_block_ip(self, ip: str, context: dict) -> str:
         """Record the block in memory/blocked_ips.json (audit trail) AND

@@ -16,6 +16,15 @@ log = logging.getLogger(__name__)
 CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/stark/spotify/callback")
+# Same durability gap Calendar OAuth already solved (see
+# server/routes/calendar_auth.py): the access/refresh token pair only ever
+# lived in TOKEN_FILE, which is on Render's ephemeral filesystem and is
+# gitignored on top of that — so it silently disappeared on every redeploy,
+# forcing a re-auth through /stark/spotify/auth each time. This env var is
+# the same fallback seed Calendar uses: set once from the value
+# /stark/spotify/callback prints after a real auth, it survives redeploys
+# even though TOKEN_FILE itself doesn't.
+SPOTIFY_REFRESH_TOKEN = os.getenv("SPOTIFY_REFRESH_TOKEN", "")
 TOKEN_FILE = BASE_DIR / "memory" / "spotify_token.json"
 
 _MOOD_QUERIES = {
@@ -37,6 +46,11 @@ class SpotifyService:
                 return json.loads(TOKEN_FILE.read_text())
             except Exception:
                 return {}
+        # TOKEN_FILE doesn't survive a redeploy; SPOTIFY_REFRESH_TOKEN does.
+        # expires_at 0 forces _get_access_token() to refresh immediately,
+        # which re-populates TOKEN_FILE for the rest of this process's life.
+        if SPOTIFY_REFRESH_TOKEN:
+            return {"refresh_token": SPOTIFY_REFRESH_TOKEN, "access_token": "", "expires_at": 0}
         return {}
 
     def _save_token(self, token: dict):
@@ -108,7 +122,10 @@ class SpotifyService:
         }
         return f"https://accounts.spotify.com/authorize?{urlencode(params)}"
 
-    def exchange_code(self, code: str) -> bool:
+    def exchange_code(self, code: str) -> str | None:
+        """Returns the refresh_token on success (so the caller can show it
+        once, the same way calendar_auth.py's /callback does — see
+        SPOTIFY_REFRESH_TOKEN above), or None on failure."""
         try:
             r = httpx.post(
                 "https://accounts.spotify.com/api/token",
@@ -122,15 +139,15 @@ class SpotifyService:
             data = r.json()
             if "access_token" not in data:
                 log.warning("Spotify code exchange failed: %s", data)
-                return False
+                return None
             self._save_token({
                 "access_token": data["access_token"], "refresh_token": data["refresh_token"],
                 "expires_at": time.time() + data["expires_in"],
             })
-            return True
+            return data["refresh_token"]
         except Exception as e:
             log.warning("Spotify code exchange error: %s", e)
-            return False
+            return None
 
     def now_playing(self) -> dict:
         return self._api("GET", "/me/player/currently-playing")

@@ -39,15 +39,18 @@ async def spotify_callback(request: Request):
         }
 
     from services.spotify import spotify
-    success = spotify.exchange_code(code)
+    refresh_token = spotify.exchange_code(code)
 
-    if success:
-        return HTMLResponse("""
+    if refresh_token:
+        return HTMLResponse(f"""
             <html><body style="background:#040810;color:#00b4ff;
             font-family:monospace;text-align:center;padding:50px">
             <h1>⚡ JARVIS</h1>
             <h2>Spotify Connected Successfully</h2>
-            <p>You can close this window.</p>
+            <p>Copy this into <code>SPOTIFY_REFRESH_TOKEN</code> in Render's env vars,
+            then redeploy — otherwise this connection won't survive the next one:</p>
+            <pre style="white-space:pre-wrap;word-break:break-all">{refresh_token}</pre>
+            <p>This page will not show this value again. You can close this window.</p>
             </body></html>
         """)
     return {"error": "Failed to exchange code"}
