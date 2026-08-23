@@ -588,7 +588,16 @@
   // ── Live metrics polling ───────────────────────────────────────────────────
   async function pollMetrics() {
     try {
-      const r = await fetch(`${API}/stark/telemetry`);
+      // Missing Authorization header used to make this a guaranteed 401
+      // every 30s (server/routes/telemetry.py requires verify_token same
+      // as every other route) -- five of those trips sentinel's brute-
+      // force threshold (services/sentinel.py's 15-minute IP block),
+      // which then 403s EVERY request from this IP, including an
+      // otherwise-correct WebSocket token. Confirmed live: this is what
+      // was actually behind "the token stopped working" on production.
+      const r = await fetch(`${API}/stark/telemetry`, {
+        headers: getToken() ? {Authorization: `Bearer ${getToken()}`} : {}
+      });
       const d = await r.json();
       if (d.cpu  != null) setArc(arcCpu,  valCpu,  d.cpu);
       if (d.ram  != null) setArc(arcRam,  valRam,  d.ram);
