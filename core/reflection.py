@@ -50,8 +50,19 @@ def reflect(query: str, draft: str, threshold: int = THRESHOLD) -> dict:
     score     = int(score_m.group(1)) if score_m else 7
     critique  = critique_m.group(1).strip() if critique_m else ""
     final_raw = final_m.group(1).strip() if final_m else ""
-    # Fall back to original draft if parsing failed or LLM echoed the template
-    final     = final_raw if final_raw and "SCORE:" not in final_raw else draft
+    # Fall back to original draft if parsing failed, the LLM echoed the
+    # template, or (confirmed live) the critic reasoned out loud through
+    # the whole FINAL section instead of just answering -- second-
+    # guessing its own score inline ("I'll score it 6/10...") rather than
+    # emitting a literal "SCORE:" marker, so the "SCORE:" not in
+    # final_raw check alone didn't catch it. This is a length sanity
+    # check instead of trying to pattern-match every way a model can
+    # ramble: the prompt itself penalizes a reply "too long for a simple
+    # question," so a genuine rewrite has no legitimate reason to run to
+    # several times the length of the draft it's supposedly tightening.
+    final_ok  = (final_raw and "SCORE:" not in final_raw
+                 and len(final_raw) <= max(len(draft) * 4, 400))
+    final     = final_raw if final_ok else draft
     rewritten = score <= threshold and final != draft
 
     if rewritten:
