@@ -192,12 +192,20 @@ class CommunicationsIntelligence:
         except Exception:
             parsed = {}
 
+        # Same failure class as core/reflection.py's FINAL: leak: if the
+        # model doesn't return clean JSON, don't fall back to dumping its
+        # entire raw completion (which can be an unbounded reasoning
+        # ramble, not just a plain-prose summary) straight into a
+        # user-facing field. Cap it to roughly what a "one-paragraph
+        # summary" (what was actually asked for) could plausibly be.
+        fallback_summary = raw.strip()[:600]
+
         return {
             "transcript": transcript,
             "action_items": parsed.get("action_items", []),
             "decisions": parsed.get("decisions", []),
             "people": parsed.get("people", []),
-            "summary": parsed.get("summary", raw),
+            "summary": parsed.get("summary", fallback_summary),
         }
 
 
