@@ -229,17 +229,31 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
 
     intent = reasoner.analyze(msg)
 
-    from core.protocols import is_lockdown
-    if is_lockdown() and intent.action != "chat":
-        # Mirrors core.protocols's own protocol-engine check (Protocol 3:
-        # only "chat" actions are permitted during lockdown) — that check
-        # lives inside Brain.process(), which this function bypasses
-        # around for most actions. Confirmed live: with lockdown
-        # genuinely active, a real "task"-classified message got a full,
-        # completely unblocked answer, because it never reached
-        # process() at all. Falling through to the real pipeline here
-        # lets the actual lockdown check apply instead of silently
-        # streaming past it.
+    from core.protocols import protocol_engine
+    proto = protocol_engine.check(intent)
+    if not proto.allowed or proto.protocol_triggered:
+        # Generalizes what used to be a lockdown-only check here (Protocol
+        # 3: only "chat" actions permitted during lockdown) into the same
+        # ProtocolEngine.check() Brain.process() itself runs as one of its
+        # ~24 steps, which this function otherwise bypasses entirely for
+        # most actions. The narrower, lockdown-only version of this check
+        # already proved the pattern live: with lockdown genuinely active,
+        # a real "task"-classified message got a full, completely
+        # unblocked answer, because it never reached process() at all.
+        # The same gap existed for every OTHER protocol here too — Ultron
+        # (12, immutable blocklist), Mandarin (21, prompt-injection/
+        # social-engineering defense), Rescue (22, distress detection),
+        # and Bodyguard (1/7, destructive-action warning) never ran on
+        # this fast path at all, only Lockdown did. All of these are pure
+        # regex/keyword checks (no LLM call), so this adds no meaningful
+        # latency to the common case where nothing triggers.
+        #
+        # A "warn" result (allowed=True, protocol_triggered set, e.g. a
+        # first Bodyguard warning) is included here too, not just a hard
+        # block: falling back to the real pipeline is what actually
+        # prepends the warning message Brain.process() would show
+        # (core/brain_v2.py's proto_prefix logic) — the streaming path
+        # has no equivalent, so without this it silently vanished.
         #
         # Do NOT cancel classify_task here (unlike the validation-failure
         # branch below, which owns it exclusively because it returns True

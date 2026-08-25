@@ -138,12 +138,22 @@ def handle_incoming_sms(from_number: str, body: str) -> str:
 # thinking...") and edits in the real response once it's ready, same pattern
 # Discord's own docs use for any handler backed by real work.
 
+_SNIPE_TTL_SECONDS = 300  # a snipe is a "catch it right after" feature, not
+                          # a permanent log of what someone deleted — this
+                          # caps how long a deleted message stays recoverable
+
+
 class JarvisDiscordBot:
     def __init__(self):
         self._client = None
         self._loop = None  # captured in on_ready() — the bot's own running
                             # event loop, needed to schedule send_alert_sync's
                             # coroutine from synchronous/other-thread code
+        # channel_id -> {"content", "author", "author_id", "deleted_at",
+        # "attachments"} for the most recently deleted message in that
+        # channel. One entry per channel (not a history), so this can never
+        # grow unbounded regardless of server activity.
+        self._snipe_cache: dict = {}
 
     def is_configured(self) -> bool:
         return bool(DISCORD_BOT_TOKEN)
@@ -177,11 +187,21 @@ class JarvisDiscordBot:
             # a function called once per retry rather than once per
             # start() call.
 
-            # No message_content intent — slash commands don't need it, and
-            # a user-installed app can't read message content in guilds it
-            # doesn't own anyway, so requesting it here would be a no-op at
-            # best and a misleading permission ask at worst.
+            # message_content is a privileged intent (must also be enabled
+            # for this bot in Discord's Developer Portal) — needed for
+            # /snipe below. Only takes effect in guilds this bot is
+            # traditionally added to with that intent granted; a
+            # user-installed context still never delivers message content
+            # regardless (Discord platform rule, not something this code
+            # can opt into), so /snipe simply has nothing to show there.
+            # Enabling this is a real, deliberate tradeoff: it means this
+            # bot's process now sees (and briefly caches, per-channel, one
+            # message deep, see _SNIPE_TTL_SECONDS) the content of messages
+            # from anyone in a channel it's in, not just people invoking a
+            # slash command — accepted explicitly for /snipe, not a default
+            # anyone should assume is harmless to add for other reasons.
             intents = discord.Intents.default()
+            intents.message_content = True
             client = discord.Client(intents=intents)
             tree = app_commands.CommandTree(client)
             self._client = client
@@ -336,6 +356,41 @@ class JarvisDiscordBot:
                 except Exception as e:
                     text = f"Scene activation failed: {e}"
                 await interaction.followup.send(text)
+
+            @tree.command(name="snipe", description="Show the last deleted message in this channel")
+            @app_commands.allowed_installs(guilds=True, users=True)
+            @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+            async def snipe(interaction: discord.Interaction):
+                if not self._authorized(interaction.user.id):
+                    await interaction.response.send_message("Unauthorized.", ephemeral=True)
+                    return
+                entry = self._snipe_cache.get(interaction.channel_id)
+                if entry and time.time() - entry["deleted_at"] <= _SNIPE_TTL_SECONDS:
+                    text = f"**{entry['author']}** said (deleted):\n{entry['content'] or '*[no text content]*'}"
+                    if entry["attachments"]:
+                        text += "\n" + "\n".join(entry["attachments"])
+                else:
+                    # Covers both "never saw a delete here" and "it expired"
+                    # — no need to distinguish for the user, and not
+                    # distinguishing avoids confirming/denying that
+                    # something existed past the TTL window.
+                    text = "Nothing to snipe."
+                await interaction.response.send_message(text[:2000])
+
+            @client.event
+            async def on_message_delete(message: "discord.Message"):
+                # discord.py only fires this (as opposed to the content-less
+                # on_raw_message_delete) when the message was already in its
+                # own internal cache — meaning message.content here is
+                # always real, never a blank placeholder for one it lost
+                # track of.
+                self._snipe_cache[message.channel.id] = {
+                    "content":     message.content,
+                    "author":      str(message.author),
+                    "author_id":   message.author.id,
+                    "deleted_at":  time.time(),
+                    "attachments": [a.url for a in message.attachments],
+                }
 
             @client.event
             async def on_ready():

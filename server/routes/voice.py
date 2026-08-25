@@ -435,6 +435,24 @@ async def _stream_and_collect(websocket: WebSocket, msg: str) -> str:
         await websocket.send_json({"type": "error", "message": val.reason})
         return ""
 
+    # This function never called Brain.process() at all, so none of
+    # ProtocolEngine's checks (Ultron/Mandarin/Rescue/Lockdown/Bodyguard)
+    # ever ran on voice input -- confirmed audit finding: strictly worse
+    # than server/websocket.py's equivalent text fast path, which at
+    # least mirrored the Lockdown check. Mayday, protocol-refusal,
+    # note-save, calendar, and destructive-file actions arriving over
+    # voice never reached their real handlers; the model just fabricated
+    # a plausible-sounding response instead. All of ProtocolEngine's
+    # checks are pure regex/keyword matching (no LLM call), so this adds
+    # no meaningful latency to the common case where nothing triggers.
+    from core.protocols import protocol_engine
+    proto = protocol_engine.check(intent)
+    if not proto.allowed or proto.protocol_triggered:
+        from core.brain_v2 import brain
+        result = brain.process_dict(msg)
+        await websocket.send_json({"type": "stream_end", **result})
+        return result["response"]
+
     messages = [{"role": "system", "content": intent.system}]
     if intent.context:
         messages.append({"role": "system", "content": f"Context:\n{intent.context}"})
