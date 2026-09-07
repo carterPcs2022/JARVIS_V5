@@ -1,20 +1,8 @@
-"""core/interfaces/llm_provider.py — the LLMProvider protocol each model
-client in core/llm/ (openai.py/Groq, cerebras.py, ollama.py,
-anthropic_client.py) now implements, plus a lazy registry over them.
+"""core/interfaces/llm_provider.py — uniform provider interface and lazy registry.
 
-core/llm/router.py remains the live, real routing/fallback/caching logic —
-this doesn't replace it or change how it calls each provider module today.
-It's a uniform surface *alongside* router.py's existing one, for whatever
-in Phase 2+ wants to call "a provider" without knowing that Anthropic's
-client takes `system` as a separate argument while the other three expect
-it inlined in `messages`, or that only Anthropic supports `effort`.
-
-core/llm/cascade.py already sketches a Provider enum + RouteResult for
-exactly this purpose but is unused (confirmed by the audit — nothing
-imports it) and only names three of the four real providers (no Cerebras).
-Left untouched here rather than folded in, since reconciling the two is
-real routing-logic work for a later phase, not a Phase 1 "add interfaces
-without moving/rewriting anything" change.
+The live router remains responsible for production routing/fallback behavior.
+This interface lets higher-level agent code address providers uniformly,
+including the optional GPT-6 Astra Responses API adapter.
 """
 from __future__ import annotations
 from abc import ABC, abstractmethod
@@ -28,10 +16,8 @@ class GenerateRequest:
     max_tokens: int = 1024
     temperature: float = 0.7
     model: str | None = None
-    system: str = ""     # only Anthropic's client takes this separately; the
-                          # OpenAI-compatible ones (Groq/Cerebras/Ollama) expect
-                          # a {"role": "system", ...} message in `messages` instead
-    effort: str = ""      # Anthropic extended-thinking effort; ignored elsewhere
+    system: str = ""
+    effort: str = ""  # Extended reasoning effort where supported.
 
 
 @dataclass
@@ -45,8 +31,7 @@ class ModelResponse:
 
 
 class LLMProvider(ABC):
-    """One model client, callable uniformly regardless of the underlying
-    API's actual request/response shape."""
+    """One model client, callable uniformly regardless of API shape."""
     name: str = "base"
 
     @abstractmethod
@@ -54,9 +39,7 @@ class LLMProvider(ABC):
         ...
 
     def is_available(self) -> bool:
-        """Whether this provider's credentials/endpoint are configured at
-        all — not a live health check. Default True; providers that read
-        an API key override this."""
+        """Whether credentials/endpoint are configured; not a health check."""
         return True
 
 
@@ -68,9 +51,14 @@ def _build_registry() -> dict[str, LLMProvider]:
     from core.llm.cerebras import CerebrasProvider
     from core.llm.ollama import OllamaProvider
     from core.llm.anthropic_client import AnthropicProvider
+    from core.llm.astra import AstraProvider
 
     providers: list[LLMProvider] = [
-        GroqProvider(), CerebrasProvider(), OllamaProvider(), AnthropicProvider(),
+        GroqProvider(),
+        CerebrasProvider(),
+        OllamaProvider(),
+        AnthropicProvider(),
+        AstraProvider(),
     ]
     return {p.name: p for p in providers}
 
