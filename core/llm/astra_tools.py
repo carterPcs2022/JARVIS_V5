@@ -2,7 +2,8 @@
 
 Astra may propose function calls, but JARVIS remains the execution authority.
 Only tools explicitly supplied by a JARVIS Tool registry are exposed. Each
-Tool's existing confirmation/risk rules are enforced before its handler runs.
+Tool's existing confirmation/risk rules are enforced before its handler runs,
+and handler results are verified before they are fed back to Astra.
 
 This deliberately does NOT expose OpenAI's computer-use tool or arbitrary
 shell access. Those capabilities can be integrated later through the same
@@ -15,15 +16,41 @@ from typing import Any
 
 import httpx
 
-from core.interfaces.tool import Tool
+from core.interfaces.tool import Tool, ToolResult
+from core.interfaces.verification import async_with_retry, verify_tool_result
 from core.llm.astra import API_URL, TIMEOUT, _config
 
 
 MAX_ROUNDS = 4
+MAX_TOOL_ATTEMPTS = 3
+
+
+def _strict_compatible(schema: Any) -> bool:
+    """Return whether a JSON schema is safe to send with Responses strict mode."""
+    if not isinstance(schema, dict):
+        return True
+    schema_type = schema.get("type")
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        if schema.get("additionalProperties") is not False:
+            return False
+        required = set(schema.get("required", []))
+        if required != set(properties):
+            return False
+        return all(_strict_compatible(value) for value in properties.values())
+    if schema_type == "array":
+        return _strict_compatible(schema.get("items", {}))
+    return True
 
 
 def build_tool_schemas(registry: dict[str, Tool]) -> list[dict[str, Any]]:
-    """Convert JARVIS Tool definitions to Responses function-tool schemas."""
+    """Convert JARVIS Tool definitions to Responses function-tool schemas.
+
+    Existing JARVIS schemas are allowed to remain non-strict when they contain
+    optional fields or lack ``additionalProperties: false``. This avoids
+    advertising an invalid strict schema to Astra while preserving each tool's
+    existing contract.
+    """
     schemas: list[dict[str, Any]] = []
     for tool in registry.values():
         schemas.append({
@@ -31,7 +58,7 @@ def build_tool_schemas(registry: dict[str, Tool]) -> list[dict[str, Any]]:
             "name": tool.name,
             "description": tool.description,
             "parameters": tool.parameters,
-            "strict": True,
+            "strict": _strict_compatible(tool.parameters),
         })
     return schemas
 
@@ -59,6 +86,13 @@ def _function_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def _verification_input(tool_result: ToolResult) -> Any:
+    """Normalize ToolResult so verification also sees handler-returned errors."""
+    if tool_result.ok:
+        return tool_result.output
+    return {"error": tool_result.error or "tool_execution_failed"}
+
+
 async def run_with_tools(
     messages: list[dict[str, Any]],
     registry: dict[str, Tool],
@@ -69,9 +103,9 @@ async def run_with_tools(
 ) -> dict[str, Any]:
     """Run a bounded Astra function-calling loop through JARVIS Tool objects.
 
-    A confirmation-required tool is never executed. The loop returns a
-    ``confirmation_required`` result so the real JARVIS confirmation channel
-    can handle it rather than letting the model approve its own side effect.
+    Confirmation-required tools are never executed. Reversible transient
+    failures get a hard-capped retry; verified failures are returned to Astra
+    as tool output so it can adapt instead of hallucinating success.
     """
     api_key, model = _config()
     if not api_key:
@@ -138,12 +172,21 @@ async def run_with_tools(
                         args = {}
                         result = {"ok": False, "error": "invalid_arguments"}
                     else:
-                        tool_result = tool.execute(args, confirmed=False)
-                        result = {
-                            "ok": tool_result.ok,
-                            "output": tool_result.output,
-                            "error": tool_result.error,
-                        }
+                        async def invoke() -> ToolResult:
+                            return tool.execute(args, confirmed=False)
+
+                        def verify(result_value: ToolResult):
+                            return verify_tool_result(
+                                _verification_input(result_value),
+                                reversible=tool.reversible,
+                            )
+
+                        tool_result, verdict = await async_with_retry(
+                            invoke,
+                            verify=verify,
+                            max_attempts=(MAX_TOOL_ATTEMPTS if tool.reversible else 1),
+                        )
+
                         if tool_result.error == "confirmation_required":
                             return {
                                 "content": "",
@@ -154,7 +197,18 @@ async def run_with_tools(
                                 "tool": name,
                                 "rounds": _round + 1,
                             }
-                        executed.append({"tool": name, "ok": tool_result.ok})
+
+                        raw_output = _verification_input(tool_result)
+                        result = {
+                            "ok": verdict.success,
+                            "output": raw_output if verdict.success else None,
+                            "error": verdict.errors[0] if verdict.errors else "",
+                        }
+                        executed.append({
+                            "tool": name,
+                            "ok": verdict.success,
+                            "attempts": len(verdict.errors) + 1 if not verdict.success else 1,
+                        })
 
                 outputs.append({
                     "type": "function_call_output",
