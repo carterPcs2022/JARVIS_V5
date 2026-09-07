@@ -3,8 +3,8 @@ import pytest
 from core.interfaces.llm_provider import registry, GenerateRequest, LLMProvider
 
 
-def test_registry_has_all_4_providers():
-    assert set(registry().keys()) == {"groq", "cerebras", "ollama", "anthropic"}
+def test_registry_has_all_5_providers():
+    assert set(registry().keys()) == {"groq", "cerebras", "ollama", "anthropic", "astra"}
 
 
 def test_every_provider_isinstance_and_self_named():
