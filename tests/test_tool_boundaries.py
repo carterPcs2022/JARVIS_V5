@@ -5,7 +5,13 @@ from core.interfaces.tool import Tool
 from core.llm.astra_tools import _execute_verified
 
 
+def _clear_pending():
+    for pending_id in list(_PENDING):
+        discard(pending_id)
+
+
 def test_confirmation_required_tool_never_runs_handler():
+    _clear_pending()
     calls = []
     tool = Tool(
         name="dangerous_demo",
@@ -33,12 +39,15 @@ def test_mac_registry_repairs_choice_and_gmail_send_boundaries():
     registry = mac_registry()
     assert "ask_user_choice" in registry
     assert registry["ask_user_choice"].parameters["type"] == "object"
-    assert registry["gmail_confirm_send"].requires_confirmation is True
-    assert registry["gmail_confirm_send"].risk_level == "destructive"
+    # Gmail already has its own draft-then-confirm flow, so the generic
+    # dispatcher gate must not double-gate the final send action.
+    assert registry["gmail_confirm_send"].requires_confirmation is False
+    assert registry["gmail_confirm_send"].risk_level == "high"
     assert registry["gmail_confirm_send"].reversible is False
 
 
 def test_astra_does_not_retry_confirmation_gate():
+    _clear_pending()
     calls = []
     tool = Tool(
         name="approval_demo",
