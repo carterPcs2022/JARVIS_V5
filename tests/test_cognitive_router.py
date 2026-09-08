@@ -16,7 +16,9 @@ def test_safety_early_exit_wins_over_astra_preference():
     ):
         result = CognitiveRouter().route("use astra: run a self check")
 
-    assert result == brain_result
+    assert result["response"] == brain_result["response"]
+    assert result["provider"] == brain_result["provider"]
+    assert result["conscience"]["recommendation"] == "proceed_if_authorized"
     process.assert_called_once_with("use astra: run a self check")
     should_astra.assert_not_called()
     astra_think.assert_not_called()
@@ -33,6 +35,7 @@ def test_decision_guard_pushes_back_before_astra():
     assert result["ok"] is False
     assert result["requires_review"] is True
     assert result["provider"] == "decision_guard"
+    assert result["conscience"]["recommendation"] == "pause_and_review"
     process.assert_not_called()
     should_astra.assert_not_called()
     astra_think.assert_not_called()
@@ -52,10 +55,9 @@ def test_non_action_high_value_request_can_use_astra():
     ):
         result = CognitiveRouter().route("use astra for analysis of this architecture")
 
-    assert result == {
-        "response": "deep analysis",
-        "ok": True,
-        "model": "gpt-6-astra",
-        "provider": "astra",
-    }
+    assert result["response"] == "deep analysis"
+    assert result["ok"] is True
+    assert result["model"] == "gpt-6-astra"
+    assert result["provider"] == "astra"
+    assert result["conscience"]["values_checked"]
     process.assert_not_called()
