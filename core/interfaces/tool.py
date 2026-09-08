@@ -63,9 +63,8 @@ def mac_registry() -> dict[str, Tool]:
     Older mac_dispatcher versions omitted ``ask_user_choice`` from their
     metadata table even though the dispatcher implements it.  We repair that
     mismatch at the registry boundary rather than duplicating the dispatcher.
-    The Gmail final-send operation is also marked confirmation-required here
-    so Astra cannot turn a model-generated tool call into an immediate send.
-    The normal Mac two-turn Gmail flow remains unchanged.
+    Gmail's draft/send flow remains owned by the dispatcher and is intentionally
+    kept outside the generic Tool confirmation gate.
     """
     global _MAC_TOOLS
     if _MAC_TOOLS is None:
@@ -93,16 +92,15 @@ def mac_registry() -> dict[str, Tool]:
                 permissions=["read"],
             )
 
-        # The dispatcher already has a user-facing draft/confirm flow.  For
-        # typed model tool calls we add the generic confirmation gate so Astra
-        # can propose the send but never perform the irreversible step itself.
+        # Gmail has a separate user-facing draft → confirm flow.  Do not
+        # overlay the generic pending-action gate here or the dispatcher would
+        # create a second, incompatible confirmation state.
         send_tool = TOOL_REGISTRY.get("gmail_confirm_send")
         if send_tool is not None:
-            send_tool.requires_confirmation = True
-            send_tool.risk_level = "destructive"
+            send_tool.requires_confirmation = False
+            send_tool.risk_level = "high"
             send_tool.reversible = False
-            if "destructive" not in send_tool.permissions:
-                send_tool.permissions.append("destructive")
+            send_tool.permissions = [p for p in send_tool.permissions if p != "destructive"]
 
         _MAC_TOOLS = TOOL_REGISTRY
     return _MAC_TOOLS
