@@ -13,8 +13,20 @@ from __future__ import annotations
 
 class CognitiveRouter:
     def route(self, user_input: str) -> dict:
-        """Route a new integration request through the safest available path."""
+        """Route a new integration request through the safest available path.
+
+        Safety-critical early-exit requests stay on the canonical Brain path.
+        This prevents an "use Astra"/"need your best" phrase from accidentally
+        turning an actionable JARVIS command into an Astra-only chat response.
+        """
+        from core.brain_v2 import brain, has_early_exit_trigger
         from core.llm.astra_gateway import should_use_astra, think as astra_think
+
+        # Brain owns the real executor, protocol guards, confirmations, and
+        # other deterministic handlers. Never let the intelligence preference
+        # override those boundaries.
+        if has_early_exit_trigger(user_input):
+            return brain.process_dict(user_input)
 
         if should_use_astra(user_input):
             result = astra_think(user_input)
@@ -25,7 +37,6 @@ class CognitiveRouter:
                 "provider": result.get("provider", "astra"),
             }
 
-        from core.brain_v2 import brain
         return brain.process_dict(user_input)
 
 
