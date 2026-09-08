@@ -1,6 +1,4 @@
-"""tests/test_mac_dispatcher.py — core/mac_dispatcher.py's two-turn
-confirm/discard flow (empty_trash), and confirmation that gmail_send's
-own, separate draft-then-confirm mechanism is never double-gated by it."""
+"""tests/test_mac_dispatcher.py — macOS dispatcher confirmation flows."""
 from unittest import mock
 import core.mac_dispatcher as md
 
@@ -15,7 +13,15 @@ def _fake_llm_parse_factory(mapping: dict):
     return fake
 
 
+def _reset_confirmation_state():
+    from core.interfaces import permissions
+    md._last_pending_id = None
+    for pending_id in list(permissions._PENDING):
+        permissions.discard(pending_id)
+
+
 def test_routine_tool_executes_immediately():
+    _reset_confirmation_state()
     fake_parse = _fake_llm_parse_factory({"spotify": {"tool": "open_app", "args": {"name": "Spotify"}}})
     with mock.patch.object(md, "_llm_parse", side_effect=fake_parse), \
          mock.patch("core.tools.mac.open_app", return_value={"ok": True, "message": "Opened Spotify"}):
@@ -24,6 +30,7 @@ def test_routine_tool_executes_immediately():
 
 
 def test_empty_trash_proposes_without_executing_then_confirms():
+    _reset_confirmation_state()
     fake_parse = _fake_llm_parse_factory({
         "empty": {"tool": "empty_trash", "args": {}},
     })
@@ -40,6 +47,7 @@ def test_empty_trash_proposes_without_executing_then_confirms():
 
 
 def test_unrelated_followup_discards_pending_action():
+    _reset_confirmation_state()
     fake_parse = _fake_llm_parse_factory({
         "empty": {"tool": "empty_trash", "args": {}},
         "safari": {"tool": "open_app", "args": {"name": "Safari"}},
@@ -54,9 +62,9 @@ def test_unrelated_followup_discards_pending_action():
 
 
 def test_gmail_send_not_double_gated_by_generic_confirmation():
-    """gmail_send.py already has its own complete draft-then-confirm flow
-    (core/tools/gmail_send.py) -- the generic mac_dispatcher confirmation
-    gate must never register a pending action for it."""
+    """Gmail's own draft-then-confirm flow is separate from the generic
+    macOS confirmation gate and must not inherit stale dispatcher state."""
+    _reset_confirmation_state()
     fake_parse = _fake_llm_parse_factory({
         "send an email": {"tool": "gmail_send", "args": {"to": "bob@x.com", "subject": "Hi", "body": "Hello"}},
         "send it": {"tool": "gmail_confirm_send", "args": {}},
