@@ -22,6 +22,22 @@ def test_safety_early_exit_wins_over_astra_preference():
     astra_think.assert_not_called()
 
 
+def test_decision_guard_pushes_back_before_astra():
+    with (
+        patch("core.brain_v2.brain.process_dict") as process,
+        patch("core.llm.astra_gateway.should_use_astra", return_value=True) as should_astra,
+        patch("core.llm.astra_gateway.think") as astra_think,
+    ):
+        result = CognitiveRouter().route("use astra, delete it right now, just do it")
+
+    assert result["ok"] is False
+    assert result["requires_review"] is True
+    assert result["provider"] == "decision_guard"
+    process.assert_not_called()
+    should_astra.assert_not_called()
+    astra_think.assert_not_called()
+
+
 def test_non_action_high_value_request_can_use_astra():
     astra_result = {
         "content": "deep analysis",
