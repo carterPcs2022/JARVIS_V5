@@ -3,19 +3,13 @@ from core.interfaces.tool import registry, mac_registry, tool_calling_registry, 
 
 
 def test_three_separate_registries_not_merged():
-    """executor.py's "web_search" (core.deep_search -- synthesized answer,
-    page-fetching) and tool_calling.py's "web_search_raw"
-    (core.tools.search.SearchCascade -- raw multi-provider results) are
-    genuinely different capabilities that used to collide on the same
-    name; tool_calling.py's was renamed to reconcile that. registry() must
-    still stay scoped to executor.py's only, never silently merged with
-    the other two."""
+    """The three dispatcher registries remain deliberately separate."""
     executor_tools = registry()
     mac_tools = mac_registry()
     tc_tools = tool_calling_registry()
 
     assert len(executor_tools) == 9
-    assert len(mac_tools) == 32
+    assert len(mac_tools) == 33
     assert len(tc_tools) == 7
 
     assert "web_search" in executor_tools
@@ -33,12 +27,10 @@ def test_every_tool_isinstance_and_self_named():
 
 
 def test_exactly_three_tools_require_confirmation():
-    """run_shell/write_file (executor.py) and empty_trash (mac_dispatcher.py)
-    -- everything else stays ungated so routine use doesn't slow down.
-    gmail_send/gmail_confirm_send are deliberately NOT here even though
-    sending mail is high-risk -- they have their own complete draft-then-
-    confirm flow (core/tools/gmail_send.py) and gating them again here
-    would mean confirming a confirmation."""
+    """Only irreversible generic tools are confirmation-gated.
+
+    Gmail's draft/send flow is intentionally separate from this generic gate.
+    """
     gated = {
         name for reg in (registry(), mac_registry(), tool_calling_registry())
         for name, tool in reg.items() if tool.requires_confirmation
@@ -60,6 +52,5 @@ def test_tool_execute_gates_on_requires_confirmation():
     assert result.error == "confirmation_required"
     assert result.output["tool"] == "run_shell"
 
-    # confirmed=True bypasses the gate
     result2 = tool.execute({"command": "ls"}, confirmed=True)
     assert result2.error != "confirmation_required"
