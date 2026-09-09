@@ -10,19 +10,9 @@ _clients: dict = {}
 
 
 def _ws_token_ok(websocket: WebSocket) -> bool:
-    """Same semantics as utils.security.verify_token (open access if
-    API_TOKEN is unset, DEV_MODE bypass on local) — this endpoint never
-    had any check at all, unlike every REST route, which all reject an
-    unauthenticated request with 401. Confirmed live: a bare websockets
-    client with no token, no headers, no prior session connected,
-    received the real boot greeting, and got a genuine LLM response back
-    ("CONFIRMED" on request) — full command execution, zero credentials,
-    reachable by anyone on the internet. The HUD already sends
-    ?token=... on this exact URL (hud_mobile/desktop.html), so checking
-    it here needed no frontend change at all — the server just never
-    read it."""
+    """Authenticate the WebSocket before accepting it; cloud auth fails closed."""
     if not API_TOKEN:
-        return True
+        return ENVIRONMENT == "local"
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
 
@@ -37,12 +27,6 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
     token = websocket.query_params.get("token", "")
     ok = bool(token) and hmac.compare_digest(token, API_TOKEN)
     if not ok:
-        # Same brute-force counter as utils.security.verify_token's REST
-        # 401s (services.sentinel.record_failed_auth) — this endpoint's
-        # rejections (e.g. the real "token=abcdef" WS 403 that prompted
-        # this fix) went completely unrecorded before, so the sentinel's
-        # threat log only ever reflected CPU/disk pressure, never actual
-        # unauthenticated access attempts against the chat pipeline.
         try:
             from utils.security import _record_failed_auth_safe
             _record_failed_auth_safe(ip)
@@ -50,34 +34,11 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
             pass
     return ok
 
-# Combat-mode threat classification — was only ever wired into
-# server/routes/chat.py's POST /stark/chat, never into this module, despite
-# this being the endpoint the actual HUD chat uses for every real message.
-# threat_detector.py/combat_mode.py were fully built and correct; they just
-# never had a chance to run for real usage. Mirrors chat.py's pattern
-# exactly: classify concurrently with the main response (never adds
-# latency), capped at its own short timeout, treated as "no threat" on
-# timeout/error for that one message.
 THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
 
 
 async def _apply_threat_classification(loop: asyncio.AbstractEventLoop, msg: str,
                                         classify_task: "asyncio.Future") -> str | None:
-    """Await the classification kicked off alongside the main response,
-    hand it to combat_mode, and return a soft-confirm prompt to append to
-    the reply if one applies. Never raises.
-
-    Used to silently return None on a timeout/exception here — skipping
-    combat_mode.handle_classification() entirely, with no log line, no
-    trace. This is a personal safety/emergency-detection feature; a real
-    emergency message that happened to hit a slow classify_task got
-    treated identically to "confirmed not a threat," completely silently.
-    Now constructs the same classifier_failed marker services.
-    threat_detector.classify() itself uses on an internal failure, and
-    still calls handle_classification() with it — that function checks
-    classifier_failed first and asks a check-in question rather than
-    doing nothing, so a failure here behaves the same as a failure
-    inside classify() itself instead of a third, worse, silent variant."""
     from services.threat_detector import classifier_failed_result
     from services.combat_mode import combat_mode
     try:
@@ -92,17 +53,13 @@ async def _apply_threat_classification(loop: asyncio.AbstractEventLoop, msg: str
 
 
 def _boot_greeting() -> str:
-    """JARVIS introduces himself on a brand-new install, or gives a
-    time-of-day acknowledgment on every connection after that."""
     try:
         from core.memory import get_short_term
         first_time = len(get_short_term(1)) == 0
     except Exception:
         first_time = False
-
     if first_time:
         return "J.A.R.V.I.S. online. All systems nominal. I'm ready when you are, sir."
-
     from config.settings import now_local
     hour = now_local().hour
     time_of_day = "morning" if hour < 12 else "afternoon" if hour < 17 else "evening"
@@ -112,11 +69,8 @@ def _boot_greeting() -> str:
 @router.websocket("/ws/chat")
 async def ws_chat(websocket: WebSocket):
     if not _ws_token_ok(websocket):
-        # Reject before accept() — no boot greeting, no connection, no
-        # partial handshake for an unauthenticated caller to learn from.
         await websocket.close(code=1008)
         return
-
     await websocket.accept()
     cid = str(id(websocket))
     q: asyncio.Queue = asyncio.Queue(maxsize=50)
@@ -138,13 +92,9 @@ async def ws_chat(websocket: WebSocket):
     try:
         while True:
             data = json.loads(await websocket.receive_text())
-            msg  = data.get("message", "").strip()
+            msg = data.get("message", "").strip()
             if not msg:
                 continue
-
-            # Combat-mode Phase 2 fast path — same check as
-            # server/routes/chat.py, before classification/brain even
-            # start. See services/combat_staging.py.
             from services.combat_mode import combat_mode
             if combat_mode.is_engaged():
                 from services.combat_staging import try_fast_path
@@ -152,21 +102,16 @@ async def ws_chat(websocket: WebSocket):
                 if staged:
                     await websocket.send_json({"type": "response", **staged})
                     continue
-
             loop = asyncio.get_event_loop()
             from services.threat_detector import classify as classify_threat
             classify_task = loop.run_in_executor(None, classify_threat, msg)
-
-            # Try streaming path first (Groq only)
             streamed = await _try_stream(websocket, msg, loop, classify_task)
             if not streamed:
-                # Fallback: blocking brain call (Ollama or error)
                 result = await loop.run_in_executor(None, brain.process_dict, msg)
                 soft_confirm = await _apply_threat_classification(loop, msg, classify_task)
                 if soft_confirm and isinstance(result.get("response"), str):
                     result["response"] = f"{result['response']}\n\n{soft_confirm}"
                 await websocket.send_json({"type": "response", **result})
-
     except WebSocketDisconnect:
         print(f"[JARVIS] Client disconnected — going quiet ({cid}).")
     except Exception as e:
@@ -179,97 +124,26 @@ async def ws_chat(websocket: WebSocket):
 
 async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEventLoop,
                       classify_task: "asyncio.Future") -> bool:
-    """
-    Attempt Groq streaming. Returns True if streaming succeeded.
-    On success, sends token/stream_end events and persists the turn.
-
-    classify_task is the threat-classification future the caller already
-    kicked off — every True-returning branch here must resolve it (apply or
-    explicitly discard) so it's never left dangling; a False return hands
-    it back to the caller for the brain.process_dict() fallback to use.
-    """
     if not GROQ_API_KEY:
         return False
-
     from core.brain_v2 import has_early_exit_trigger
     if has_early_exit_trigger(msg):
-        # Generalizes what used to be a self-improvement-only special
-        # case here: Brain.process() has several early-exit trigger
-        # blocks (Mayday, clip, Mac app triggers, model update, sandbox,
-        # Spotify quick commands, smart-home scenes) that are plain
-        # substring/state checks, entirely independent of
-        # Reasoner.analyze()'s action label. Auditing them individually
-        # found ~30 of ~35 trigger phrases across these categories
-        # classified into an action this function never bypassed for —
-        # meaning most of them streamed a hallucinated chat completion
-        # instead of ever reaching the real handler. See
-        # core.brain_v2.has_early_exit_trigger()'s docstring for the
-        # full reasoning and the self-improvement incident that
-        # surfaced this.
         return False
-
-    # If there's a pending ask_user_choice, don't take the fast streaming
-    # shortcut — fall through to the real Brain.process() pipeline (via
-    # the caller's brain.process_dict() fallback), which is the one place
-    # resolution + clearing the pending state happens. This path never
-    # calls Brain.process() at all for a streamed reply, so it can't
-    # resolve a pending choice itself without duplicating (and risking
-    # double-clearing) that logic.
     from core.ask_user_choice import get_pending
     if get_pending() is not None:
         return False
-
     from core.llm.openai import stream_chat
     from core.brain_v2 import Reasoner, Validator
-    from core.context import build_context, build_system
-    from config.settings import JARVIS_PERSONALITY
-
-    reasoner  = Reasoner()
+    reasoner = Reasoner()
     validator = Validator()
-
     intent = reasoner.analyze(msg)
-
     from core.protocols import protocol_engine
     proto = protocol_engine.check(intent)
     if not proto.allowed or proto.protocol_triggered:
-        # Generalizes what used to be a lockdown-only check here (Protocol
-        # 3: only "chat" actions permitted during lockdown) into the same
-        # ProtocolEngine.check() Brain.process() itself runs as one of its
-        # ~24 steps, which this function otherwise bypasses entirely for
-        # most actions. The narrower, lockdown-only version of this check
-        # already proved the pattern live: with lockdown genuinely active,
-        # a real "task"-classified message got a full, completely
-        # unblocked answer, because it never reached process() at all.
-        # The same gap existed for every OTHER protocol here too — Ultron
-        # (12, immutable blocklist), Mandarin (21, prompt-injection/
-        # social-engineering defense), Rescue (22, distress detection),
-        # and Bodyguard (1/7, destructive-action warning) never ran on
-        # this fast path at all, only Lockdown did. All of these are pure
-        # regex/keyword checks (no LLM call), so this adds no meaningful
-        # latency to the common case where nothing triggers.
-        #
-        # A "warn" result (allowed=True, protocol_triggered set, e.g. a
-        # first Bodyguard warning) is included here too, not just a hard
-        # block: falling back to the real pipeline is what actually
-        # prepends the warning message Brain.process() would show
-        # (core/brain_v2.py's proto_prefix logic) — the streaming path
-        # has no equivalent, so without this it silently vanished.
-        #
-        # Do NOT cancel classify_task here (unlike the validation-failure
-        # branch below, which owns it exclusively because it returns True
-        # and fully handles the response itself). Returning False hands
-        # control back to ws_chat()'s fallback branch, which still awaits
-        # this same classify_task via _apply_threat_classification() —
-        # cancelling it here first raises an uncaught CancelledError
-        # there instead (confirmed live: the connection went completely
-        # silent, no response, no error event, because CancelledError
-        # subclasses BaseException and isn't caught by the handler's
-        # `except Exception`).
         return False
-
     validation = validator.check(intent)
     if not validation.ok:
-        classify_task.cancel()  # invalid/blocked input isn't a realistic threat candidate
+        classify_task.cancel()
         await websocket.send_json({
             "type": "response",
             "response": f"I can't process that: {validation.reason}",
@@ -278,50 +152,22 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
                      "mode": "direct", "was_rewritten": False, "issues": [validation.reason]},
         })
         return True
-
-    # Stream chat, task, and search queries — context already has web results embedded
-    # Only drop to full pipeline for true multi-step complex tasks, or actions
-    # that need a real tool call instead of free-text generation. This list
-    # must track core/brain_v2.py's Reasoner action set — an action added
-    # there without being added here still gets classified correctly, but
-    # silently streams a hallucinated chat response instead of ever reaching
-    # the executor that would actually call the tool ("calendar" did exactly
-    # this: intent classification worked, but requests still streamed
-    # through as ordinary chat and fabricated a confident-sounding answer
-    # with no Google Calendar call behind it at all). delete_file/
-    # compress_file had the same gap — Executor's headless-cloud
-    # hallucination guard for those never got a chance to run either.
     if intent.complexity == "complex" or intent.action in (
         "mac_control", "voice", "vision", "code", "calendar", "delete_file", "compress_file",
     ):
         return False
-
     messages = [{"role": "system", "content": intent.system}]
     if intent.context:
         messages.append({"role": "system", "content": f"Context:\n{intent.context}"})
     messages.append({"role": "user", "content": msg})
-
     try:
-        start    = time.time()
+        start = time.time()
         full_txt = ""
         await websocket.send_json({"type": "stream_start"})
-
         async for token in stream_chat(messages, max_tokens=1024, temperature=0.6):
             full_txt += token
             await websocket.send_json({"type": "token", "token": token})
-
         latency = round((time.time() - start) * 1000, 2)
-
-        # ── ask_user_choice marker detection ────────────────────────────────
-        # This streamed the raw tokens live as they arrived, so a trailing
-        # ```ask_user_choice block (the model is instructed to only ever put
-        # one at the very end of a response, never lead with or interleave
-        # it) may have flashed briefly as raw text before this strips it —
-        # a known, accepted tradeoff of the fast token-streaming path rather
-        # than something worth buffering the whole response to avoid, since
-        # this marker is meant to be rare. stream_end below carries the
-        # corrected text, which is what actually gets persisted/rendered as
-        # the final message.
         pending_choice = None
         try:
             from core.ask_user_choice import extract_marker, format_fallback_text, propose
@@ -333,20 +179,10 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
                     full_txt = f"{full_txt}\n\n{format_fallback_text(pending_choice)}".strip()
         except Exception:
             pass
-
-        # Persist turn
         await loop.run_in_executor(None, _persist, msg, full_txt)
-
         soft_confirm = await _apply_threat_classification(loop, msg, classify_task)
         if soft_confirm:
             full_txt = f"{full_txt}\n\n{soft_confirm}"
-
-        # Render has no speakers, but the browser does — generate audio in
-        # the background (never blocks the text response) and tell the
-        # client it's ready to fetch from /stark/voice/audio. Previously
-        # only the non-streaming full pipeline (core/brain_v2.py Executor)
-        # did this; this fast streaming path — the one actually used for
-        # ordinary chat — never generated audio at all.
         has_audio = False
         try:
             from config.settings import VOICE_ENABLED
@@ -355,27 +191,16 @@ async def _try_stream(websocket: WebSocket, msg: str, loop: asyncio.AbstractEven
                 loop.run_in_executor(None, _generate_voice_background, full_txt, websocket, loop)
         except Exception:
             pass
-
         from config.settings import GROQ_MODEL
         await websocket.send_json({
-            "type":     "stream_end",
-            "response": full_txt,
-            "model":    GROQ_MODEL,
-            "provider": "groq",
-            "latency_ms": latency,
-            "has_audio": has_audio,
+            "type": "stream_end", "response": full_txt, "model": GROQ_MODEL,
+            "provider": "groq", "latency_ms": latency, "has_audio": has_audio,
             "pending_choice": pending_choice,
-            "meta": {
-                "action":        intent.action,
-                "complexity":    intent.complexity,
-                "mode":          "stream",
-                "was_rewritten": False,
-                "issues":        [],
-            },
+            "meta": {"action": intent.action, "complexity": intent.complexity,
+                     "mode": "stream", "was_rewritten": False, "issues": []},
         })
         bus.chat("assistant", full_txt)
         return True
-
     except Exception as e:
         print(f"[WS Stream] Groq stream failed: {e}")
         return False
@@ -390,42 +215,17 @@ def _persist(user_msg: str, response: str):
 
 
 def _generate_voice_background(text: str, websocket: WebSocket, loop: asyncio.AbstractEventLoop):
-    """Writes one or more uniquely-named files under static/ (served at
-    GET /stark/voice/audio?file=...) — never called on the event loop
-    directly, always via run_in_executor.
-
-    Generation itself can take several seconds (a real ElevenLabs API
-    round-trip), far longer than a client would ever guess-and-wait for —
-    that mismatch, not browser caching, was the actual cause of "playing
-    old audio": the client fetched a fixed filename before this finished
-    writing it, or while a previous request was still writing over it.
-    Pushing the exact filename(s) back once writing is done removes the
-    guesswork entirely.
-
-    Uses generate_chunks_for_network() rather than the old single-file
-    generate_for_network() — a response over ~800 characters used to be
-    silently truncated mid-sentence in speech (while the full text still
-    reached the chat window). Chunking speaks all of it across multiple
-    files instead of cutting it off; a normal-length response still comes
-    back as a single chunk, so this is a superset of the old behavior,
-    not a change for typical responses."""
     try:
         from services.elevenlabs_voice import generate_chunks_for_network
         filenames = generate_chunks_for_network(text)
         if filenames:
-            asyncio.run_coroutine_threadsafe(
-                _send_audio_ready(websocket, filenames), loop,
-            )
+            asyncio.run_coroutine_threadsafe(_send_audio_ready(websocket, filenames), loop)
     except Exception as e:
         print(f"[WebSocket] Background voice generation failed: {e}")
 
 
 async def _send_audio_ready(websocket: WebSocket, filenames: list[str]):
     try:
-        await websocket.send_json({
-            "type": "audio_ready",
-            "audio_file": filenames[0],     # back-compat: older HUD builds only read this
-            "audio_files": filenames,       # full ordered list — play these in sequence
-        })
+        await websocket.send_json({"type": "audio_ready", "audio_file": filenames[0], "audio_files": filenames})
     except Exception:
-        pass  # client may have disconnected between the request and generation finishing
+        pass
