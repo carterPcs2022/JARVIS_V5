@@ -1,16 +1,15 @@
 """Bounded JARVIS agent loop for model-selected tool use.
 
 The model proposes tools; ToolGateway decides whether they may execute. This
-module adds the missing orchestration layer without making the model an
-execution authority. Confirmation gates, verification, and hard round limits
-remain enforced by the gateway/tool contract.
+module adds the orchestration layer without making the model an execution
+authority. Confirmation gates, verification, and hard round limits remain
+inside the gateway/tool contract and the model adapter.
 """
 from __future__ import annotations
 
 from typing import Any
 
 from core.tool_gateway import ToolGateway, gateway
-
 
 MAX_ROUNDS = 6
 
@@ -37,6 +36,26 @@ class AgentLoop:
             "error": result.error or "",
             "confirmation_required": result.error == "confirmation_required",
         }
+
+    async def run_astra(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        max_tokens: int = 4096,
+        effort: str = "high",
+        system: str = "",
+    ) -> dict[str, Any]:
+        """Connect the real Astra response loop to this AgentLoop's gateway."""
+        from core.llm.astra_tools import run_with_tools
+
+        result = await run_with_tools(
+            messages,
+            tool_gateway=self.tool_gateway,
+            max_tokens=max_tokens,
+            effort=effort,
+            system=system,
+        )
+        return result
 
 
 agent_loop = AgentLoop()
