@@ -1,12 +1,9 @@
 """Safe Responses-API tool bridge for GPT-6 Astra.
 
 Astra may propose function calls, but JARVIS remains the execution authority.
-Only tools explicitly supplied by a JARVIS Tool registry are exposed. Each
-Tool's existing confirmation/risk rules are enforced before its handler runs,
-and handler results are verified before they are fed back to Astra.
-
-This deliberately does NOT expose OpenAI computer-use or arbitrary shell
-access. Those capabilities stay outside this bridge until a dedicated review.
+Only tools explicitly supplied by a JARVIS ToolGateway are exposed. Each
+Tool's confirmation/risk rules are enforced before its handler runs, and
+handler results are verified before they are fed back to Astra.
 """
 from __future__ import annotations
 
@@ -18,13 +15,13 @@ import httpx
 from core.interfaces.tool import Tool, ToolResult
 from core.interfaces.verification import async_with_retry, verify_tool_result
 from core.llm.astra import API_URL, TIMEOUT, _config
+from core.tool_gateway import ToolGateway, gateway
 
 MAX_ROUNDS = 4
 MAX_TOOL_ATTEMPTS = 3
 
 
 def _strict_compatible(schema: Any) -> bool:
-    """Return whether a JSON schema is compatible with Responses strict mode."""
     if not isinstance(schema, dict):
         return True
     schema_type = schema.get("type")
@@ -84,16 +81,18 @@ def _verification_input(tool_result: ToolResult) -> Any:
     return {"error": tool_result.error or "tool_execution_failed"}
 
 
-async def _execute_verified(tool: Tool, args: dict[str, Any]) -> tuple[ToolResult, Any]:
-    """Execute a tool with a hard retry cap, but never retry approval gates."""
-    # Confirmation is a state transition, not a transient tool failure.
-    # Calling Tool.execute() once prevents duplicate pending actions.
+async def _execute_verified(
+    tool: Tool,
+    args: dict[str, Any],
+    tool_gateway: ToolGateway,
+) -> tuple[ToolResult, Any]:
+    """Execute through the central gateway with a hard retry cap."""
     if tool.requires_confirmation:
-        result = tool.execute(args, confirmed=False)
+        result = tool_gateway.execute(tool.name, args, confirmed=False)
         return result, verify_tool_result(_verification_input(result), reversible=False)
 
     async def invoke() -> ToolResult:
-        return tool.execute(args, confirmed=False)
+        return tool_gateway.execute(tool.name, args, confirmed=False)
 
     def verify(result_value: ToolResult):
         return verify_tool_result(
@@ -110,17 +109,18 @@ async def _execute_verified(tool: Tool, args: dict[str, Any]) -> tuple[ToolResul
 
 async def run_with_tools(
     messages: list[dict[str, Any]],
-    registry: dict[str, Tool],
+    registry: dict[str, Tool] | None = None,
     *,
+    tool_gateway: ToolGateway | None = None,
     max_tokens: int = 4096,
     effort: str = "high",
     system: str = "",
 ) -> dict[str, Any]:
-    """Run a bounded Astra function-calling loop through JARVIS Tool objects.
+    """Run a bounded Astra function-calling loop through JARVIS's gateway.
 
-    Confirmation-required tools are proposed but never executed. Reversible
-    transient failures receive a bounded retry; verified failures are returned
-    to Astra so it can adapt instead of hallucinating success.
+    ``tool_gateway`` is the preferred integration path. ``registry`` remains
+    supported for compatibility and is wrapped by a temporary gateway, keeping
+    one authorization/confirmation boundary for actual execution.
     """
     api_key, model = _config()
     if not api_key:
@@ -130,7 +130,9 @@ async def run_with_tools(
     if effort not in {"low", "medium", "high", "xhigh", "max"}:
         effort = "high"
 
-    tools = build_tool_schemas(registry)
+    active_gateway = tool_gateway or gateway
+    active_registry = registry if registry is not None else active_gateway.tool_map()
+    tools = build_tool_schemas(active_registry)
     input_items: list[dict[str, Any]] = list(messages)
     if system:
         input_items.insert(0, {"role": "system", "content": system})
@@ -154,10 +156,7 @@ async def run_with_tools(
 
             response = await client.post(
                 API_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
             )
             response.raise_for_status()
@@ -177,7 +176,7 @@ async def run_with_tools(
             outputs: list[dict[str, Any]] = []
             for call in calls:
                 name = str(call.get("name", ""))
-                tool = registry.get(name)
+                tool = active_registry.get(name)
                 if tool is None:
                     result = {"ok": False, "error": "unknown_tool"}
                 else:
@@ -187,8 +186,7 @@ async def run_with_tools(
                         args = {}
                         result = {"ok": False, "error": "invalid_arguments"}
                     else:
-                        tool_result, verdict = await _execute_verified(tool, args)
-
+                        tool_result, verdict = await _execute_verified(tool, args, active_gateway)
                         if tool_result.error == "confirmation_required":
                             return {
                                 "content": "",
@@ -209,7 +207,7 @@ async def run_with_tools(
                         executed.append({
                             "tool": name,
                             "ok": verdict.success,
-                            "attempts": getattr(verdict, "attempts", None) or (1 if verdict.success else len(verdict.errors) + 1),
+                            "attempts": getattr(verdict, "attempts", None) or 1,
                         })
 
                 outputs.append({
