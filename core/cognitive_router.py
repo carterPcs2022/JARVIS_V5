@@ -11,6 +11,17 @@ def _with_conscience(result: dict, assessment) -> dict:
     return result
 
 
+def should_use_agent_loop(user_input: str) -> bool:
+    """Return whether a request should enter the real model-selected tool loop."""
+    from core.llm.astra_gateway import should_use_astra
+    q = (user_input or "").lower()
+    tool_intent = any(term in q for term in (
+        "github", "repository", "repo", "pull request", "pull requests",
+        "recent commits", "review this pr", "review my pr", "codebase",
+    ))
+    return should_use_astra(user_input) or tool_intent
+
+
 class CognitiveRouter:
     def route(self, user_input: str) -> dict:
         """Route through JARVIS's safest synchronous cognitive path."""
@@ -51,16 +62,10 @@ class CognitiveRouter:
         return _with_conscience(brain.process_dict(user_input), conscience_assessment)
 
     async def route_async(self, user_input: str) -> dict:
-        """Async agentic path: real Astra responses can select JARVIS tools.
-
-        Deterministic handlers and the decision guard still run first. The
-        AgentLoop is only entered for explicit/high-value agentic requests so
-        ordinary chat does not suddenly depend on an external provider.
-        """
+        """Async agentic path: real Astra responses can select JARVIS tools."""
         from core.brain_v2 import brain, has_early_exit_trigger
         from core.conscience import conscience
         from core.decision_guard import assess_decision, pushback_message
-        from core.llm.astra_gateway import should_use_astra
 
         if has_early_exit_trigger(user_input):
             result = brain.process_dict(user_input)
@@ -82,7 +87,7 @@ class CognitiveRouter:
                 "conscience": assessment.as_dict(),
             }
 
-        if should_use_astra(user_input):
+        if should_use_agent_loop(user_input):
             from core.agent_loop import agent_loop
             result = await agent_loop.run_astra(
                 [{"role": "user", "content": user_input}],
