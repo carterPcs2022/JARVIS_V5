@@ -1,10 +1,4 @@
-"""Central, policy-aware facade over JARVIS capabilities.
-
-The gateway is intentionally a facade rather than a replacement for existing
-execution paths. It exposes safe discovery and execution through the typed Tool
-contract while preserving the legacy registries until their callers can be
-migrated and regression-tested.
-"""
+"""Central, policy-aware facade over JARVIS capabilities."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -28,10 +22,6 @@ class ToolGateway:
     @staticmethod
     def _build_tools() -> dict[str, Tool]:
         tools = dict(registry())
-
-        # GitHub capabilities already have a dedicated, token-authenticated
-        # service. Expose only bounded read/review operations here; mutations
-        # remain outside this first gateway slice.
         from services.github_intel import github
 
         tools.update({
@@ -93,15 +83,16 @@ class ToolGateway:
             for tool in self._tools.values()
         ]
 
+    def tool_map(self) -> dict[str, Tool]:
+        """Return a shallow copy for trusted adapters that build tool schemas."""
+        return dict(self._tools)
+
     def authorize(self, name: str, *, confirmed: bool = False) -> GatewayDecision:
         tool = self._tools.get(name)
         if tool is None:
             return GatewayDecision(False, "unknown_tool")
-        if "network" in tool.permissions and name.startswith("github_"):
-            # GitHub access is read-only in this gateway slice. This check is
-            # deliberately capability-based instead of relying on model text.
-            if tool.risk_level != "low":
-                return GatewayDecision(False, "github_mutation_not_exposed")
+        if "network" in tool.permissions and name.startswith("github_") and tool.risk_level != "low":
+            return GatewayDecision(False, "github_mutation_not_exposed")
         if tool.requires_confirmation and not confirmed:
             return GatewayDecision(False, "confirmation_required")
         return GatewayDecision(True, "authorized")
