@@ -24,7 +24,7 @@ def test_confirmation_required_tool_never_runs_handler():
         permissions=["destructive"],
     )
 
-    result = tool.execute({"x": 1})
+    result = tool.execute({})
 
     assert not result.ok
     assert result.error == "confirmation_required"
@@ -39,8 +39,6 @@ def test_mac_registry_repairs_choice_and_gmail_send_boundaries():
     registry = mac_registry()
     assert "ask_user_choice" in registry
     assert registry["ask_user_choice"].parameters["type"] == "object"
-    # Gmail already has its own draft-then-confirm flow, so the generic
-    # dispatcher gate must not double-gate the final send action.
     assert registry["gmail_confirm_send"].requires_confirmation is False
     assert registry["gmail_confirm_send"].risk_level == "high"
     assert registry["gmail_confirm_send"].reversible is False
@@ -65,7 +63,6 @@ def test_astra_does_not_retry_confirmation_gate():
     assert result.error == "confirmation_required"
     assert not verdict.success
     assert calls == []
-    # Exactly one pending action proves the approval gate was not retried.
     assert len(_PENDING) == 1
     pending_id = next(iter(_PENDING))
     discard(pending_id)
