@@ -15,7 +15,8 @@ This updater now:
   * records the decision and its reasons;
   * never auto-selects an unknown model profile merely because its name looks
     newer;
-  * still fails safely when a configured model disappears.
+  * automatically selects a profiled replacement when a configured Groq
+    model disappears, so a deprecation cannot leave a tier permanently broken.
 
 The goal is "newest *good* model for this JARVIS tier", not "largest number in
 an ID".
@@ -26,9 +27,8 @@ import json
 import re
 import time
 import httpx
-from pathlib import Path
-from datetime import datetime, timezone
 from config.settings import BASE_DIR
+from datetime import datetime, timezone
 
 MODEL_REGISTRY_FILE = BASE_DIR / "memory" / "model_registry.json"
 UPDATE_LOG_FILE = BASE_DIR / "logs" / "model_updates.json"
@@ -41,9 +41,6 @@ ANTHROPIC_SETTING_NAMES = {
     "fable": "ANTHROPIC_MODEL_FABLE",
 }
 
-# Provider metadata is deliberately small and auditable.  The live API tells
-# us which IDs exist; this table tells JARVIS what those known IDs are good at.
-# Unknown models are NOT auto-selected until they have an explicit profile.
 GROQ_MODEL_PROFILES: dict[str, dict] = {
     "openai/gpt-oss-20b": {
         "tiers": {"instant", "standard", "coder"}, "production": True,
@@ -55,7 +52,7 @@ GROQ_MODEL_PROFILES: dict[str, dict] = {
         "tiers": {"standard", "reasoning", "research", "coder"}, "production": True,
         "reasoning": True, "tools": True, "parallel_tools": False,
         "vision": False, "json": True, "built_in_tools": True,
-        "speed": 500, "context": 131072, "quality": 93,
+        "speed": 500, "context": 131072, "quality": 90,
     },
     "qwen/qwen3.6-27b": {
         "tiers": {"standard", "reasoning", "research", "coder"}, "production": False,
@@ -89,8 +86,6 @@ GROQ_MODEL_PROFILES: dict[str, dict] = {
     },
 }
 
-# Minimum improvement required before an automatic change.  This prevents a
-# one-point score fluctuation from rewriting the repo every week.
 _MIN_SCORE_GAIN = 7
 
 
@@ -109,12 +104,7 @@ def _is_newer(candidate: str, current: str) -> bool:
 
 
 def _base_family(model_id: str) -> str:
-    """Best-effort family key used only for reporting/fallbacks.
-
-    This is intentionally NOT used as the upgrade gate anymore.  Different
-    generations are allowed to compete when their capability profiles say
-    they serve the same JARVIS tier.
-    """
+    """Best-effort family key used only for conservative Anthropic checks."""
     model_id = model_id.lower()
 
     def strip_version(m: re.Match) -> str:
@@ -135,14 +125,7 @@ class ModelUpdater:
     def __init__(self):
         self.registry = self._load_registry()
 
-    # ── Live catalogs ───────────────────────────────────────────────────
-
     def _fetch_groq_models(self) -> dict[str, dict]:
-        """Return the live Groq catalog keyed by model ID.
-
-        Keep the metadata returned by Groq (created/active/context/etc.) so
-        selection can use more than the spelling of an ID.
-        """
         from config.settings import GROQ_API_KEY
         if not GROQ_API_KEY:
             return {}
@@ -183,8 +166,6 @@ class ModelUpdater:
             print(f"[ModelUpdater] Anthropic fetch failed: {e}")
             return {}
 
-    # ── Capability scoring ──────────────────────────────────────────────
-
     def _score_groq(self, tier: str, model_id: str, metadata: dict) -> tuple[float, list[str]] | None:
         profile = GROQ_MODEL_PROFILES.get(model_id)
         if not profile or tier not in profile["tiers"]:
@@ -193,7 +174,6 @@ class ModelUpdater:
         score = float(profile["quality"])
         reasons: list[str] = []
 
-        # Tier-specific capabilities matter more than raw parameter count.
         if tier == "instant":
             speed_score = _safe_ratio(profile["speed"], 250, 1000) * 18
             score += speed_score
@@ -219,9 +199,6 @@ class ModelUpdater:
                 score += 3
                 reasons.append("structured JSON")
 
-        # JARVIS uses tools heavily, so parallel tool calls are a real
-        # advantage.  This is why Qwen 3.8 is not allowed to win simply by
-        # having a larger version number.
         if profile["parallel_tools"] and tier in {"standard", "reasoning", "research", "coder"}:
             score += 7
             reasons.append("parallel tool calls")
@@ -233,8 +210,6 @@ class ModelUpdater:
             score += 4
             reasons.append("vision capable")
 
-        # Production status is a deliberate stability advantage.  Preview
-        # models can be discontinued at short notice, so novelty is not free.
         if profile["production"]:
             score += 10
             reasons.append("production model")
@@ -242,12 +217,10 @@ class ModelUpdater:
             score -= 10
             reasons.append("preview model penalty")
 
-        # Prefer larger context where it is materially different.
         live_context = int(metadata.get("context_window") or profile["context"] or 0)
         if live_context >= 131000:
             score += 2
 
-        # Recency is a tie-breaker, not the primary criterion.
         created = metadata.get("created")
         if isinstance(created, (int, float)):
             age_days = max(0.0, (time.time() - created) / 86400)
@@ -280,8 +253,6 @@ class ModelUpdater:
         winner["runner_up"] = candidates[1]["id"] if len(candidates) > 1 else None
         return winner
 
-    # ── Detection ───────────────────────────────────────────────────────
-
     def _check_groq(self, registry: dict, live_models: dict[str, dict]) -> list[dict]:
         updates = []
         for tier, cfg in registry.items():
@@ -290,10 +261,6 @@ class ModelUpdater:
                 continue
 
             if current_id not in live_models:
-                # A vanished model is an emergency/deprecation signal.  Pick
-                # the safest profiled replacement rather than leaving JARVIS
-                # permanently broken, but record that this was forced by
-                # disappearance rather than a normal upgrade.
                 winner = self._best_groq_for_tier(tier, live_models, current_id)
                 updates.append({
                     "provider": "groq", "tier": tier,
@@ -310,8 +277,6 @@ class ModelUpdater:
                 continue
 
             current_score = winner["current_score"]
-            # If the current model has no profile we do not auto-replace it
-            # unless it is actually gone. Unknown models require review.
             if current_score is None:
                 continue
 
@@ -327,12 +292,7 @@ class ModelUpdater:
         return updates
 
     def _check_anthropic(self, registry: dict, live_models: dict[str, dict]) -> list[dict]:
-        """Anthropic gets conservative family/version handling for now.
-
-        We don't guess cross-family Anthropic replacements.  Their model IDs
-        carry enough structured version information for safe same-family
-        upgrades, while unknown families remain human-review only.
-        """
+        """Conservative same-family/version upgrades for Anthropic."""
         updates = []
         for tier, cfg in registry.items():
             current_id = cfg.get("id", "")
@@ -398,8 +358,6 @@ class ModelUpdater:
             "checked_at": self.registry["last_checked"],
         }
 
-    # ── Apply ────────────────────────────────────────────────────────────
-
     def apply_updates(self, updates: list) -> dict:
         if not updates:
             return {"applied": 0, "updates": [], "message": "No updates to apply"}
@@ -419,10 +377,7 @@ class ModelUpdater:
                     self._patch_router_file(tier, new_model)
                 self._log_update(update)
                 applied.append(update)
-                print(
-                    f"[ModelUpdater] {provider} {tier}: {old_model} -> {new_model} "
-                    f"({update.get('reason', 'selected')})"
-                )
+                print(f"[ModelUpdater] {provider} {tier}: {old_model} -> {new_model} ({update.get('reason', 'selected')})")
             except Exception as e:
                 print(f"[ModelUpdater] Failed to apply {provider}/{tier}: {e}")
 
@@ -430,13 +385,9 @@ class ModelUpdater:
             self._announce_updates(applied)
             self._commit_to_github(applied)
 
-        return {
-            "applied": len(applied), "updates": applied,
-            "message": f"Applied {len(applied)} model update(s)",
-        }
+        return {"applied": len(applied), "updates": applied, "message": f"Applied {len(applied)} model update(s)"}
 
     def _commit_to_github(self, updates: list):
-        """Persist source changes past the next Render redeploy."""
         from utils.git_ops import commit_and_push
         names = "; ".join(f"{u['tier']} to {u['new_model']}" for u in updates[:3])
         result = commit_and_push(
@@ -471,18 +422,12 @@ class ModelUpdater:
         block = re.search(rf'"{tier}":\s*\{{(.*?)\}}', content, re.DOTALL)
         if not block:
             return
-        new_inner = re.sub(
-            r'"id":\s*"[^"]*"',
-            f'"id": "{new_model}"',
-            block.group(1), count=1,
-        )
+        new_inner = re.sub(r'"id":\s*"[^"]*"', f'"id": "{new_model}"', block.group(1), count=1)
         if new_inner == block.group(1):
             return
         updated = content[:block.start(1)] + new_inner + content[block.end(1):]
         ROUTER_FILE.write_text(updated)
         print(f"[ModelUpdater] Patched router.py: {tier} id = {new_model}")
-
-    # ── Persistence / reporting ─────────────────────────────────────────
 
     def _announce_updates(self, updates: list):
         names = ", ".join(f"{u['tier']} to {u['new_model']}" for u in updates[:3])
@@ -497,8 +442,7 @@ class ModelUpdater:
             bus.system(message)
             for u in updates:
                 bus.alert(
-                    f"Model upgraded: {u['provider']}/{u['tier']} -> {u['new_model']} "
-                    f"({u.get('reason', 'selected')})",
+                    f"Model upgraded: {u['provider']}/{u['tier']} -> {u['new_model']} ({u.get('reason', 'selected')})",
                     severity="high", category="MODEL_UPDATE",
                 )
         except Exception:
@@ -545,12 +489,16 @@ class ModelUpdater:
             "recent_updates": log,
         }
 
-    # ── Entry points ─────────────────────────────────────────────────────
-
     def check_and_apply(self) -> dict:
-        """Check live catalogs and apply only materially better models."""
         result = self.check_for_updates()
 
+        # Normal upgrades and safe replacements for vanished Groq models are
+        # both actionable.  Anthropic deprecations remain review-only because
+        # we deliberately do not guess cross-family replacements there.
+        actionable_deprecations = [
+            d for d in result["deprecated"]
+            if d.get("new_model")
+        ]
         for d in result["deprecated"]:
             if d.get("new_model"):
                 print(
@@ -563,7 +511,7 @@ class ModelUpdater:
                     f"'{d['old_model']}' vanished and no profiled replacement exists."
                 )
 
-        updates = result["updates"]
+        updates = result["updates"] + actionable_deprecations
         if not updates:
             print("[ModelUpdater] No materially better models found.")
             return {
