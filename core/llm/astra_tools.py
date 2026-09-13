@@ -54,7 +54,10 @@ def _verification_input(result: ToolResult) -> Any:
 
 
 async def _execute_verified(tool: Tool, args: dict[str, Any], tool_gateway: ToolGateway | None = None) -> tuple[ToolResult, Any]:
-    active_gateway = tool_gateway or gateway
+    # When called with a standalone Tool (for example by a unit test or a
+    # trusted adapter), construct a gateway containing exactly that tool. The
+    # production Astra path passes the shared gateway explicitly.
+    active_gateway = tool_gateway or ToolGateway({tool.name: tool})
     if tool.requires_confirmation:
         result = active_gateway.execute(tool.name, args, confirmed=False)
         return result, verify_tool_result(_verification_input(result), reversible=False)
