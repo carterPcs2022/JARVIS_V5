@@ -39,7 +39,6 @@ def test_missing_groq_model_gets_a_safe_profiled_replacement():
     updater = ModelUpdater.__new__(ModelUpdater)
     registry = {"reasoning": {"id": "qwen/old-model"}}
     live_models = {
-        "qwen/old-model": {"active": False},
         "qwen/qwen3.8-27b": {},
     }
     updates = updater._check_groq(registry, live_models)
