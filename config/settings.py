@@ -54,6 +54,7 @@ ANTHROPIC_MODEL_FABLE = os.getenv("ANTHROPIC_MODEL_FABLE", "claude-fable-5")
 ENABLE_SONNET = os.getenv("ENABLE_SONNET", "true").lower() == "true"
 ENABLE_OPUS = os.getenv("ENABLE_OPUS", "true").lower() == "true"
 ENABLE_FABLE = os.getenv("ENABLE_FABLE", "true").lower() == "true"
+ENABLE_REASONING_ENGINES = os.getenv("ENABLE_REASONING_ENGINES", "true").lower() == "true"
 SONNET_DAILY_CALL_LIMIT = int(os.getenv("SONNET_DAILY_CALLS", "100"))
 OPUS_DAILY_CALL_LIMIT = int(os.getenv("OPUS_DAILY_CALLS", "50"))
 FABLE_DAILY_CALL_LIMIT = int(os.getenv("FABLE_DAILY_CALLS", "20"))
@@ -80,6 +81,8 @@ SANDBOX_APPROVAL_TOKEN = os.getenv("SANDBOX_APPROVAL_TOKEN", "")
 AVENGERS_PASSPHRASE = os.getenv("AVENGERS_PASSPHRASE", "")
 PEPPER_TOKEN = os.getenv("PEPPER_TOKEN", "")
 JARVIS_MAYDAY_PHRASE = os.getenv("JARVIS_MAYDAY_PHRASE", "code red")
+GITHUB_WEBHOOK_SECRET = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 # Memory
 MEMORY_DIR = BASE_DIR / "memory"
