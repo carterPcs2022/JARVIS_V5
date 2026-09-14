@@ -2,8 +2,12 @@
 
 If a service fails too many times in a row, "open" the circuit so further
 calls fail fast (no retry storm against a dead service) instead of hanging;
-after a cooldown, try a limited number of test calls ("half-open") and
-close again once they succeed.
+after a cooldown, try a limited number of test calls ("half-open") and close
+again once it succeeds.
+
+Rate-limit failures are treated specially: when a provider tells us exactly
+when it can be retried, open immediately rather than burning five more
+requests into the same exhausted quota.
 
 States: CLOSED (normal) -> OPEN (failing, bypass) -> HALF (testing recovery) -> CLOSED
 """
@@ -13,9 +17,9 @@ from datetime import datetime
 
 class CircuitBreaker:
 
-    FAILURE_THRESHOLD = 5    # failures before opening
-    RECOVERY_TIMEOUT  = 60   # seconds before trying again
-    SUCCESS_THRESHOLD = 2    # successes to close from half-open
+    FAILURE_THRESHOLD = 5
+    RECOVERY_TIMEOUT = 60
+    SUCCESS_THRESHOLD = 2
 
     def __init__(self):
         self._circuits: dict = {}
@@ -30,16 +34,8 @@ class CircuitBreaker:
         return self._circuits[service]
 
     def _maybe_recover(self, service: str) -> dict:
-        """If open and the recovery window (retry_after, or the fixed
-        cooldown) has elapsed, flip to half-open so the next attempt can
-        actually test recovery. Centralized here so is_available() and
-        call() never drift out of sync — previously is_available() only
-        read the stored "open"/"closed" state and never re-checked elapsed
-        time, so router.py's `if not cb.is_available(...): continue` gate
-        skipped straight past Groq forever without ever reaching call()
-        (the only place the elapsed-time check lived), leaving a circuit
-        permanently open until process restart even long after Groq itself
-        had recovered."""
+        """Transition an open circuit to half-open once its real retry
+        window (when supplied) or the normal recovery timeout has elapsed."""
         circuit = self._get_circuit(service)
         if circuit["state"] == "open":
             effective_timeout = circuit["retry_after"] or self.RECOVERY_TIMEOUT
@@ -50,18 +46,10 @@ class CircuitBreaker:
         return circuit
 
     def call(self, service: str, fn, *args, **kwargs):
-        """Execute fn(*args, **kwargs) through the circuit breaker.
-        Usage: result = cb.call("groq", groq_function, messages)"""
+        """Execute fn(*args, **kwargs) through the circuit breaker."""
         circuit = self._maybe_recover(service)
 
         if circuit["state"] == "open":
-            # retry_after (from e.g. GroqRateLimitError, set in
-            # _on_failure) overrides the fixed cooldown when the failing
-            # call told us exactly how long to wait — a tokens-per-day
-            # exhaustion (40+ minutes) shouldn't be probed every
-            # RECOVERY_TIMEOUT like a tokens-per-minute one (seconds) would
-            # be; without this, every RECOVERY_TIMEOUT window between now
-            # and the real reset burns a guaranteed-to-fail probe request.
             effective_timeout = circuit["retry_after"] or self.RECOVERY_TIMEOUT
             elapsed = time.time() - (circuit["opened_at"] or 0)
             raise CircuitOpenError(
@@ -93,16 +81,15 @@ class CircuitBreaker:
         circuit = self._get_circuit(service)
         circuit["failures"] += 1
         circuit["last_failure"] = datetime.now().isoformat()
-        # Always overwrite, including with None — a failure that doesn't
-        # carry a retry_after (e.g. a plain network error) means the
-        # PREVIOUS failure's retry_after (which could be a 40+ minute TPD
-        # wait) is no longer the relevant one. Without this, a single
-        # unrelated blip during half-open testing would reopen the circuit
-        # for another full TPD-length wait instead of falling back to the
-        # default RECOVERY_TIMEOUT.
         circuit["retry_after"] = retry_after
 
-        if circuit["failures"] >= self.FAILURE_THRESHOLD and circuit["state"] != "open":
+        # A provider-supplied retry window is authoritative. In particular,
+        # Groq's 429 can represent either a short TPM/RPM limit or a much
+        # longer TPD limit. Opening immediately prevents background workers
+        # and concurrent requests from repeatedly spending calls that are
+        # guaranteed to fail until that window expires.
+        should_open = retry_after is not None or circuit["failures"] >= self.FAILURE_THRESHOLD
+        if should_open and circuit["state"] != "open":
             circuit["state"] = "open"
             circuit["opened_at"] = time.time()
             circuit["total_opens"] += 1
@@ -115,6 +102,7 @@ class CircuitBreaker:
                     f"Will retry in {wait:.0f}s.",
                     severity="medium", category="CIRCUIT_BREAKER",
                 )
+
             except Exception:
                 pass
 
@@ -128,6 +116,8 @@ class CircuitBreaker:
         if service in self._circuits:
             self._circuits[service]["state"] = "closed"
             self._circuits[service]["failures"] = 0
+            self._circuits[service]["successes"] = 0
+            self._circuits[service]["retry_after"] = None
 
     def dashboard(self) -> dict:
         return {
