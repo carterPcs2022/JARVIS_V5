@@ -3,7 +3,7 @@ from core.state import state
 
 router = APIRouter(tags=["health"])
 
-@router.get("/")
+@router.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {
         "status":      "JARVIS V5 ONLINE",
