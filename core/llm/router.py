@@ -88,7 +88,7 @@ MODEL_REGISTRY = {
         # breaks its digit-stripping family comparison, so this needed a
         # manual pick. Verified live: 200 OK, still emits <think> tags the
         # same way (already handled by _strip_think_tags() below).
-        "id": "qwen/qwen3.6-27b", "max_tokens": 4096,
+        "id": "openai/gpt-oss-120b", "max_tokens": 4096,
         "best_for": ["complex_reasoning", "math", "logic", "debate"],
     },
     "research": {
