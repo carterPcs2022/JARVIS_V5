@@ -129,11 +129,42 @@ def full_diagnostic() -> dict:
     if missing_memory_files:
         warnings.append(f"⚠️ Memory file(s) missing: {', '.join(missing_memory_files)} — see memory_files")
 
-    all_llms_down = not groq_ok and not anthropic_ok and not ollama_ok
+    # Provider availability and circuit state are intentionally reported
+    # separately. A provider can be rate-limited (or have a billing problem)
+    # without JARVIS itself being offline, because the router may still have
+    # an Anthropic fallback available. Never turn a provider retry window
+    # into a fabricated "JARVIS recovery time".
+    circuit_breakers = {}
+    try:
+        from services.circuit_breaker import cb
+        dashboard = cb.dashboard()
+        now = __import__("time").time()
+        for service, info in dashboard.items():
+            circuit = cb._get_circuit(service)
+            retry_after = circuit.get("retry_after")
+            opened_at = circuit.get("opened_at")
+            remaining = None
+            if circuit.get("state") == "open":
+                wait = retry_after or cb.RECOVERY_TIMEOUT
+                remaining = max(0.0, wait - (now - (opened_at or now)))
+            circuit_breakers[service] = {
+                **info,
+                "retry_after_seconds": retry_after,
+                "retry_in_seconds": round(remaining, 1) if remaining is not None else None,
+            }
+    except Exception as e:
+        circuit_breakers = {"error": str(e)}
+
+    reasoning_available = bool(
+        anthropic_ok or ollama_ok or groq_ok or state.any_model_available("groq")
+    )
+    all_llms_down = not reasoning_available
     status = "DEGRADED" if (all_llms_down or lockdown_active or friday_active) else "NOMINAL"
 
     return {"status": status,
-            "brain": brain_status, "active_model": active_model,
+            "brain": brain_status if reasoning_available else "ALL ENGINES OFFLINE",
+            "reasoning_available": reasoning_available,
+            "active_model": active_model,
             "groq_available": groq_ok, "ollama_available": ollama_ok,
             "anthropic_available": anthropic_ok,
             "system": sys, "warnings": warnings,
@@ -141,4 +172,5 @@ def full_diagnostic() -> dict:
             "protocols": proto,
             "config_check": config_result,
             "mac_bridge": mac_bridge_result,
-            "memory_files": memory_files_result}
+            "memory_files": memory_files_result,
+            "circuit_breakers": circuit_breakers}
