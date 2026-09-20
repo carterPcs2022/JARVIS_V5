@@ -20,3 +20,7 @@ build.log
 # Stray accidental commit (zip archive of an old source snapshot, not
 # meant to be tracked) — kept locally, no longer tracked by git.
 /n
+
+# Local Claude Code settings — may contain machine paths or credentials
+.claude/settings.local.json
+.claude/*.local.json
