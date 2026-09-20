@@ -347,11 +347,17 @@ def parse_spotify_command(text: str) -> dict | None:
     if any(s in t for s in SPOTIFY_STOP):
         return {"action": "pause"}
 
-    if "playlist" in t and any(x in t for x in ("my playlist", "playlist called", "playlist named")):
+    if "playlist" in t and (
+        "my playlist" in t
+        or "playlist called" in t
+        or "playlist named" in t
+        or ("play " in t and t.endswith("playlist"))
+    ):
         query = t
-        for marker in ("my playlist", "playlist called", "playlist named"):
+        for marker in ("playlist called", "playlist named", "my playlist"):
             query = query.replace(marker, " ")
         query = query.replace("on spotify", " ").replace("play", " ").strip()
+        query = query.removesuffix(" playlist").strip()
         return {"action": "playlist", "query": query}
 
     for trigger in SPOTIFY_PLAY:
