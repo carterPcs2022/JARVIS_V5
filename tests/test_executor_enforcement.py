@@ -49,3 +49,11 @@ def test_permanent_error_never_retries():
         mock_shell.return_value = {"error": "Command not in allowlist: rm -rf /"}
         execute_step({"tool": "run_shell", "args": {"command": "rm -rf /"}, "confirmed": True})
         assert mock_shell.call_count == 1
+
+
+def test_executor_rejects_malformed_tool_arguments_before_handler():
+    with mock.patch("core.tools.system.snapshot") as snapshot:
+        result = json.loads(execute_step({"tool": "system_info", "args": {"unexpected": True}}))
+        assert result["tool"] == "system_info"
+        assert result["error"].startswith("invalid_arguments:")
+        snapshot.assert_not_called()
