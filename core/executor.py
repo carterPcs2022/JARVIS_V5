@@ -4,6 +4,7 @@ Runs individual planned steps, dispatching to the right tool.
 """
 import json
 from core.llm.router import think
+from core.interfaces.tool import validate_tool_args
 
 
 def execute_step(step: dict) -> str:
@@ -35,6 +36,14 @@ def execute_step(step: dict) -> str:
     # confirmation channel can pass step["confirmed"]=True to bypass this;
     # none of the current callers do.
     spec = TOOLS.get(tool)
+    if spec:
+        validation_error = validate_tool_args(spec, args)
+        if validation_error:
+            return json.dumps({
+                "error": f"invalid_arguments: {validation_error}",
+                "tool": tool,
+            })
+
     if spec and spec.requires_confirmation and not step.get("confirmed", False):
         return json.dumps({
             "error": f"'{tool}' requires explicit confirmation and can't run "
@@ -46,6 +55,14 @@ def execute_step(step: dict) -> str:
 
     def _run() -> str:
         try:
+            if spec:
+                # Use the same Tool contract as the central gateway after the
+                # explicit step-level confirmation check above. This keeps
+                # argument validation and exception handling on one path.
+                tool_result = spec.execute(args, confirmed=True)
+                if not tool_result.ok:
+                    return json.dumps({"error": tool_result.error, "tool": tool})
+                return str(tool_result.output)
             return handler(args)
         except Exception as e:
             return json.dumps({"error": str(e), "tool": tool})
