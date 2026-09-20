@@ -66,7 +66,11 @@ def full_diagnostic() -> dict:
     if sys["disk_used_pct"] > 85: warnings.append("⚠️ Disk critical")
     # Ollama/Anthropic are fallbacks — their absence isn't a problem on its
     # own as long as Groq is up. Only call it out when nothing is left.
-    if not groq_ok and not anthropic_ok and not ollama_ok:
+    if groq_rate_limited:
+        retry = _groq_circuit.get("retry_after")
+        retry_text = f" — retry window {retry:.0f}s" if isinstance(retry, (int, float)) else ""
+        warnings.append(f"⚠️ Groq rate-limited{retry_text} (fallback may be active)")
+    elif not groq_ok and not anthropic_ok and not ollama_ok:
         warnings.append("⚠️ Groq unavailable")
         warnings.append("⚠️ Anthropic unavailable")
         warnings.append("⚠️ Ollama unavailable")
@@ -84,8 +88,27 @@ def full_diagnostic() -> dict:
     active_model = state.get("active_model") or (
         GROQ_MODEL if groq_ok else OLLAMA_MODEL if ollama_ok else "none"
     )
-    brain_status = ("GROQ ONLINE" if groq_ok else
-                    "OLLAMA FALLBACK" if ollama_ok else "ALL ENGINES OFFLINE")
+
+    # A 429 means Groq itself is reachable, but that provider is not
+    # currently usable for a new request. Do not label that state simply
+    # "GROQ ONLINE" or silently omit it from warnings: the user needs to
+    # know whether JARVIS is using a fallback.
+    groq_rate_limited = False
+    try:
+        from services.circuit_breaker import cb as _cb
+        _groq_circuit = _cb._get_circuit("groq")
+        groq_rate_limited = _groq_circuit.get("state") == "open" and (
+            _groq_circuit.get("retry_after") is not None
+        )
+    except Exception:
+        _groq_circuit = {}
+
+    brain_status = (
+        "GROQ RATE LIMITED" if groq_rate_limited else
+        "GROQ ONLINE" if groq_ok else
+        "OLLAMA FALLBACK" if ollama_ok else
+        "ALL ENGINES OFFLINE"
+    )
 
     state.update({"groq_available": groq_ok, "ollama_available": ollama_ok,
                   "status": "online" if (groq_ok or ollama_ok) else "degraded"})
