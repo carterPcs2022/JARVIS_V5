@@ -92,12 +92,12 @@ def _save(path: Path, data) -> bool:
 # ── Short-term memory ─────────────────────────────────────────────────────────
 
 def save_turn(user: str, ai: str):
-    try:
-        from core.protocols import shield
-        user = shield.scan_and_redact(user)
-        ai   = shield.scan_and_redact(ai)
-    except Exception:
-        pass
+    # Redaction is a safety boundary, so silently bypassing it is not
+    # acceptable. If the shield cannot load, fail closed rather than storing
+    # an unredacted conversation turn.
+    from core.protocols import shield
+    user = shield.scan_and_redact(user)
+    ai   = shield.scan_and_redact(ai)
 
     turns = _load(SHORT_TERM_FILE)
     turns.append({
