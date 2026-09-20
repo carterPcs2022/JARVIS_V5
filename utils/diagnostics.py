@@ -64,19 +64,6 @@ def full_diagnostic() -> dict:
     if sys["cpu_percent"] > 90:   warnings.append("⚠️ CPU critical")
     if sys["ram_used_pct"] > 90:  warnings.append("⚠️ RAM critical")
     if sys["disk_used_pct"] > 85: warnings.append("⚠️ Disk critical")
-    # Ollama/Anthropic are fallbacks — their absence isn't a problem on its
-    # own as long as Groq is up. Only call it out when nothing is left.
-    if groq_rate_limited:
-        retry = _groq_circuit.get("retry_after")
-        retry_text = f" — retry window {retry:.0f}s" if isinstance(retry, (int, float)) else ""
-        warnings.append(f"⚠️ Groq rate-limited{retry_text} (fallback may be active)")
-    elif not groq_ok and not anthropic_ok and not ollama_ok:
-        warnings.append("⚠️ Groq unavailable")
-        warnings.append("⚠️ Anthropic unavailable")
-        warnings.append("⚠️ Ollama unavailable")
-    elif not groq_ok:
-        warnings.append("⚠️ Groq unavailable (fallback active)")
-
     # active_model is set live by core/llm/router.py after every real chat
     # call (it reflects whichever tier/model actually served the last
     # response — Groq or an Anthropic tier). Previously this function
@@ -109,6 +96,21 @@ def full_diagnostic() -> dict:
         "OLLAMA FALLBACK" if ollama_ok else
         "ALL ENGINES OFFLINE"
     )
+
+    # Ollama/Anthropic are fallbacks — their absence isn't a problem on its
+    # own as long as another reasoning path is available. A rate-limited
+    # Groq circuit is reported explicitly rather than being mislabeled as
+    # fully online.
+    if groq_rate_limited:
+        retry = _groq_circuit.get("retry_after")
+        retry_text = f" — retry window {retry:.0f}s" if isinstance(retry, (int, float)) else ""
+        warnings.append(f"⚠️ Groq rate-limited{retry_text} (fallback may be active)")
+    elif not groq_ok and not anthropic_ok and not ollama_ok:
+        warnings.append("⚠️ Groq unavailable")
+        warnings.append("⚠️ Anthropic unavailable")
+        warnings.append("⚠️ Ollama unavailable")
+    elif not groq_ok:
+        warnings.append("⚠️ Groq unavailable (fallback active)")
 
     state.update({"groq_available": groq_ok, "ollama_available": ollama_ok,
                   "status": "online" if (groq_ok or ollama_ok) else "degraded"})
