@@ -252,7 +252,7 @@ class SpotifyService:
         if not devices:
             return {
                 "error": "No active Spotify device found",
-                "fix": "Open Spotify on your phone or Mac first",
+                "fix": "Open Spotify on your iPhone first so Spotify exposes it as a Connect device.",
             }
 
         device = devices[0]
@@ -280,9 +280,34 @@ class SpotifyService:
         return {"playing": True, "device": device.get("name", "your device")}
 
     def _get_devices(self) -> list:
-        """List the user's available Spotify Connect devices."""
+        """List available Spotify Connect devices, preferring the user's iPhone.
+
+        JARVIS runs remotely, so it cannot play audio itself. Spotify's Web API
+        sends playback to a Spotify Connect device owned by the user. Prefer
+        an active smartphone, then any smartphone, then another active device.
+        This keeps JARVIS from accidentally targeting an old Mac or speaker.
+        """
         resp = self._api("GET", "/me/player/devices")
-        return resp.get("devices", []) if "error" not in resp else []
+        if "error" in resp:
+            return []
+
+        devices = [
+            d for d in resp.get("devices", [])
+            if d.get("id") and not d.get("is_restricted")
+        ]
+
+        # Phone-first: the user's current setup is iPhone-only.
+        smartphones = [d for d in devices if str(d.get("type", "")).lower() == "smartphone"]
+        active = [d for d in smartphones if d.get("is_active")]
+        if active:
+            return active + [d for d in smartphones if d not in active]
+
+        if smartphones:
+            return smartphones + [d for d in devices if d not in smartphones and d.get("is_active")]
+
+        # No phone was exposed by Spotify; only use an already-active fallback
+        # rather than waking up an arbitrary remembered device.
+        return [d for d in devices if d.get("is_active")]
 
     def pause(self) -> dict:
         return self._api("PUT", "/me/player/pause")
