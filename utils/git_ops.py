@@ -42,8 +42,12 @@ def _authenticated_push_target() -> tuple[str, str] | None:
         ["git", "-C", str(BASE_DIR), "remote", "get-url", "origin"],
         capture_output=True, text=True, timeout=10,
     )
-    if remote.returncode != 0 or not remote.stdout.strip().startswith("https://github.com/"):
-        return None
+    remote_url = remote.stdout.strip() if remote.returncode == 0 else ""
+    if not remote_url.startswith("https://github.com/"):
+        repository = os.getenv("GITHUB_REPOSITORY", "carterPcs2022/JARVIS_V5").strip().strip("/")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+            return None
+        remote_url = f"https://github.com/{repository}.git"
 
     branch = subprocess.run(
         ["git", "-C", str(BASE_DIR), "rev-parse", "--abbrev-ref", "HEAD"],
@@ -52,7 +56,7 @@ def _authenticated_push_target() -> tuple[str, str] | None:
     if branch.returncode != 0:
         return None
 
-    url = remote.stdout.strip().replace("https://github.com/", f"https://x-access-token:{token}@github.com/", 1)
+    url = remote_url.replace("https://github.com/", f"https://x-access-token:{token}@github.com/", 1)
     return url, branch.stdout.strip()
 
 
@@ -83,8 +87,16 @@ def commit_and_push(paths: list[str], message: str, log_prefix: str = "[GitOps]"
             return {"committed": False, "pushed": False, "error": commit.stderr.strip()}
 
         target = _authenticated_push_target()
-        push_cmd = (["git", "-C", str(BASE_DIR), "push", target[0], f"HEAD:{target[1]}"]
-                    if target else ["git", "-C", str(BASE_DIR), "push"])
+        if target:
+            push_cmd = ["git", "-C", str(BASE_DIR), "push", target[0], f"HEAD:{target[1]}"]
+        else:
+            branch = subprocess.run(
+                ["git", "-C", str(BASE_DIR), "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if branch.returncode != 0 or not branch.stdout.strip():
+                return {"committed": True, "pushed": False, "error": "could not determine current git branch"}
+            push_cmd = ["git", "-C", str(BASE_DIR), "push", "origin", f"HEAD:{branch.stdout.strip()}"]
         push = subprocess.run(push_cmd, capture_output=True, text=True, timeout=30)
         if push.returncode != 0:
             # git's own error text sometimes echoes the remote URL verbatim
