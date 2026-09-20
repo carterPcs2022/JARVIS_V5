@@ -384,6 +384,17 @@ class ModelUpdater:
         if applied:
             self._announce_updates(applied)
             self._commit_to_github(applied)
+            # ModelUpdater is an authorized writer to settings.py/router.py.
+            # Refresh Sentinel after the write so its integrity monitor does
+            # not report its own model migration as FILE_TAMPERED during the
+            # same running process. The next deploy will rebuild/load the
+            # persisted baseline from the committed source anyway.
+            try:
+                from services.sentinel import build_baseline
+                build_baseline(str(BASE_DIR))
+                print("[ModelUpdater] Sentinel baseline refreshed after authorized model update.")
+            except Exception as e:
+                print(f"[ModelUpdater] Sentinel baseline refresh skipped: {e}")
 
         return {"applied": len(applied), "updates": applied, "message": f"Applied {len(applied)} model update(s)"}
 
