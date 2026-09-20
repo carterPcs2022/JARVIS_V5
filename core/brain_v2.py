@@ -1351,8 +1351,12 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, spotify_response)
                 return Result(response=spotify_response, ok=True, provider="spotify")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Brain] Spotify command failed: {e}")
+            from core.memory import save_turn
+            response = f"Spotify command failed, sir: {e}"
+            save_turn(user_input, response)
+            return Result(response=response, ok=False, provider="spotify")
 
         # ── Smart home scene commands — instant, no LLM needed ───────────────
         try:
@@ -1362,8 +1366,12 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, scene_response)
                 return Result(response=scene_response, ok=True, provider="home_automation")
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[Brain] Smart-home scene failed: {e}")
+            from core.memory import save_turn
+            response = f"Smart-home command failed, sir: {e}"
+            save_turn(user_input, response)
+            return Result(response=response, ok=False, provider="home_automation")
 
         # ── "Clip that" — bookmark the last exchange ──────────────────────────
         if any(t in user_input.lower() for t in CLIP_TRIGGERS):
@@ -1398,8 +1406,12 @@ class Brain:
                 response = f"Clipped, sir. Tagged as: {', '.join(clip['tags'])}."
                 save_turn(user_input, response)
                 return Result(response=response, ok=True, provider="clip")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Brain] Clip command failed: {e}")
+                from core.memory import save_turn
+                response = f"Clip command failed, sir: {e}"
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="clip")
 
         # ── Mac Bridge app/system triggers ─────────────────────────────────────
         for trigger, (method_name, args) in MAC_APP_TRIGGERS.items():
@@ -1420,8 +1432,12 @@ class Brain:
                     speak(response)
                     save_turn(user_input, response)
                     return Result(response=response, ok=True, provider="mac_bridge")
-                except Exception:
-                    break
+                except Exception as e:
+                    print(f"[Brain] Mac Bridge command failed: {e}")
+                    from core.memory import save_turn
+                    response = f"Mac command failed, sir: {e}"
+                    save_turn(user_input, response)
+                    return Result(response=response, ok=False, provider="mac_bridge")
 
         # ── Model self-update — instant, no LLM needed for the check itself ───
         if any(t in user_input.lower() for t in MODEL_UPDATE_TRIGGERS):
@@ -1440,8 +1456,12 @@ class Brain:
                 from core.memory import save_turn
                 save_turn(user_input, response)
                 return Result(response=response, ok=True, provider="model_updater")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Brain] Model updater failed: {e}")
+                from core.memory import save_turn
+                response = f"Model update check failed, sir: {e}"
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="model_updater")
 
         # ── Security-protocol activation requests — refuse honestly,
         # NEVER fabricate compliance. Confirmed live: "JARVIS run lockdown"
@@ -1634,7 +1654,15 @@ class Brain:
                 return Result(response=result["response"], ok=True,
                               model=result["model"], provider="stark_intelligence")
             except Exception as e:
-                print(f"[Brain] Maximum intelligence failed, falling back to normal pipeline: {e}")
+                # A request explicitly asking for maximum intelligence must
+                # never fall through to ordinary chat after the dedicated
+                # stack fails; doing so can produce a plausible generic
+                # answer that falsely looks like the requested deep run.
+                print(f"[Brain] Maximum intelligence failed: {e}")
+                response = f"Maximum intelligence run failed, sir: {e}"
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="stark_intelligence")
 
         # ── Instant responses (e.g. "what time is it") — no LLM needed, and
         # answered from the user's configured timezone rather than letting
