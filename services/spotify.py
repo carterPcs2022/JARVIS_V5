@@ -114,7 +114,8 @@ class SpotifyService:
     def get_auth_url(self) -> str:
         scopes = (
             "user-modify-playback-state user-read-playback-state "
-            "user-read-currently-playing streaming"
+            "user-read-currently-playing playlist-read-private "
+            "playlist-read-collaborative"
         )
         params = {
             "client_id": CLIENT_ID, "response_type": "code",
@@ -151,6 +152,92 @@ class SpotifyService:
 
     def now_playing(self) -> dict:
         return self._api("GET", "/me/player/currently-playing")
+
+    def get_playlists(self) -> list:
+        """Return the user's Spotify playlists, including private ones."""
+        token = self._get_access_token()
+        if not token:
+            return []
+        playlists = []
+        offset = 0
+        try:
+            while True:
+                r = httpx.get(
+                    "https://api.spotify.com/v1/me/playlists",
+                    params={"limit": 50, "offset": offset},
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=10,
+                )
+                if r.status_code >= 400:
+                    log.warning("Spotify playlist lookup failed: %s", r.text)
+                    return playlists
+                data = r.json()
+                items = data.get("items", [])
+                playlists.extend(
+                    {
+                        "id": item.get("id", ""),
+                        "name": item.get("name", ""),
+                        "uri": item.get("uri", ""),
+                        "url": (item.get("external_urls") or {}).get("spotify", ""),
+                    }
+                    for item in items if item.get("id") and item.get("uri")
+                )
+                if not data.get("next") or not items:
+                    break
+                offset += len(items)
+            return playlists
+        except Exception as e:
+            log.warning("Spotify playlist lookup error: %s", e)
+            return playlists
+
+    @staticmethod
+    def _normalize_playlist_name(value: str) -> str:
+        import re
+        return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+    def find_playlist(self, query: str) -> dict | None:
+        """Find the closest match among the user's playlists."""
+        import difflib
+        wanted = self._normalize_playlist_name(query)
+        if not wanted:
+            return None
+        playlists = self.get_playlists()
+        for playlist in playlists:
+            if self._normalize_playlist_name(playlist["name"]) == wanted:
+                return playlist
+        for playlist in playlists:
+            name = self._normalize_playlist_name(playlist["name"])
+            if wanted in name or name in wanted:
+                return playlist
+        best, best_score = None, 0.0
+        for playlist in playlists:
+            name = self._normalize_playlist_name(playlist["name"])
+            score = difflib.SequenceMatcher(None, wanted, name).ratio()
+            if score > best_score:
+                best, best_score = playlist, score
+        return best if best_score >= 0.72 else None
+
+    def play_playlist(self, query: str) -> dict:
+        """Play one of the user's playlists on an active Spotify device."""
+        token = self._get_access_token()
+        if not token:
+            return {"error": "Not authenticated"}
+        playlist = self.find_playlist(query)
+        if not playlist:
+            return {"error": f"Couldn't find your playlist: {query}"}
+        devices = self._get_devices()
+        if not devices:
+            return {"error": "No active Spotify device found",
+                    "fix": "Open Spotify on your phone or Mac first"}
+        resp = self._api(
+            "PUT", "/me/player/play",
+            data={"context_uri": playlist["uri"]},
+            params={"device_id": devices[0]["id"]},
+        )
+        if "error" in resp:
+            return resp
+        return {"playing": True, "playlist": playlist["name"],
+                "device": devices[0].get("name", "your device")}
 
     def play(self, query: str = "") -> dict:
         """Play on the user's active Spotify Connect device — JARVIS never
@@ -260,6 +347,13 @@ def parse_spotify_command(text: str) -> dict | None:
     if any(s in t for s in SPOTIFY_STOP):
         return {"action": "pause"}
 
+    if "playlist" in t and any(x in t for x in ("my playlist", "playlist called", "playlist named")):
+        query = t
+        for marker in ("my playlist", "playlist called", "playlist named"):
+            query = query.replace(marker, " ")
+        query = query.replace("on spotify", " ").replace("play", " ").strip()
+        return {"action": "playlist", "query": query}
+
     for trigger in SPOTIFY_PLAY:
         if trigger in t:
             query = t.split(trigger, 1)[-1].strip()
@@ -333,6 +427,9 @@ def handle_spotify_command(text: str) -> str | None:
         return "Volume down."
     if kind == "mood":
         return _format_play_response(spotify.play_mood(detected["mood"]))
+    if kind == "playlist":
+        return _format_play_response(spotify.play_playlist(detected["query"]))
+
     if kind == "play_or_pause":
         command = detected["command"]
         if command["action"] == "pause":
@@ -348,6 +445,8 @@ def _format_play_response(result: dict) -> str:
     response — never asks the user to confirm, just plays it and says so, or
     explains exactly why it couldn't (e.g. no active device)."""
     if result.get("playing"):
+        if result.get("playlist"):
+            return f"Playing your {result['playlist']} playlist on {result.get('device', 'your device')}, sir."
         track  = result.get("track", "")
         artist = result.get("artist", "")
         device = result.get("device", "your device")
