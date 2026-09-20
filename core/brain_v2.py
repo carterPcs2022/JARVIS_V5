@@ -98,7 +98,8 @@ SELF_CHECK_TRIGGERS = [
     "run self check", "run a self check", "self check", "self-check",
     "run self-check", "health check", "run health check",
     "system check", "systems check", "run diagnostics", "run a diagnostic",
-    "run diagnostic", "status check", "full diagnostic",
+    "run diagnostic", "status check", "full diagnostic", "status",
+    "system status", "jarvis status", "are you online", "are you operational",
 ]
 
 # "Jarvis any threats?" had no matching trigger, fell through to ordinary
