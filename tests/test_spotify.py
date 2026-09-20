@@ -51,3 +51,35 @@ def test_exchange_code_returns_none_on_failure(tmp_path):
          mock.patch("httpx.post", return_value=fake_response):
         result = spotify_mod.SpotifyService().exchange_code("bad-code")
         assert result is None
+
+
+def test_find_playlist_prefers_exact_user_playlist():
+    service = spotify_mod.SpotifyService()
+    playlists = [
+        {"id": "1", "name": "Gaming", "uri": "spotify:playlist:1"},
+        {"id": "2", "name": "Gaming Mix", "uri": "spotify:playlist:2"},
+    ]
+    with mock.patch.object(service, "get_playlists", return_value=playlists):
+        assert service.find_playlist("gaming") == playlists[0]
+
+
+def test_play_playlist_uses_playlist_context_uri():
+    service = spotify_mod.SpotifyService()
+    playlist = {"id": "1", "name": "Gaming", "uri": "spotify:playlist:1"}
+    with mock.patch.object(service, "_get_access_token", return_value="token"),          mock.patch.object(service, "find_playlist", return_value=playlist),          mock.patch.object(service, "_get_devices", return_value=[{"id": "device-1", "name": "iPhone"}]),          mock.patch.object(service, "_api", return_value={"ok": True}) as api:
+        result = service.play_playlist("gaming")
+        assert result["playing"] is True
+        assert result["playlist"] == "Gaming"
+        api.assert_called_once_with(
+            "PUT",
+            "/me/player/play",
+            data={"context_uri": "spotify:playlist:1"},
+            params={"device_id": "device-1"},
+        )
+
+
+def test_parse_spotify_playlist_command():
+    assert spotify_mod.parse_spotify_command("play my gaming playlist") == {
+        "action": "playlist",
+        "query": "my gaming",
+    }
