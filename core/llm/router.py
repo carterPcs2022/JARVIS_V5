@@ -757,8 +757,6 @@ COMMON_QUERIES = [
     "what time is it",
     "what's the date",
     "how are you",
-    "are you online",
-    "status",
     "good morning",
 ]
 
