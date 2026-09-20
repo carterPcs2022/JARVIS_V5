@@ -112,8 +112,15 @@ def full_diagnostic() -> dict:
     elif not groq_ok:
         warnings.append("⚠️ Groq unavailable (fallback active)")
 
-    state.update({"groq_available": groq_ok, "ollama_available": ollama_ok,
-                  "status": "online" if (groq_ok or ollama_ok) else "degraded"})
+    # Anthropic can be the only usable provider on a cloud deployment,
+    # so it must participate in the headline availability decision.
+    state.update({
+        "groq_available": groq_ok,
+        "ollama_available": ollama_ok,
+        "anthropic_available": anthropic_ok,
+        "status": "online" if (groq_ok or ollama_ok or anthropic_ok
+                               or state.any_model_available("groq")) else "degraded",
+    })
 
     # Protocol status
     lockdown_active = friday_active = False
