@@ -2,6 +2,7 @@
 from fastapi import FastAPI, BackgroundTasks, Depends, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 import os
 import time
@@ -855,7 +856,11 @@ async def chat_simple(body: dict, request: Request):
     msg = body.get("message", "")
     if not msg:
         return {"error": "No message"}
-    return brain.process_dict(msg)
+    # Brain.process_dict() is synchronous and can perform LLM/network work.
+    # Running it directly inside this async route blocks Uvicorn's event
+    # loop and can stall unrelated requests. Keep the local-only endpoint
+    # non-blocking just like the authenticated chat route.
+    return await run_in_threadpool(brain.process_dict, msg)
 
 
 # Extra routes that need BackgroundTasks or are too small for their own file
