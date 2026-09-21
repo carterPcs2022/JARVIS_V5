@@ -1,6 +1,8 @@
 """services/evening_routine.py — evening wind-down: day summary, tomorrow
 preview, unfinished tasks, night mode, calm music."""
 
+import os
+
 
 class EveningRoutine:
 
@@ -36,12 +38,16 @@ class EveningRoutine:
         except Exception:
             pass
 
-        try:
-            from services.spotify import spotify
-            if spotify.is_connected():
-                spotify.play_mood("sleep")
-        except Exception:
-            pass
+        # Spotify playback is intentionally user-initiated. The evening
+        # routine must never start music just because JARVIS is connected to
+        # Spotify; playback control belongs to an explicit user command.
+        if os.getenv("JARVIS_AUTONOMOUS_SPOTIFY", "").lower() == "true":
+            try:
+                from services.spotify import spotify
+                if spotify.is_connected():
+                    spotify.play_mood("sleep")
+            except Exception:
+                pass
 
         return {"message": message, "status": "evening_complete"}
 
