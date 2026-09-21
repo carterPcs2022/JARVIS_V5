@@ -37,6 +37,40 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
 THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
 
 
+def _choice_test_enabled() -> bool:
+    """Developer-only manual UI test; disabled unless explicitly enabled in the environment."""
+    return os.getenv("JARVIS_CHOICE_TEST_ENABLED", "false").lower() == "true"
+
+
+async def _run_choice_test(websocket: WebSocket) -> bool:
+    """Send a harmless pending-choice payload through the real chat WS path."""
+    if not _choice_test_enabled():
+        return False
+    from core.ask_user_choice import propose
+    pending = propose([{
+        "question": "Choice-system test: which option should JARVIS use?",
+        "options": ["Option A", "Option B", "Cancel"],
+        "allow_multiple": False,
+    }])
+    if pending is None:
+        await websocket.send_json({
+            "type": "response",
+            "response": "Choice test could not create a pending choice.",
+            "model": "", "provider": "choice_test", "latency_ms": 0,
+            "pending_choice": None,
+        })
+        return True
+    await websocket.send_json({
+        "type": "response",
+        "response": "Choice-system test ready. Pick an option below.",
+        "model": "", "provider": "choice_test", "latency_ms": 0,
+        "pending_choice": pending,
+        "meta": {"action": "choice_test", "complexity": "simple", "mode": "test",
+                 "was_rewritten": False, "issues": []},
+    })
+    return True
+
+
 async def _apply_threat_classification(loop: asyncio.AbstractEventLoop, msg: str,
                                         classify_task: "asyncio.Future") -> str | None:
     from services.threat_detector import classifier_failed_result
@@ -94,6 +128,8 @@ async def ws_chat(websocket: WebSocket):
             data = json.loads(await websocket.receive_text())
             msg = data.get("message", "").strip()
             if not msg:
+                continue
+            if msg.lower() == "choice test" and await _run_choice_test(websocket):
                 continue
             from services.combat_mode import combat_mode
             if combat_mode.is_engaged():
