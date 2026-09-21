@@ -222,6 +222,10 @@ class SpotifyService:
             log.warning("Spotify code exchange error: %s", e)
             return None
 
+    def validate_oauth_state(self, state: str | None) -> bool:
+        """Validate the signed OAuth state for the Spotify callback."""
+        return validate_oauth_state(state)
+
     def now_playing(self) -> dict:
         return self._api("GET", "/me/player/currently-playing")
 
