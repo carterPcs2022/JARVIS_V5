@@ -217,7 +217,7 @@ class SpotifyService:
                 best, best_score = playlist, score
         return best if best_score >= 0.72 else None
 
-    def play_playlist(self, query: str) -> dict:
+    def play_playlist(self, query: str, device_id: str | None = None) -> dict:
         """Play one of the user's playlists on an active Spotify device."""
         token = self._get_access_token()
         if not token:
@@ -228,18 +228,24 @@ class SpotifyService:
         devices = self._get_devices()
         if not devices:
             return {"error": "No active Spotify device found",
-                    "fix": "Open Spotify on your phone or Mac first"}
+                    "fix": "Open Spotify on your iPhone first so Spotify exposes it as a Connect device."}
+        if device_id:
+            device = next((d for d in devices if d.get("id") == device_id), None)
+            if device is None:
+                return {"error": "The selected Spotify device is no longer available. Open Spotify on your iPhone and try again."}
+        else:
+            device = devices[0]
         resp = self._api(
             "PUT", "/me/player/play",
             data={"context_uri": playlist["uri"]},
-            params={"device_id": devices[0]["id"]},
+            params={"device_id": device["id"]},
         )
         if "error" in resp:
             return resp
         return {"playing": True, "playlist": playlist["name"],
-                "device": devices[0].get("name", "your device")}
+                "device": device.get("name", "your device")}
 
-    def play(self, query: str = "") -> dict:
+    def play(self, query: str = "", device_id: str | None = None) -> dict:
         """Play on the user's active Spotify Connect device — JARVIS never
         streams audio itself (Render has no speakers to play through and no
         access to the user's), it just tells Spotify's own service which
@@ -255,8 +261,13 @@ class SpotifyService:
                 "fix": "Open Spotify on your iPhone first so Spotify exposes it as a Connect device.",
             }
 
-        device = devices[0]
-        device_id = device["id"]
+        if device_id:
+            device = next((d for d in devices if d.get("id") == device_id), None)
+            if device is None:
+                return {"error": "The selected Spotify device is no longer available. Open Spotify on your iPhone and try again."}
+        else:
+            device = devices[0]
+            device_id = device["id"]
 
         if query:
             result = self.search(query)
@@ -278,6 +289,10 @@ class SpotifyService:
         if "error" in resp:
             return resp
         return {"playing": True, "device": device.get("name", "your device")}
+
+    def get_devices(self) -> list:
+        """Return safe Spotify Connect devices suitable for a user choice UI."""
+        return self._get_devices()
 
     def _get_devices(self) -> list:
         """List available Spotify Connect devices, preferring the user's iPhone.
@@ -434,11 +449,7 @@ def is_spotify_command(text: str) -> bool:
 
 
 def handle_spotify_command(text: str) -> str | None:
-    """Returns a response string if `text` is a Spotify command, else None.
-    Detection and execution are split (see detect_spotify_command()) so the
-    "is this a match" question can be answered without side effects; this
-    function is still the only place that actually calls the mutating
-    spotify.* methods."""
+    """Execute a Spotify command, asking the user to choose a device when needed."""
     detected = detect_spotify_command(text)
     if not detected:
         return None
@@ -458,17 +469,40 @@ def handle_spotify_command(text: str) -> str | None:
         return "Volume down."
     if kind == "mood":
         return _format_play_response(spotify.play_mood(detected["mood"]))
+
+    command = detected.get("command", {})
+    if kind in ("playlist", "play_or_pause") and command.get("action") == "pause":
+        spotify.pause()
+        return "Music paused."
+
+    if kind not in ("playlist", "play_or_pause"):
+        return None
+
+    query = command.get("query", "")
+    devices = spotify.get_devices()
+    if not devices:
+        return _format_play_response({"error": "No active Spotify device found"})
+
+    if len(devices) > 1:
+        from core.ask_user_choice import annotate_pending, propose
+        options = [d.get("name", "Unnamed Spotify device") for d in devices]
+        pending = propose([{
+            "question": "Which Spotify device should I use?",
+            "options": options,
+            "allow_multiple": False,
+        }])
+        if pending:
+            annotate_pending({
+                "action": "spotify_device_selection",
+                "spotify_command": command,
+                "device_ids": {name: d["id"] for name, d in zip(options, devices)},
+            })
+            return "I found multiple Spotify devices. Which one should I use, sir?"
+
+    device_id = devices[0]["id"]
     if kind == "playlist":
-        return _format_play_response(spotify.play_playlist(detected["query"]))
-
-    if kind == "play_or_pause":
-        command = detected["command"]
-        if command["action"] == "pause":
-            spotify.pause()
-            return "Music paused."
-        return _format_play_response(spotify.play(command["query"]))
-
-    return None
+        return _format_play_response(spotify.play_playlist(query, device_id=device_id))
+    return _format_play_response(spotify.play(query, device_id=device_id))
 
 
 def _format_play_response(result: dict) -> str:
