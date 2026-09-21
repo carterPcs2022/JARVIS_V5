@@ -25,6 +25,12 @@ async def spotify_callback(request: Request):
     """Spotify OAuth callback — reads code from query params."""
     code = request.query_params.get("code")
     error = request.query_params.get("error")
+    state = request.query_params.get("state")
+
+    from services.spotify import spotify
+
+    if not spotify.validate_oauth_state(state):
+        return {"error": "Invalid or expired Spotify OAuth state. Restart the authorization flow at /stark/spotify/auth."}
 
     if error:
         return {"error": f"Spotify auth denied: {error}"}
@@ -38,7 +44,6 @@ async def spotify_callback(request: Request):
             "fix": "Check redirect URI matches exactly in Spotify dashboard",
         }
 
-    from services.spotify import spotify
     refresh_token = spotify.exchange_code(code)
 
     if refresh_token:
