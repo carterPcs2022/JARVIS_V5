@@ -11,15 +11,15 @@ doesn't start audio out of nowhere on a device with nothing open.
 1. Go to [developer.spotify.com](https://developer.spotify.com/dashboard).
 2. Create an app — name it JARVIS (or anything).
 3. Add a redirect URI:
-   - Local: `http://localhost:8000/stark/spotify/callback`
+   - Local: `http://127.0.0.1:8000/stark/spotify/callback`
    - Render: `https://jarvis-v5-sl2y.onrender.com/stark/spotify/callback`
 4. Copy the Client ID and Client Secret into `.env`:
    ```
    SPOTIFY_CLIENT_ID=...
    SPOTIFY_CLIENT_SECRET=...
-   SPOTIFY_REDIRECT_URI=http://localhost:8000/stark/spotify/callback
+   SPOTIFY_REDIRECT_URI=https://jarvis-v5-sl2y.onrender.com/stark/spotify/callback
    ```
-   (Match `SPOTIFY_REDIRECT_URI` to whichever redirect URI you registered.)
+   (For Render, use the HTTPS URI above exactly. Spotify requires an exact match and does not allow `localhost`.)
 5. Restart JARVIS.
 6. Open `/stark/spotify/auth` in a browser and approve.
 7. Done — say "JARVIS play some focus music."
