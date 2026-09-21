@@ -463,17 +463,19 @@ def parse_spotify_command(text: str) -> dict | None:
     if any(s in t for s in SPOTIFY_STOP):
         return {"action": "pause"}
 
-    if "playlist" in t and (
-        "my playlist" in t
-        or "playlist called" in t
-        or "playlist named" in t
-        or ("play " in t and t.endswith("playlist"))
-    ):
+    if "playlist" in t:
+        # Explicit playlist wording must always use the user's playlist
+        # library, never the track-search path.
         query = t
-        for marker in ("playlist called", "playlist named", "my playlist"):
+        for marker in (
+            "playlist called", "playlist named", "my playlist",
+            "the playlist", "playlist",
+        ):
             query = query.replace(marker, " ")
-        query = query.replace("on spotify", " ").replace("play", " ").strip()
-        query = query.removesuffix(" playlist").strip()
+        query = query.replace("on spotify", " ").replace("spotify", " ")
+        for marker in ("start playing", "start", "put on", "play", "begin playing", "begin"):
+            query = query.replace(marker, " ")
+        query = " ".join(query.split()).strip()
         return {"action": "playlist", "query": query}
 
     for trigger in SPOTIFY_PLAY:
@@ -580,7 +582,7 @@ def handle_spotify_command(text: str) -> str | None:
             return "I found multiple Spotify devices. Which one should I use, sir?"
 
     device_id = devices[0]["id"]
-    if kind == "playlist":
+    if command.get("action") == "playlist":
         return _format_play_response(spotify.play_playlist(query, device_id=device_id))
     return _format_play_response(spotify.play(query, device_id=device_id))
 
