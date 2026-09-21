@@ -146,6 +146,16 @@ def clear_pending() -> None:
     global _pending
     _pending = None
 
+def annotate_pending(metadata: dict[str, Any]) -> dict[str, Any] | None:
+    """Attach internal metadata to the live pending choice without changing its public shape."""
+    global _pending
+    if _pending is None or not isinstance(metadata, dict):
+        return None
+    _pending.update(metadata)
+    return dict(_pending)
+
+
+
 
 def _flat_options(pending: dict[str, Any]) -> list[tuple[int, str, str]]:
     """(question_index, option_text) for every option, in a single flat
