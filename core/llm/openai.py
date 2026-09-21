@@ -2,6 +2,8 @@
 core/llm/openai.py — Groq client (OpenAI-compatible endpoint).
 Named openai.py because Groq uses the OpenAI API format exactly.
 """
+import json
+import os
 import re
 import httpx
 from typing import AsyncIterator
@@ -9,10 +11,12 @@ from config.settings import GROQ_API_KEY, GROQ_MODEL, GROQ_BASE_URL
 
 TIMEOUT = 30
 
-# Matches Groq's rate-limit error body, e.g. "Please try again in
-# 43m2.847s." or "Please try again in 4.521s." — used when the response
-# doesn't carry a numeric Retry-After header (seen in practice for
-# tokens-per-day limits, unlike the shorter-lived per-minute ones).
+# Groq can reject an oversized HTTP request with 413 before model inference.
+# Keep a safety ceiling below typical proxy/request-body limits while leaving
+# the model's much larger context window available to normal calls.
+GROQ_MAX_REQUEST_BYTES = int(os.getenv("GROQ_MAX_REQUEST_BYTES", "450000"))
+GROQ_MAX_MESSAGE_CHARS = int(os.getenv("GROQ_MAX_MESSAGE_CHARS", "120000"))
+
 _RETRY_AFTER_BODY_RE = re.compile(
     r"try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.I
 )
@@ -37,33 +41,105 @@ def _parse_retry_after(response: httpx.Response) -> float | None:
 
 
 class GroqRateLimitError(Exception):
-    """429 from Groq. Carries retry_after (seconds, from the Retry-After
-    header, or parsed from Groq's error message body when no header is
-    sent) when available — a TPM (tokens-per-minute) limit resets in
-    single-digit seconds and a TPD (tokens-per-day) limit can reset 40+
-    minutes out; this lets callers (services/circuit_breaker.py) honor the
-    real wait instead of retrying against a fixed cooldown that has no idea
-    which one was hit."""
+    """429 from Groq, carrying the server-provided retry delay when available."""
     def __init__(self, message: str, retry_after: float | None = None):
         super().__init__(message)
         self.retry_after = retry_after
 
-# Connect-timeout, not a flat total-request timeout: a fixed few-second cap
-# on the *whole* call would kill the "research" tier's own legitimate
-# generations (up to 8192 output tokens — even at Groq's speed that can
-# take longer than a few seconds to fully stream). A tight connect timeout
-# still gets the actual goal (fail fast if the connection itself is
-# hanging/broken) without cutting off an already-in-progress, working
-# response.
+
+class GroqPayloadTooLargeError(Exception):
+    """413 from Groq or a client-side payload that is too large.
+
+    The router can treat this as a provider/request-size failure and fall
+    back cleanly instead of turning it into a misleading application result.
+    """
+    def __init__(self, message: str, request_bytes: int | None = None):
+        super().__init__(message)
+        self.request_bytes = request_bytes
+
+
+def _message_text(message: dict) -> str:
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content
+    try:
+        return json.dumps(content, ensure_ascii=False)
+    except Exception:
+        return str(content)
+
+
+def _compact_messages(messages: list[dict]) -> tuple[list[dict], int]:
+    """Bound Groq request size while preserving system + newest conversation.
+
+    JARVIS already budgets its assembled context, but a later pipeline stage
+    can add system/tool/history content. This is the final provider boundary,
+    so it must enforce a real byte limit on the JSON body rather than relying
+    only on approximate token counts.
+    """
+    normalized = [dict(m) for m in messages]
+    raw = json.dumps(
+        {"model": GROQ_MODEL, "messages": normalized},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    if len(raw) <= GROQ_MAX_REQUEST_BYTES:
+        return normalized, len(raw)
+
+    # Preserve the system prompt, the newest user message, and then the most
+    # recent messages that fit. Never silently replace the newest user input.
+    system = [m for m in normalized if m.get("role") == "system"][:1]
+    newest_user_index = next(
+        (i for i in range(len(normalized) - 1, -1, -1)
+         if normalized[i].get("role") == "user"),
+        None,
+    )
+    newest_user = [normalized[newest_user_index]] if newest_user_index is not None else []
+
+    selected = []
+    seen = set()
+    for m in system + newest_user:
+        marker = id(m)
+        if marker not in seen:
+            selected.append(m)
+            seen.add(marker)
+
+    # Add recent messages from the end, oldest-to-newest ordering restored.
+    for m in reversed(normalized):
+        if id(m) in seen:
+            continue
+        candidate = [*selected, m]
+        size = len(json.dumps(
+            {"model": GROQ_MODEL, "messages": candidate},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"))
+        if size > GROQ_MAX_REQUEST_BYTES:
+            continue
+        selected.append(m)
+        seen.add(id(m))
+
+    # Restore original ordering.
+    selected.sort(key=lambda m: normalized.index(m))
+
+    # If one individual message is itself huge, trim only its content.
+    for m in selected:
+        text = _message_text(m)
+        if len(text) <= GROQ_MAX_MESSAGE_CHARS:
+            continue
+        clipped = text[:GROQ_MAX_MESSAGE_CHARS] + "\n[provider-boundary truncation]"
+        m["content"] = clipped
+
+    selected.sort(key=lambda m: normalized.index(m))
+    size = len(json.dumps(
+        {"model": GROQ_MODEL, "messages": selected},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8"))
+    return selected, size
+
+
 _TIMEOUT_CONFIG = httpx.Timeout(connect=3.0, read=TIMEOUT, write=5.0, pool=5.0)
 
-# Module-level clients, reused across every call instead of opening a
-# fresh TCP+TLS connection per request — Groq is the primary provider,
-# hit on nearly every chat message, so keep-alive connection reuse here
-# is a real, cheap latency win (not needed for Anthropic/Ollama, which
-# are called far less often). httpx.Client is documented as safe for
-# concurrent use across threads, so a single shared instance is fine
-# even though chat()/embed() can be called from multiple request threads.
 _CLIENT = httpx.Client(
     timeout=_TIMEOUT_CONFIG,
     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=30),
@@ -72,9 +148,6 @@ _ASYNC_CLIENT: httpx.AsyncClient | None = None
 
 
 def _get_async_client() -> httpx.AsyncClient:
-    # Created lazily on first use (inside an async context) rather than at
-    # import time, so it binds to whatever event loop is actually running
-    # instead of risking construction before one exists.
     global _ASYNC_CLIENT
     if _ASYNC_CLIENT is None:
         _ASYNC_CLIENT = httpx.AsyncClient(
@@ -90,21 +163,28 @@ async def stream_chat(messages: list[dict], max_tokens: int = 1024,
     if not GROQ_API_KEY:
         raise ValueError("GROQ_API_KEY not set")
 
+    messages, request_bytes = _compact_messages(messages)
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type":  "application/json",
+        "Content-Type": "application/json",
     }
     payload = {
-        "model":       GROQ_MODEL,
-        "messages":    messages,
-        "max_tokens":  max_tokens,
+        "model": GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
         "temperature": temperature,
-        "stream":      True,
+        "stream": True,
     }
 
+    print(f"[Groq] stream request: {request_bytes} bytes, {len(messages)} messages")
     c = _get_async_client()
     async with c.stream("POST", f"{GROQ_BASE_URL}/chat/completions",
                         json=payload, headers=headers) as resp:
+        if resp.status_code == 413:
+            raise GroqPayloadTooLargeError(
+                f"Groq rejected streaming payload (HTTP 413, {request_bytes} bytes)",
+                request_bytes,
+            )
         resp.raise_for_status()
         async for line in resp.aiter_lines():
             if not line.startswith("data:"):
@@ -112,7 +192,6 @@ async def stream_chat(messages: list[dict], max_tokens: int = 1024,
             chunk = line[5:].strip()
             if chunk == "[DONE]":
                 break
-            import json
             try:
                 data = json.loads(chunk)
                 token = data["choices"][0]["delta"].get("content", "")
@@ -127,31 +206,36 @@ def chat(messages: list[dict], max_tokens: int = 1024,
     if not GROQ_API_KEY:
         raise ValueError("GROQ_API_KEY not set")
 
+    messages, request_bytes = _compact_messages(messages)
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type":  "application/json",
+        "Content-Type": "application/json",
     }
     payload = {
-        "model":       model or GROQ_MODEL,
-        "messages":    messages,
-        "max_tokens":  max_tokens,
+        "model": model or GROQ_MODEL,
+        "messages": messages,
+        "max_tokens": max_tokens,
         "temperature": temperature,
     }
 
     r = _CLIENT.post(f"{GROQ_BASE_URL}/chat/completions",
                      json=payload, headers=headers)
 
-    # Fail fast on 429 instead of sleeping through Groq's retry-after
-    # (previously up to 30s, twice — a single request could block for
-    # a minute before core/llm/router.py's chat() cascade ever got a
-    # chance to fall back to Ollama). Raising GroqRateLimitError (not just
-    # relying on raise_for_status()'s generic httpx.HTTPStatusError) carries
-    # the real Retry-After value through to services/circuit_breaker.py, so
-    # a tokens-per-day exhaustion (resets in 40+ minutes) isn't treated the
-    # same as a tokens-per-minute one (resets in seconds) — check_groq() in
-    # core/llm/router.py catches this specifically alongside
-    # httpx.HTTPStatusError and still treats a 429 as "up, just rate
-    # limited" rather than down.
+    if r.status_code == 413:
+        try:
+            detail = r.json().get("error", {}).get("message", "")
+        except Exception:
+            detail = ""
+        print(
+            f"[Groq] Payload too large — {request_bytes} bytes"
+            + (f": {detail}" if detail else "")
+        )
+        raise GroqPayloadTooLargeError(
+            f"413 payload too large for Groq ({request_bytes} bytes)"
+            + (f": {detail}" if detail else ""),
+            request_bytes,
+        )
+
     if r.status_code == 429:
         retry_after = _parse_retry_after(r)
         print(f"[Groq] Rate limited — failing fast "
@@ -164,8 +248,8 @@ def chat(messages: list[dict], max_tokens: int = 1024,
 
     return {
         "content": data["choices"][0]["message"]["content"],
-        "model":   data.get("model", GROQ_MODEL),
-        "usage":   data.get("usage", {}),
+        "model": data.get("model", GROQ_MODEL),
+        "usage": data.get("usage", {}),
     }
 
 
@@ -176,7 +260,7 @@ def embed(text: str) -> list[float] | None:
     try:
         headers = {
             "Authorization": f"Bearer {GROQ_API_KEY}",
-            "Content-Type":  "application/json",
+            "Content-Type": "application/json",
         }
         payload = {"model": "text-embedding-ada-002", "input": text}
         r = _CLIENT.post(f"{GROQ_BASE_URL}/embeddings",
@@ -187,10 +271,6 @@ def embed(text: str) -> list[float] | None:
         pass
     return None
 
-
-# ── LLMProvider adapter (core/interfaces/llm_provider.py) ─────────────────────
-# Named GroqProvider (not OpenAIProvider) to match what this module actually
-# talks to — see the module docstring above.
 
 import asyncio
 from core.interfaces.llm_provider import LLMProvider, GenerateRequest, ModelResponse
@@ -203,8 +283,6 @@ class GroqProvider(LLMProvider):
         return bool(GROQ_API_KEY)
 
     async def generate(self, request: GenerateRequest) -> ModelResponse:
-        # Groq is OpenAI-format: a system message (if any) belongs inline in
-        # `messages`, not passed separately like Anthropic's client expects.
         messages = list(request.messages)
         if request.system:
             messages = [{"role": "system", "content": request.system}] + messages
