@@ -49,7 +49,7 @@ async def _run_choice_test(websocket: WebSocket) -> bool:
     from core.ask_user_choice import propose
     pending = propose([{
         "question": "Choice-system test: which option should JARVIS use?",
-        "options": ["Option A", "Option B", "Cancel"],
+        "options": ["Test A", "Test B", "Cancel"],
         "allow_multiple": False,
     }])
     if pending is None:
@@ -60,6 +60,7 @@ async def _run_choice_test(websocket: WebSocket) -> bool:
             "pending_choice": None,
         })
         return True
+    pending["choice_test"] = True
     await websocket.send_json({
         "type": "response",
         "response": "Choice-system test ready. Pick an option below.",
@@ -130,6 +131,28 @@ async def ws_chat(websocket: WebSocket):
             if not msg:
                 continue
             if msg.lower() == "choice test" and await _run_choice_test(websocket):
+                continue
+            from core.ask_user_choice import clear_pending, get_pending, resolve_reply
+            _pending = get_pending()
+            if _pending is not None and _pending.get("choice_test"):
+                _resolved = resolve_reply(_pending, msg)
+                clear_pending()
+                if _resolved:
+                    await websocket.send_json({
+                        "type": "response",
+                        "response": f"Choice test passed — JARVIS received your selection.\n\n{_resolved}",
+                        "model": "", "provider": "choice_test", "latency_ms": 0,
+                        "pending_choice": None,
+                        "meta": {"action": "choice_test", "selection_received": True},
+                    })
+                else:
+                    await websocket.send_json({
+                        "type": "response",
+                        "response": "Choice test received the reply, but it did not match an option.",
+                        "model": "", "provider": "choice_test", "latency_ms": 0,
+                        "pending_choice": None,
+                        "meta": {"action": "choice_test", "selection_received": False},
+                    })
                 continue
             from services.combat_mode import combat_mode
             if combat_mode.is_engaged():
