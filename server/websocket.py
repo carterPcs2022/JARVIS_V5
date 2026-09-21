@@ -46,7 +46,7 @@ async def _run_choice_test(websocket: WebSocket) -> bool:
     """Send a harmless pending-choice payload through the real chat WS path."""
     if not _choice_test_enabled():
         return False
-    from core.ask_user_choice import propose
+    from core.ask_user_choice import annotate_pending, propose
     pending = propose([{
         "question": "Choice-system test: which option should JARVIS use?",
         "options": ["Test A", "Test B", "Cancel"],
@@ -60,7 +60,7 @@ async def _run_choice_test(websocket: WebSocket) -> bool:
             "pending_choice": None,
         })
         return True
-    pending["choice_test"] = True
+    pending = annotate_pending({"choice_test": True}) or pending
     await websocket.send_json({
         "type": "response",
         "response": "Choice-system test ready. Pick an option below.",
