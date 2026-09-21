@@ -3,9 +3,12 @@
 import os
 import time
 import json
+import hashlib
+import hmac
 import logging
+import secrets
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -15,7 +18,74 @@ log = logging.getLogger(__name__)
 
 CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI", "http://localhost:8000/stark/spotify/callback")
+REDIRECT_URI = os.getenv(
+    "SPOTIFY_REDIRECT_URI",
+    "http://127.0.0.1:8000/stark/spotify/callback",
+).strip()
+_OAUTH_STATE_TTL = 600
+
+def _validated_redirect_uri() -> str:
+    """Return a Spotify-acceptable redirect URI and reject unsafe production config."""
+    uri = REDIRECT_URI.strip()
+    parsed = urlparse(uri)
+    host = (parsed.hostname or "").lower()
+    cloud = bool(
+        os.getenv("RENDER")
+        or os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or os.getenv("RAILWAY_ENVIRONMENT")
+    )
+
+    if not uri or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("SPOTIFY_REDIRECT_URI is missing or invalid.")
+
+    if host == "localhost":
+        raise RuntimeError(
+            "SPOTIFY_REDIRECT_URI uses localhost, which Spotify no longer allows. "
+            "Use an HTTPS Render callback in production or 127.0.0.1 for local development."
+        )
+
+    if cloud and parsed.scheme != "https":
+        raise RuntimeError(
+            "SPOTIFY_REDIRECT_URI must use HTTPS in cloud deployments."
+        )
+
+    return uri
+
+def _make_oauth_state() -> str:
+    """Create a short-lived signed OAuth state value without storing session data."""
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_urlsafe(24)
+    payload = f"{timestamp}.{nonce}"
+    signature = hmac.new(
+        CLIENT_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{payload}.{signature}"
+
+def validate_oauth_state(state: str | None) -> bool:
+    """Validate a signed OAuth state value and reject expired/tampered values."""
+    if not state or not CLIENT_SECRET:
+        return False
+    parts = state.split(".", 2)
+    if len(parts) != 3:
+        return False
+    timestamp, nonce, signature = parts
+    try:
+        issued = int(timestamp)
+    except ValueError:
+        return False
+    if abs(time.time() - issued) > _OAUTH_STATE_TTL:
+        return False
+    payload = f"{timestamp}.{nonce}"
+    expected = hmac.new(
+        CLIENT_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
 # Same durability gap Calendar OAuth already solved (see
 # server/routes/calendar_auth.py): the access/refresh token pair only ever
 # lived in TOKEN_FILE, which is on Render's ephemeral filesystem and is
@@ -117,9 +187,11 @@ class SpotifyService:
             "user-read-currently-playing playlist-read-private "
             "playlist-read-collaborative"
         )
+        redirect_uri = _validated_redirect_uri()
         params = {
             "client_id": CLIENT_ID, "response_type": "code",
-            "redirect_uri": REDIRECT_URI, "scope": scopes,
+            "redirect_uri": redirect_uri, "scope": scopes,
+            "state": _make_oauth_state(),
         }
         return f"https://accounts.spotify.com/authorize?{urlencode(params)}"
 
@@ -132,7 +204,7 @@ class SpotifyService:
                 "https://accounts.spotify.com/api/token",
                 data={
                     "grant_type": "authorization_code", "code": code,
-                    "redirect_uri": REDIRECT_URI, "client_id": CLIENT_ID,
+                    "redirect_uri": _validated_redirect_uri(), "client_id": CLIENT_ID,
                     "client_secret": CLIENT_SECRET,
                 },
                 timeout=10,
