@@ -418,9 +418,10 @@ def detect_spotify_command(text: str) -> dict | None:
     twice for the same message."""
     t = text.lower()
 
-    if not spotify.is_connected():
-        return None  # let the LLM handle it normally rather than claim music control that isn't set up
-
+    # Always claim explicit Spotify commands here. If OAuth is unavailable,
+    # handle_spotify_command() returns a clear setup/auth message instead of
+    # falling through to the legacy Mac dispatcher (which cannot reach the
+    # user's iPhone).
     if any(w in t for w in ("next", "skip")):
         return {"kind": "next"}
 
@@ -453,6 +454,9 @@ def handle_spotify_command(text: str) -> str | None:
     detected = detect_spotify_command(text)
     if not detected:
         return None
+
+    if not spotify.is_connected():
+        return "Spotify isn't connected to JARVIS yet, sir. Visit /stark/spotify/auth to connect it."
 
     kind = detected["kind"]
     if kind == "next":
