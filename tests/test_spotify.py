@@ -83,3 +83,31 @@ def test_parse_spotify_playlist_command():
         "action": "playlist",
         "query": "my gaming",
     }
+
+
+def test_redirect_uri_rejects_localhost():
+    with mock.patch.object(spotify_mod, "REDIRECT_URI", "http://localhost:8000/stark/spotify/callback"):
+        try:
+            spotify_mod._validated_redirect_uri()
+        except RuntimeError as exc:
+            assert "localhost" in str(exc)
+        else:
+            raise AssertionError("localhost redirect URI must be rejected")
+
+
+def test_redirect_uri_requires_https_in_render():
+    with mock.patch.object(spotify_mod, "REDIRECT_URI", "http://jarvis-v5-sl2y.onrender.com/stark/spotify/callback"), \
+         mock.patch.dict("os.environ", {"RENDER": "true"}, clear=False):
+        try:
+            spotify_mod._validated_redirect_uri()
+        except RuntimeError as exc:
+            assert "HTTPS" in str(exc)
+        else:
+            raise AssertionError("cloud HTTP redirect URI must be rejected")
+
+
+def test_oauth_state_round_trip_and_tamper_detection():
+    with mock.patch.object(spotify_mod, "CLIENT_SECRET", "test-client-secret"):
+        state = spotify_mod._make_oauth_state()
+        assert spotify_mod.validate_oauth_state(state) is True
+        assert spotify_mod.validate_oauth_state(state + "x") is False
