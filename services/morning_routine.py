@@ -84,12 +84,16 @@ class MorningRoutine:
         except Exception:
             pass
 
-        try:
-            from services.spotify import spotify
-            if spotify.is_connected():
-                spotify.play_mood("happy")
-        except Exception:
-            pass
+        # Spotify playback is intentionally user-initiated. The morning
+        # routine must never start music just because JARVIS is connected to
+        # Spotify; playback control belongs to an explicit user command.
+        if os.getenv("JARVIS_AUTONOMOUS_SPOTIFY", "").lower() == "true":
+            try:
+                from services.spotify import spotify
+                if spotify.is_connected():
+                    spotify.play_mood("happy")
+            except Exception:
+                pass
 
         try:
             self._push_to_phone(full_brief)
