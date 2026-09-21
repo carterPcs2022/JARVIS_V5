@@ -81,8 +81,36 @@ def test_play_playlist_uses_playlist_context_uri():
 def test_parse_spotify_playlist_command():
     assert spotify_mod.parse_spotify_command("play my gaming playlist") == {
         "action": "playlist",
-        "query": "my gaming",
+        "query": "gaming",
     }
+    assert spotify_mod.parse_spotify_command("play my playlist Breakup") == {
+        "action": "playlist",
+        "query": "breakup",
+    }
+    assert spotify_mod.parse_spotify_command("put on the Breakup playlist") == {
+        "action": "playlist",
+        "query": "breakup",
+    }
+
+
+def test_find_playlist_does_not_fuzzy_match_unrelated_playlist():
+    service = spotify_mod.SpotifyService()
+    playlists = [
+        {"id": "1", "name": "Breakup Songs", "uri": "spotify:playlist:1"},
+        {"id": "2", "name": "Workout", "uri": "spotify:playlist:2"},
+    ]
+    with mock.patch.object(service, "get_playlists", return_value=playlists):
+        assert service.find_playlist("breakup") is None
+
+
+def test_find_playlist_matches_normalized_exact_name():
+    service = spotify_mod.SpotifyService()
+    playlists = [
+        {"id": "1", "name": "Breakup 💔", "uri": "spotify:playlist:1"},
+        {"id": "2", "name": "Workout", "uri": "spotify:playlist:2"},
+    ]
+    with mock.patch.object(service, "get_playlists", return_value=playlists):
+        assert service.find_playlist("breakup") == playlists[0]
 
 
 def test_redirect_uri_rejects_localhost():
