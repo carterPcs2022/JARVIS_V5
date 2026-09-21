@@ -272,26 +272,27 @@ class SpotifyService:
         return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
     def find_playlist(self, query: str) -> dict | None:
-        """Find the closest match among the user's playlists."""
-        import difflib
+        """Find the user's playlist without guessing a different playlist.
+
+        Playlist playback is intentionally stricter than track search: a
+        fuzzy match can silently start the wrong playlist. Natural-language
+        cleanup happens in parse_spotify_command(), while this function only
+        accepts an exact normalized playlist-name match.
+        """
         wanted = self._normalize_playlist_name(query)
         if not wanted:
             return None
+
         playlists = self.get_playlists()
-        for playlist in playlists:
-            if self._normalize_playlist_name(playlist["name"]) == wanted:
-                return playlist
-        for playlist in playlists:
-            name = self._normalize_playlist_name(playlist["name"])
-            if wanted in name or name in wanted:
-                return playlist
-        best, best_score = None, 0.0
-        for playlist in playlists:
-            name = self._normalize_playlist_name(playlist["name"])
-            score = difflib.SequenceMatcher(None, wanted, name).ratio()
-            if score > best_score:
-                best, best_score = playlist, score
-        return best if best_score >= 0.72 else None
+        exact = [
+            playlist for playlist in playlists
+            if self._normalize_playlist_name(playlist.get("name", "")) == wanted
+        ]
+
+        # Never pick a merely similar playlist. If duplicate normalized names
+        # exist, prefer the first exact Spotify library entry rather than
+        # falling back to an unrelated playlist.
+        return exact[0] if exact else None
 
     def play_playlist(self, query: str, device_id: str | None = None) -> dict:
         """Play one of the user's playlists on an active Spotify device."""
