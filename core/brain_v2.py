@@ -1318,21 +1318,65 @@ class Brain:
             save_turn(user_input, response)
             return Result(response=response, ok=True, provider="mayday")
 
-        # ── Resolve a pending ask_user_choice from the previous turn ──────────
-        # Any reply consumes it — matched or not — so a stale question can
-        # never keep intercepting unrelated later turns. Must run before the
-        # quick-command short-circuits below so e.g. replying "2" to a
-        # pending question doesn't get misread as a Spotify/scene command.
+        # ── Resolve a pending ask_user_choice from the previous turn ────────
+        # Spotify device selections are executed directly so the selected
+        # device cannot be reinterpreted as a fresh command.
         try:
             from core.ask_user_choice import clear_pending, get_pending, resolve_reply
             _pending_choice = get_pending()
             if _pending_choice is not None:
+                if _pending_choice.get("action") == "spotify_device_selection":
+                    _device_ids = _pending_choice.get("device_ids", {})
+                    _command = _pending_choice.get("spotify_command", {})
+                    _options = list(_device_ids.keys())
+                    _selected_name = None
+                    import re as _re
+                    _text_lower = user_input.lower().strip()
+                    _num = _re.search(r"\b(\d+)\b", _text_lower)
+                    if _num and 1 <= int(_num.group(1)) <= len(_options):
+                        _selected_name = _options[int(_num.group(1)) - 1]
+                    else:
+                        for _name in _options:
+                            if _text_lower == _name.lower() or (
+                                len(_text_lower) >= 3 and _text_lower in _name.lower()
+                            ):
+                                _selected_name = _name
+                                break
+                    clear_pending()
+                    if _selected_name is None:
+                        response = (
+                            "I couldn't match that to one of the Spotify devices, sir. "
+                            "Please ask me to play it again and choose a listed device."
+                        )
+                        from core.memory import save_turn
+                        save_turn(user_input, response)
+                        return Result(response=response, ok=False, provider="spotify_choice")
+                    from services.spotify import _format_play_response, spotify
+                    _device_id = _device_ids.get(_selected_name)
+                    if _command.get("action") == "playlist":
+                        _result = spotify.play_playlist(_command.get("query", ""), device_id=_device_id)
+                    else:
+                        _result = spotify.play(_command.get("query", ""), device_id=_device_id)
+                    response = _format_play_response(_result)
+                    from core.memory import save_turn
+                    save_turn(user_input, response)
+                    return Result(response=response, ok=bool(_result.get("playing")), provider="spotify")
+                
                 _resolved = resolve_reply(_pending_choice, user_input)
                 clear_pending()
                 if _resolved:
                     user_input = f"{user_input}\n\n[{_resolved}]"
-        except Exception:
-            pass
+        except Exception as _choice_error:
+            print(f"[Brain] Pending choice resolution failed: {_choice_error}")
+            if _pending_choice is not None and _pending_choice.get("action") == "spotify_device_selection":
+                from core.ask_user_choice import clear_pending
+                clear_pending()
+                response = "I couldn't safely apply that Spotify device selection, sir."
+                from core.memory import save_turn
+                save_turn(user_input, response)
+                return Result(response=response, ok=False, provider="spotify_choice")
+
+
 
         # ── Predictive cache — free lookup, instant response if pre-loaded ────
         try:
@@ -1350,7 +1394,10 @@ class Brain:
             if spotify_response:
                 from core.memory import save_turn
                 save_turn(user_input, spotify_response)
-                return Result(response=spotify_response, ok=True, provider="spotify")
+                from core.ask_user_choice import get_pending
+                _spotify_pending = get_pending()
+                return Result(response=spotify_response, ok=True, provider="spotify",
+                              pending_choice=_spotify_pending)
         except Exception as e:
             print(f"[Brain] Spotify command failed: {e}")
             from core.memory import save_turn
