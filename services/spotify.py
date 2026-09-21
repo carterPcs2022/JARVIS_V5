@@ -380,25 +380,46 @@ class SpotifyService:
         This keeps JARVIS from accidentally targeting an old Mac or speaker.
         """
         resp = self._api("GET", "/me/player/devices")
-        if "error" in resp:
-            return []
+        devices = []
+        if "error" not in resp:
+            devices = [
+                d for d in resp.get("devices", [])
+                if d.get("id") and not d.get("is_restricted")
+            ]
+        else:
+            log.warning("Spotify /me/player/devices failed: %s", resp)
 
-        devices = [
-            d for d in resp.get("devices", [])
-            if d.get("id") and not d.get("is_restricted")
-        ]
+        # Spotify can omit the phone from the device list briefly. /me/player
+        # identifies the device currently holding the user's playback session,
+        # so merge that device when the normal listing misses it.
+        current = self._api("GET", "/me/player")
+        if "error" not in current:
+            active_device = current.get("device") or {}
+            active_id = active_device.get("id")
+            if active_id and not active_device.get("is_restricted"):
+                existing = next((d for d in devices if d.get("id") == active_id), None)
+                if existing:
+                    existing["is_active"] = True
+                else:
+                    devices.append({
+                        "id": active_id,
+                        "name": active_device.get("name", "Spotify device"),
+                        "type": active_device.get("type", "unknown"),
+                        "is_active": True,
+                        "is_restricted": False,
+                    })
+        elif current.get("error") not in ("Player not found", "No active device found"):
+            log.warning("Spotify /me/player lookup failed: %s", current)
 
-        # Phone-first: the user's current setup is iPhone-only.
         smartphones = [d for d in devices if str(d.get("type", "")).lower() == "smartphone"]
-        active = [d for d in smartphones if d.get("is_active")]
-        if active:
-            return active + [d for d in smartphones if d not in active]
+        active_smartphones = [d for d in smartphones if d.get("is_active")]
+        if active_smartphones:
+            return active_smartphones + [d for d in smartphones if d not in active_smartphones]
 
         if smartphones:
             return smartphones + [d for d in devices if d not in smartphones and d.get("is_active")]
 
-        # No phone was exposed by Spotify; only use an already-active fallback
-        # rather than waking up an arbitrary remembered device.
+        # Never wake an arbitrary remembered Mac/speaker.
         return [d for d in devices if d.get("is_active")]
 
     def pause(self) -> dict:
@@ -604,5 +625,5 @@ def _format_play_response(result: dict) -> str:
 
     error = result.get("error", "")
     if "No active Spotify device" in error:
-        return "No active Spotify device found. Open Spotify on your phone or Mac first, sir."
+        return "I can't see your iPhone as a Spotify Connect device yet. Open Spotify on your iPhone, start any song, leave Spotify open for a moment, then try again, sir."
     return f"Couldn't play that: {error}" if error else "Couldn't play that, sir."
