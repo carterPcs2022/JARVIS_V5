@@ -158,17 +158,21 @@ async def verify_iris(image: UploadFile = File(...), profile: str = Form("defaul
 async def iris_profile_status_route(profile: str = "default"):
     """Thin proxy to the Mac Bridge's iris enrollment status check."""
     if not MAC_BRIDGE_URL:
-        return JSONResponse(status_code=503, content={"error": "Mac bridge not configured"})
+        return {"enrolled": False, "sample_count": 0, "available": False, "error": "Mac bridge not configured"}
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(
                 f"{MAC_BRIDGE_URL}/iris/profile/status",
                 params={"profile": profile},
                 headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
             )
-            return await _proxy_to_bridge_response(resp)
+            data = resp.json()
+            if resp.status_code >= 400:
+                return {"enrolled": False, "sample_count": 0, "available": False, "error": f"bridge HTTP {resp.status_code}"}
+            data["available"] = True
+            return data
     except Exception as e:
-        return JSONResponse(status_code=502, content={"error": str(e)})
+        return {"enrolled": False, "sample_count": 0, "available": False, "error": f"bridge unreachable: {type(e).__name__}"}
 
 
 @router.post("/reset", dependencies=[Depends(verify_token)])
