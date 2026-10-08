@@ -398,6 +398,13 @@ async def hud_service_worker():
                         headers={"Service-Worker-Allowed": "/hud/", "Cache-Control": "no-cache"})
 
 
+@app.get("/hud/health", dependencies=[Depends(verify_token)])
+async def hud_health():
+    """Authoritative JARVIS health contract for STARK HUD and diagnostics."""
+    from core.system_health import snapshot
+    return snapshot()
+
+
 @app.get("/hud/status", dependencies=[Depends(verify_token)])
 async def hud_status():
     """Single combined endpoint both HUDs poll every few seconds.
