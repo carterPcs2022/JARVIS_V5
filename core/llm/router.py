@@ -174,7 +174,7 @@ def classify_query(query: str) -> str:
         return "research"
 
     if any(p in q for p in (
-        "should i", "what would you recommend", "best approach",
+        "should i", "what do you think", "what is your opinion", "what's your opinion", "what would you recommend", "do you agree", "best approach",
         "think through", "reasoning", "argument", "debate", "decide",
         "tradeoff", "calculate", "math", "logic",
     )):
