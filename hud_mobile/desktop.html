@@ -399,10 +399,28 @@ body::before {
   .left-col, .right-col { border: none; border-top: 1px solid var(--border2); }
   .center-col { min-height: 400px; }
 }
+
+/* ── STARK dynamic holographic panels ───────────────────────────────────── */
+.stark-panel-layer { position:fixed; inset:0; pointer-events:none; z-index:9000; overflow:hidden; }
+.stark-panel { position:absolute; min-width:250px; max-width:360px; padding:14px 16px; border:1px solid var(--accent); background:rgba(3,12,18,.94); box-shadow:0 0 24px rgba(95,216,255,.16), inset 0 0 18px rgba(95,216,255,.04); clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); opacity:0; transform:translateY(8px) scale(.96); animation:stark-panel-in .28s ease-out forwards; pointer-events:auto; font-family:inherit; }
+.stark-panel[data-tone="warn"] { border-color:var(--gold2); box-shadow:0 0 24px rgba(255,190,60,.14); }
+.stark-panel[data-tone="danger"] { border-color:var(--danger); box-shadow:0 0 24px rgba(255,70,70,.18); }
+.stark-panel-head { display:flex; justify-content:space-between; gap:16px; color:var(--accent); font-size:10px; letter-spacing:2px; text-transform:uppercase; }
+.stark-panel[data-tone="warn"] .stark-panel-head { color:var(--gold2); }
+.stark-panel[data-tone="danger"] .stark-panel-head { color:var(--danger); }
+.stark-panel-close { background:none; border:0; color:var(--muted); cursor:pointer; font:inherit; }
+.stark-panel-body { margin-top:10px; color:var(--text2); font-size:10px; line-height:1.65; white-space:pre-line; }
+.stark-panel-body b { color:var(--text); }
+.stark-toast { position:fixed; top:72px; left:50%; transform:translateX(-50%) translateY(-8px); z-index:9001; opacity:0; padding:7px 16px; border:1px solid var(--accent); background:rgba(3,12,18,.92); color:var(--accent); font-size:9px; letter-spacing:2px; pointer-events:none; transition:.25s; }
+.stark-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+@keyframes stark-panel-in { to { opacity:1; transform:translateY(0) scale(1); } }
+@media (max-width:700px) { .stark-panel { min-width:220px; max-width:calc(100vw - 32px); } }
 </style>
 </head>
 <body>
 
+<div class="stark-panel-layer" id="stark-panel-layer" aria-live="polite"></div>
+<div class="stark-toast" id="stark-toast"></div>
 <div class="scanline"></div>
 <div class="hud-scan-sweep"></div>
 <div class="corner corner-tl"></div>
@@ -661,6 +679,38 @@ body::before {
 </div>
 
 <script>
+// ── STARK dynamic panel system ──────────────────────────────────────────────
+function showStarkPanel(title, body, tone='info') {
+  const layer=document.getElementById('stark-panel-layer');
+  if(!layer) return;
+  const panel=document.createElement('section');
+  panel.className='stark-panel';
+  panel.dataset.tone=tone;
+  const x=Math.min(window.innerWidth-380, Math.max(16, window.innerWidth*.62));
+  const y=Math.min(window.innerHeight-230, Math.max(90, window.innerHeight*.22));
+  panel.style.left=x+'px'; panel.style.top=y+'px';
+  panel.innerHTML='<div class="stark-panel-head"><span>'+String(title).replace(/[<>]/g,'')+'</span><button class="stark-panel-close" aria-label="Close">×</button></div><div class="stark-panel-body">'+String(body).replace(/</g,'&lt;').replace(/>/g,'&gt;')+'</div>';
+  panel.querySelector('.stark-panel-close').onclick=()=>panel.remove();
+  layer.appendChild(panel);
+  return panel;
+}
+function showStarkToast(text) {
+  const el=document.getElementById('stark-toast'); if(!el) return;
+  el.textContent=text; el.classList.add('show'); clearTimeout(window._starkToastTimer);
+  window._starkToastTimer=setTimeout(()=>el.classList.remove('show'),2600);
+}
+function showSubsystemPanel(key) {
+  const labels={voice:'VOICE SUBSYSTEM',memory:'MEMORY MATRIX',sandbox:'SANDBOX',network:'NETWORK',llm:'LLM CORE',security:'SECURITY',friday:'FRIDAY COMMS',combat:'COMBAT'};
+  const node=document.getElementById('hud-node-'+key);
+  const state=node?.classList.contains('off')?'OFFLINE':node?.classList.contains('warn')?'DEGRADED':'ONLINE';
+  const tone=state==='OFFLINE'?'danger':state==='DEGRADED'?'warn':'info';
+  showStarkPanel(labels[key]||key.toUpperCase(), 'STATUS   '+state+'\n\nTap diagnostics for live details.', tone);
+}
+document.querySelectorAll('.hud-node').forEach(node=>{
+  node.style.cursor='pointer';
+  node.addEventListener('click',()=>showSubsystemPanel(node.id.replace('hud-node-','')));
+});
+
 const HOST       = location.hostname;
 const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 const wsPort     = location.protocol === 'https:' ? '' : ':8000';
