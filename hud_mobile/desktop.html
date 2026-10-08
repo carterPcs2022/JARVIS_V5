@@ -1955,6 +1955,43 @@ function updateHudNode(key, state) {
   if (line) line.setAttribute('class', `hud-line ${state}`);
 }
 
+async function pollStarkHealth() {
+  try {
+    const h = await jarvisGet('/hud/health');
+    const overall = h.overall || 'degraded';
+    const providerCount = (h.providers || []).length;
+    const degraded = (h.providers || []).filter(p => p.status === 'degraded' || p.status === 'offline').length;
+    const core = (h.components || []).find(c => c.name === 'CORE');
+    setStatus(overall === 'online' ? 'online' : 'degraded');
+
+    // Feed the authoritative health contract into the radial HUD.
+    const componentMap = {
+      core: 'CORE', memory: 'MEMORY', voice: 'VOICE',
+      security: 'SECURITY', friday: 'FRIDAY', engineering: 'ENGINEERING'
+    };
+    for (const [key, name] of Object.entries(componentMap)) {
+      const c = (h.components || []).find(x => x.name === name);
+      if (!c) continue;
+      const state = ['online','speaking','standby'].includes(c.status) ? 'ok'
+        : c.status === 'degraded' ? 'warn' : 'off';
+      updateHudNode(key, state);
+    }
+
+    const llmState = degraded < providerCount ? 'ok' : 'off';
+    updateHudNode('llm', llmState);
+    const footer = document.getElementById('footer-friday-dot');
+    const friday = (h.components || []).find(c => c.name === 'FRIDAY');
+    if (footer && friday) {
+      footer.className = 'footer-dot ' + (friday.status === 'online' ? 'green' : friday.status === 'degraded' ? 'yellow' : 'red');
+      footer.title = friday.reason || friday.status;
+    }
+    return h;
+  } catch (e) {
+    setStatus('offline');
+    return null;
+  }
+}
+
 async function pollStatus() {
   try {
     const d = await jarvisGet('/hud/status');
@@ -2127,7 +2164,7 @@ async function initHud() {
   }
 
   connectWs();
-  pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
+  pollStarkHealth(); pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
   pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
   syncEnrollStatus(); // one-time — voice enrollment status doesn't change during a session
   syncIrisEnrollStatus(); // one-time — iris enrollment status doesn't change during a session
@@ -2140,6 +2177,7 @@ initHud();
 // (core/consciousness.py, services/productivity.py) so polling them isn't
 // a live LLM call anyway, but there's no reason to poll more than the
 // content could plausibly change.
+setInterval(pollStarkHealth, 5000);
 setInterval(pollStatus, 5000);
 setInterval(pollNetwork, 30000);
 setInterval(pollWorkshop, 60000);
