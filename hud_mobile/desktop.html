@@ -2045,11 +2045,25 @@ async function pollRetinal() {
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────────
-connectWs();
-pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
-pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
-syncEnrollStatus(); // one-time — voice enrollment status doesn't change during a session
-syncIrisEnrollStatus(); // one-time — iris enrollment status doesn't change during a session
+// Authentication must finish before any protected HUD polling or the
+// WebSocket handshake starts. Previously these all fired together while
+// ensureToken() was still waiting for credentials, producing a burst of
+// unauthenticated 403s and triggering behavioral-security RAPID_FIRE.
+async function initHud() {
+  const token = await ensureToken();
+  if (!token && !DEV_MODE) {
+    setStatus('offline');
+    addMessage('system', 'JARVIS authentication required. Enter a valid API token to connect.');
+    return;
+  }
+
+  connectWs();
+  pollStatus(); pollNetwork(); pollWorkshop(); pollConsciousness(); pollObjectives(); pollVoiceStatus();
+  pollRetinal(); // one-time — retinal enrollment status doesn't change during a session
+  syncEnrollStatus(); // one-time — voice enrollment status doesn't change during a session
+  syncIrisEnrollStatus(); // one-time — iris enrollment status doesn't change during a session
+}
+initHud();
 
 // pollStatus (/hud/status) never touches Groq — it's local system/security
 // stats only — so 5s is fine. The others are tiered by how fast their data
