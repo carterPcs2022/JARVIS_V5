@@ -5,6 +5,7 @@ into a single coherent context string for any LLM call.
 """
 from core.memory import (get_context_string, recall_as_context, facts_as_context,
                           episodes_as_context, working_memory_as_context)
+from core.memory_gate import gate_context
 from core.personality import build_system_prompt
 from config.settings import JARVIS_PERSONALITY
 
@@ -152,7 +153,8 @@ def build_context(user_input: str, include_web: bool = True, deep: bool = False)
 
     parts = [include["facts"], include["ltm"], include["web"], include["episodes"],
              include["working"], include["short"]]
-    return "\n\n".join(p for p in parts if p)
+    assembled = "\n\n".join(p for p in parts if p)
+    return gate_context(assembled, user_input)
 
 
 def _trim_to_budget(text: str, budget_tokens: int) -> str:
