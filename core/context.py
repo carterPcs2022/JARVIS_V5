@@ -180,6 +180,12 @@ def build_system(custom: str | None = None) -> str:
     except Exception:
         pass
 
+    try:
+        from core.opinion import opinion_directives
+        base = base + "\n\n" + opinion_directives()
+    except Exception:
+        pass
+
     return build_system_prompt(base)
 
 
