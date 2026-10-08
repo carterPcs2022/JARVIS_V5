@@ -37,19 +37,33 @@ def _provider_status() -> list[dict]:
         ANTHROPIC_API_KEY = CEREBRAS_API_KEY = GROQ_API_KEY = ""
 
     statuses = _state("model_status", {}) or {}
+    try:
+        from services.circuit_breaker import cb
+        circuits = cb.dashboard()
+    except Exception:
+        circuits = {}
+
 
     def tracked(provider: str) -> bool:
         return any(k.startswith(provider + ":") for k in statuses)
 
     def provider_item(provider: str, configured: bool) -> dict:
+        name = provider.upper()
         if not configured:
-            return _component(provider.upper(), "offline", reason="not configured")
+            return _component(name, "offline", reason="not configured")
         keys = [k for k in statuses if k.startswith(provider + ":")]
+        circuit = circuits.get(provider, {})
+        error = (circuit.get("last_error") or "").lower()
+        if "402" in error or "payment required" in error or "billing" in error:
+            return _component(name, "payment_required", reason="provider rejected a request for payment", circuit=circuit)
+        if circuit.get("state") == "open":
+            return _component(name, "rate_limited" if circuit.get("retry_after") else "degraded",
+                              reason="circuit open; routing around provider", circuit=circuit)
         if keys and any(statuses[k] for k in keys):
-            return _component(provider.upper(), "online", reason="recent successful model call")
+            return _component(name, "online", reason="recent successful model call", circuit=circuit)
         if keys:
-            return _component(provider.upper(), "degraded", reason="configured but recent model attempts failed")
-        return _component(provider.upper(), "standby", reason="configured; no recent model result")
+            return _component(name, "degraded", reason="configured but recent model attempts failed", circuit=circuit)
+        return _component(name, "standby", reason="configured; no recent model result", circuit=circuit)
 
     return [
         provider_item("anthropic", bool(ANTHROPIC_API_KEY)),
@@ -91,7 +105,7 @@ def snapshot() -> dict:
         _component("ENGINEERING", "standby"),
     ]
 
-    degraded = any(p["status"] in ("degraded", "offline") for p in providers)
+    degraded = any(p["status"] in ("degraded", "offline", "rate_limited", "payment_required") for p in providers)
     if any(c["status"] == "degraded" for c in components):
         degraded = True
 
