@@ -446,11 +446,26 @@ async def hud_status():
         mark = mark_system.current_mark(real_capability_count=count_capabilities(app))
     except Exception:
         mark = {}
+    # FRIDAY gets a real health probe so the HUD can distinguish
+    # ONLINE from configured-but-unreachable instead of treating every
+    # failure as the same yellow light.
+    friday_status = {"online": False, "configured": False, "reason": "not configured"}
     try:
-        from services.automation import check_friday_alive
-        friday_online = check_friday_alive()
-    except Exception:
-        friday_online = False
+        import httpx
+        friday_url = os.environ.get("FRIDAY_URL", "").strip()
+        if friday_url:
+            friday_status["configured"] = True
+            try:
+                r = httpx.get(f"{friday_url.rstrip('/')}/health", timeout=3)
+                friday_status["online"] = r.status_code == 200
+                friday_status["reason"] = "online" if r.status_code == 200 else f"health returned HTTP {r.status_code}"
+            except Exception as e:
+                friday_status["reason"] = f"unreachable: {type(e).__name__}"
+        else:
+            friday_status["reason"] = "FRIDAY_URL is not configured"
+    except Exception as e:
+        friday_status["reason"] = f"probe error: {type(e).__name__}"
+    friday_online = friday_status["online"]
 
     try:
         from core.state import state
@@ -524,6 +539,7 @@ async def hud_status():
         "active_models":     model_update_status.get("current_models", {}),
         "last_model_check":  model_update_status.get("last_checked", "never"),
         "friday_online": friday_online,
+        "friday":          friday_status,
         "alerts":        recent_alerts[:10],
         "timestamp": __import__("datetime").datetime.now().isoformat(),
     }
