@@ -242,11 +242,18 @@ def record_failed_auth(ip: str):
                     print(f"[Sentinel] Firewall escalation failed for {ip}: {e}")
 
 
+def clear_failed_auth(ip: str):
+    """Forget recent failed-auth attempts after a valid credential succeeds."""
+    _failed_logins.pop(ip, None)
+    _blocked_ips.pop(ip, None)
+
+
 def is_blocked(ip: str) -> bool:
-    """Cheap check called before token comparison on every auth path (REST,
-    WebSocket, and the protocol Pepper/Rhodey/master tiers) — a blocked IP
-    gets rejected without ever reaching hmac.compare_digest, so continued
-    guessing during the block window can't even attempt a comparison."""
+    """Return whether an IP is currently in Sentinel's temporary auth block.
+
+    Callers should validate the credential first, then use this for invalid
+    credentials. Valid credentials are allowed to recover from a stale block.
+    """
     from utils.security import is_trusted_ip
     if is_trusted_ip(ip):
         return False
