@@ -17,6 +17,21 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
         return True
 
     ip = websocket.client.host if websocket.client else "unknown"
+    token = websocket.query_params.get("token", "")
+
+    # Validate the credential before applying Sentinel's failed-auth block.
+    # Sentinel exists to stop credential guessing, not to invalidate a valid
+    # credential because the same IP previously made too many bad attempts.
+    ok = bool(token) and hmac.compare_digest(token, API_TOKEN)
+    if ok:
+        try:
+            from services.sentinel import clear_failed_auth
+            clear_failed_auth(ip)
+        except Exception:
+            pass
+        return True
+
+    # Invalid credentials are still subject to Sentinel's temporary block.
     try:
         from services.sentinel import is_blocked
         if is_blocked(ip):
@@ -24,15 +39,12 @@ def _ws_token_ok(websocket: WebSocket) -> bool:
     except Exception:
         pass
 
-    token = websocket.query_params.get("token", "")
-    ok = bool(token) and hmac.compare_digest(token, API_TOKEN)
-    if not ok:
-        try:
-            from utils.security import _record_failed_auth_safe
-            _record_failed_auth_safe(ip)
-        except Exception:
-            pass
-    return ok
+    try:
+        from utils.security import _record_failed_auth_safe
+        _record_failed_auth_safe(ip)
+    except Exception:
+        pass
+    return False
 
 THREAT_CLASSIFY_TIMEOUT_SECONDS = 2
 
