@@ -3,7 +3,9 @@
 Read/inspect and verify candidate changes through the existing coding engine.
 This router deliberately stops before applying or deploying changes.
 """
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from utils.security import verify_token
 
 router = APIRouter(prefix="/stark/engineering", tags=["stark-engineering"], dependencies=[Depends(verify_token)])
@@ -21,6 +23,18 @@ def engineering_status():
         "deployment_enabled": False,
         "workflow": ["inspect", "propose", "validate", "smoke_test", "approve", "apply", "persist"],
     }
+
+
+@router.get("/hud2")
+def engineering_hud2():
+    """Serve the next-generation STARK command HUD behind the normal token gate."""
+    hud = Path(__file__).resolve().parents[2] / "hud_mobile" / "stark2.html"
+    if not hud.exists():
+        raise HTTPException(404, "STARK HUD 2.0 is not installed")
+    return FileResponse(
+        hud,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @router.post("/inspect")
