@@ -1061,31 +1061,70 @@ messagesEl.addEventListener('drop', async (e) => {
   }
 });
 
-// ── Voice input (Web Speech API) ──────────────────────────────────────────────
+// ── Voice input (push-to-talk) ────────────────────────────────────────────────
+// Records audio and sends it to /stark/voice/transcribe instead of using the
+// browser's SpeechRecognition. SpeechRecognition returned text only, so the
+// server-side speaker check never saw the audio and any voice could issue
+// commands from the mic button.
 const micBtn = document.getElementById('mic-btn');
-let recognition = null;
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SR();
-  recognition.continuous = false;
-  recognition.interimResults = false;
-  recognition.onresult = (e) => { inputEl.value = e.results[0][0].transcript; sendMessage(); };
-  recognition.onend = () => { micBtn.classList.remove('rec'); document.getElementById('btn-voice').classList.remove('active'); };
-} else {
+let pttRecorder = null;
+const PTT_MAX_MS = 8000;
+if (!(navigator.mediaDevices && window.MediaRecorder)) {
   micBtn.disabled = true;
-  micBtn.title = 'Speech recognition not supported in this browser';
+  micBtn.title = 'Audio recording not supported in this browser';
 }
 
-function toggleMic() {
-  if (!recognition) return;
-  if (micBtn.classList.contains('rec')) {
-    recognition.stop();
-    return;
+function _pttUiOff() {
+  micBtn.classList.remove('rec');
+  document.getElementById('btn-voice').classList.remove('active');
+}
+
+async function toggleMic() {
+  if (pttRecorder) { pttRecorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(VOICE_CAPTURE_AUDIO_CONSTRAINTS);
+    const chunks = [];
+    const rec = new MediaRecorder(stream);
+    pttRecorder = rec;
+    rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      pttRecorder = null;
+      _pttUiOff();
+      await _sendPttAudio(new Blob(chunks, { type: 'audio/webm' }));
+    };
+    micBtn.classList.add('rec');
+    document.getElementById('btn-voice').classList.add('active');
+    addMessage('system', 'Voice input active — listening...');
+    rec.start();
+    setTimeout(() => { if (pttRecorder === rec && rec.state === 'recording') rec.stop(); }, PTT_MAX_MS);
+  } catch (e) {
+    pttRecorder = null;
+    _pttUiOff();
+    addMessage('system', 'Microphone access denied.');
   }
-  micBtn.classList.add('rec');
-  document.getElementById('btn-voice').classList.add('active');
-  addMessage('system', 'Voice input active — listening...');
-  recognition.start();
+}
+
+async function _sendPttAudio(blob) {
+  if (blob.size < 500) return;
+  const form = new FormData();
+  form.append('audio', blob, 'command.webm');
+  try {
+    const r = await fetch(`${API}/stark/voice/transcribe`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: form,
+    });
+    const data = await r.json();
+    if (data.rejected) {
+      addMessage('system', data.reason === 'voice_mismatch' ? 'Voice not recognized.' : 'Could not verify your voice — try again.');
+      return;
+    }
+    if (data.text) { inputEl.value = data.text; sendMessage(); }
+    else addMessage('system', 'Did not catch that.');
+  } catch (e) {
+    addMessage('system', 'Transcription failed.');
+  }
 }
 
 // ── Wake-word / hands-free voice mode ─────────────────────────────────────────

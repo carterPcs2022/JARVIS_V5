@@ -68,6 +68,30 @@ def _reauth_required_response() -> JSONResponse:
     })
 
 
+SPEAKER_VERIFY_STRICT = os.getenv("SPEAKER_VERIFY_STRICT", "1") != "0"
+
+
+async def _speaker_verdict(filename, audio_bytes: bytes):
+    """Ask the Mac Bridge to verify the speaker. Returns the bridge's JSON
+    dict, or None if there was no usable answer (error, non-200, bad JSON)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{MAC_BRIDGE_URL}/voice/verify",
+                files={"audio": (filename or "audio.webm", audio_bytes)},
+                data={"profile": "default"},
+                headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
+            )
+        if resp.status_code != 200:
+            print(f"[Voice] Speaker verify bridge returned HTTP {resp.status_code}")
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        print(f"[Voice] Speaker verification unreachable: {e}")
+        return None
+
+
 @router.post("/transcribe", dependencies=[Depends(verify_token)])
 async def transcribe_audio(audio: UploadFile = File(...)):
     """Transcribe an uploaded audio clip — used by the HUD's browser-based
@@ -79,34 +103,32 @@ async def transcribe_audio(audio: UploadFile = File(...)):
     suffix = ".webm" if "webm" in (audio.filename or "") else ".wav"
     audio_bytes = await audio.read()
 
-    # Speaker verification is a soft gate, not a hard dependency — any bridge
-    # hiccup (down, timeout, misconfigured) must fall through to normal
-    # transcription rather than lock a legitimate command out. But "soft"
-    # was silently indistinguishable from "not running at all" (no
-    # MAC_BRIDGE_URL, or every call raising) — print loudly in both cases so
-    # that isn't discovered by an unverified command executing instead of
-    # in the logs.
+    # Speaker verification. Once a voiceprint is FULLY enrolled this fails
+    # CLOSED: the only way through is an explicit positive match from the
+    # bridge. A bridge error, timeout, non-200, or `verified: false` (e.g.
+    # clip too short/noisy to score) used to fall through to normal
+    # transcription, which meant an unverifiable voice executed commands.
+    # If nothing is enrolled yet (or MAC_BRIDGE_URL is unset) there is nothing
+    # to check against, so it stays open with a loud log line.
+    # Escape hatch if the Mac is offline and you need voice commands anyway:
+    # set SPEAKER_VERIFY_STRICT=0 on Render.
     if not MAC_BRIDGE_URL:
         print("[Voice] MAC_BRIDGE_URL not configured — speaker verification is OFF, any voice will execute commands")
     else:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(
-                    f"{MAC_BRIDGE_URL}/voice/verify",
-                    files={"audio": (audio.filename or "audio.webm", audio_bytes)},
-                    data={"profile": "default"},
-                    headers={"Authorization": f"Bearer {MAC_BRIDGE_TOKEN}"},
-                )
-                result = resp.json()
-            if result.get("verified") and result.get("match") is False:
-                return {
-                    "text": "",
-                    "rejected": True,
-                    "reason": "voice_mismatch",
-                    "score": result.get("score"),
-                }
-        except Exception as e:
-            print(f"[Voice] Speaker verification unreachable, falling through unverified: {e}")
+        verdict = await _speaker_verdict(audio.filename, audio_bytes)
+        if verdict and verdict.get("verified") and verdict.get("match") is False:
+            return {
+                "text": "",
+                "rejected": True,
+                "reason": "voice_mismatch",
+                "score": verdict.get("score"),
+            }
+        positive = bool(verdict and verdict.get("verified") and verdict.get("match") is True)
+        if not positive:
+            if SPEAKER_VERIFY_STRICT and await _profile_fully_enrolled("default"):
+                print(f"[Voice] Rejected: enrolled profile but no positive match (verdict={verdict})")
+                return {"text": "", "rejected": True, "reason": "unverified"}
+            print(f"[Voice] No positive speaker match, allowing (strict={SPEAKER_VERIFY_STRICT}, verdict={verdict})")
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(audio_bytes)
