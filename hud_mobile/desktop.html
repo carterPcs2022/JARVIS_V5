@@ -704,7 +704,14 @@ function showSubsystemPanel(key) {
   const node=document.getElementById('hud-node-'+key);
   const state=node?.classList.contains('off')?'OFFLINE':node?.classList.contains('warn')?'DEGRADED':'ONLINE';
   const tone=state==='OFFLINE'?'danger':state==='DEGRADED'?'warn':'info';
-  showStarkPanel(labels[key]||key.toUpperCase(), 'STATUS   '+state+'\n\nTap diagnostics for live details.', tone);
+  if(key==='memory' && window._starkHealth?.components){
+    const m=window._starkHealth.components.find(c=>String(c.name).toLowerCase()==='memory');
+    if(m){
+      showStarkPanel(labels[key], 'STATUS   '+(m.status||state).toUpperCase()+'\\n\\n'+(m.reason||'Memory matrix operational.'), tone);
+      return;
+    }
+  }
+  showStarkPanel(labels[key]||key.toUpperCase(), 'STATUS   '+state+'\\n\\nLive subsystem diagnostics.', tone);
 }
 document.querySelectorAll('.hud-node').forEach(node=>{
   node.style.cursor='pointer';
