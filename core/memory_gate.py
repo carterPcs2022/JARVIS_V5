@@ -51,6 +51,26 @@ def importance_score(text: str, explicit: bool = False) -> float:
     return min(1.0, round(score, 3))
 
 
+def memory_metadata(item: dict, source: str = "unknown") -> dict:
+    """Return explainable provenance for a memory without exposing raw secrets."""
+    return {
+        "source": source,
+        "reason": item.get("reason") or item.get("source") or "retrieved by relevance",
+        "importance": item.get("importance", item.get("confidence", None)),
+        "created_at": item.get("ts"),
+        "tags": list(item.get("tags", []))[:12],
+    }
+
+
+def should_expire(item: dict, now_iso: str | None = None) -> bool:
+    """Identify low-value stale memories; cleanup remains explicit for now."""
+    tags = set(item.get("tags", []))
+    if tags & {"important", "profile", "decision", "goal", "project"}:
+        return False
+    importance = float(item.get("importance", item.get("confidence", 0.5)) or 0.5)
+    return importance < 0.2
+
+
 def rank_memory_candidates(candidates: list[dict], query: str, k: int = 8) -> list[dict]:
     """Rank already-retrieved memories by relevance plus durable importance."""
     q = set(re.findall(r"[a-z0-9]+", (query or "").lower()))
