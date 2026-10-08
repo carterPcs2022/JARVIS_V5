@@ -38,14 +38,11 @@ def chat(body: dict, request: Request):
     from services.threat_detector import classify as classify_threat
     threat_future = _executor.submit(classify_threat, msg)
 
-    # Agentic requests get the real CognitiveRouter -> AgentLoop ->
-    # ToolGateway -> Astra path. Everything else keeps the existing Brain V2
-    # path, so normal chat remains fast and does not require Astra.
-    from core.cognitive_router import router as cognitive_router, should_use_agent_loop
-    if should_use_agent_loop(msg):
-        future = _executor.submit(asyncio.run, cognitive_router.route_async(msg))
-    else:
-        future = _executor.submit(brain.process_dict, msg)
+    # CognitiveRouter is the single cognitive front door. It preserves
+    # Brain V2 for ordinary requests while adding the decision/conscience
+    # boundary and the real agent/tool path when appropriate.
+    from core.cognitive_router import router as cognitive_router
+    future = _executor.submit(asyncio.run, cognitive_router.route_async(msg))
 
     try:
         result = future.result(timeout=TASK_TIMEOUT_SECONDS)
