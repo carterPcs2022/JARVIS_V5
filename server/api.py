@@ -6,6 +6,7 @@ from starlette.concurrency import run_in_threadpool
 from pathlib import Path
 import os
 import time
+import hmac
 
 # Process-level uptime — distinct from the OS/container uptime that
 # core.tools.system.snapshot()'s "uptime_hours" reports. On Render the
