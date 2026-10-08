@@ -668,50 +668,36 @@ const WS_URL     = `${wsProtocol}//${HOST}${wsPort}/ws/chat`;
 const DEV_MODE = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 
 function getToken() { return localStorage.getItem('jarvis_token') || ''; }
-
+let authPromptInFlight = false;
 async function ensureToken() {
   const urlParams = new URLSearchParams(location.search);
   const urlToken = urlParams.get('token');
-  if (urlToken) {
-    localStorage.setItem('jarvis_token', urlToken);
-    window.history.replaceState({}, '', location.pathname);
-  }
-  if (!getToken() && !DEV_MODE) {
-    // Uses askPassphrase()'s plain-DOM-overlay pattern instead of
-    // window.prompt() — confirmed the real cause of a real lockout:
-    // prompt()/alert()/confirm() are unreliable or silently no-op in
-    // standalone-PWA / embedded-webview contexts. A silently-failing
-    // prompt() left getToken() permanently empty, the WebSocket kept
-    // sending token="" forever, and there was no way back in short of
-    // manually clearing browser site data. A bare DOM element (what
-    // askPassphrase() already builds) always renders regardless of
-    // browser context.
-    // askPassphrase()'s input isn't trimmed (fine for a passphrase; not
-    // fine here) — a copy-pasted token with a trailing space/newline
-    // would get saved verbatim and then silently fail hmac.compare_digest()
-    // on every single connection with no visible reason. Confirmed this
-    // exact failure mode live right after deploying this fix.
-    const t = await askPassphrase('Enter your JARVIS API token (leave blank if not set):');
-    if (t && t.trim()) localStorage.setItem('jarvis_token', t.trim());
-  }
+  if (urlToken) { localStorage.setItem('jarvis_token', urlToken.trim()); window.history.replaceState({}, '', location.pathname); }
+  if (getToken() || DEV_MODE || authPromptInFlight) return getToken();
+  authPromptInFlight = true;
+  try {
+    const t = await askPassphrase('Enter your JARVIS API token:');
+    const clean = (t || '').trim();
+    if (clean) localStorage.setItem('jarvis_token', clean);
+    return clean;
+  } finally { authPromptInFlight = false; }
 }
-
 function authHeaders() {
   const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
-
 async function jarvisGet(path) {
   const r = await fetch(`${API}${path}`, { headers: authHeaders() });
+  if (r.status === 401 || r.status === 403) throw new Error(`AUTH_REJECTED: ${r.status}`);
   return r.json();
 }
 async function jarvisPost(path, body = {}) {
   const r = await fetch(`${API}${path}`, { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+  if (r.status === 401 || r.status === 403) throw new Error(`AUTH_REJECTED: ${r.status}`);
   return r.json();
 }
-
 ensureToken();
 
 // ── Clock ─────────────────────────────────────────────────────────────────────
@@ -888,28 +874,23 @@ function clearChat() {
 
 function connectWs() {
   try {
-    ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(getToken())}`);
-    ws.onopen  = () => setStatus('online');
-    ws.onclose = (e) => {
+    const token = getToken();
+    if (!token && !DEV_MODE) { ensureToken().then(connectWs); return; }
+    ws = new WebSocket(`${WS_URL}?token=${encodeURIComponent(token)}`);
+    ws.onopen = () => setStatus('online');
+    ws.onclose = async (e) => {
       setStatus('offline');
-      // 1008 = server/websocket.py's _ws_token_ok() rejected the token —
-      // not a network problem, the saved token is just wrong. Retrying
-      // blindly with the same rejected token forever left a bad cached
-      // token permanently stuck (confirmed live) with no way back short
-      // of manually clearing browser site data, since ensureToken() only
-      // prompts when getToken() is empty — a wrong-but-non-empty token
-      // silently defeats that check forever. Clear it and re-prompt.
       if (e.code === 1008) {
         localStorage.removeItem('jarvis_token');
-        ensureToken().then(connectWs);
+        addMessage('system', 'Authentication rejected. Please enter a fresh JARVIS API token.');
+        await ensureToken();
+        if (getToken()) connectWs();
         return;
       }
-      setTimeout(connectWs, 3000);
+      setTimeout(connectWs, 5000);
     };
     ws.onerror = () => setStatus('degraded');
-    ws.onmessage = (e) => {
-      try { handleWsMessage(JSON.parse(e.data)); } catch (err) {}
-    };
+    ws.onmessage = (e) => { try { handleWsMessage(JSON.parse(e.data)); } catch (err) {} };
   } catch (e) { setStatus('offline'); }
 }
 
