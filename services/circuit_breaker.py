@@ -29,7 +29,7 @@ class CircuitBreaker:
             self._circuits[service] = {
                 "state": "closed", "failures": 0, "successes": 0,
                 "last_failure": None, "opened_at": None, "total_opens": 0,
-                "retry_after": None,
+                "retry_after": None, "last_error": None, "last_error_at": None,
             }
         return self._circuits[service]
 
@@ -81,6 +81,8 @@ class CircuitBreaker:
         circuit = self._get_circuit(service)
         circuit["failures"] += 1
         circuit["last_failure"] = datetime.now().isoformat()
+        circuit["last_error"] = error[:300]
+        circuit["last_error_at"] = circuit["last_failure"]
         circuit["retry_after"] = retry_after
 
         # A provider-supplied retry window is authoritative. In particular,
@@ -121,7 +123,7 @@ class CircuitBreaker:
 
     def dashboard(self) -> dict:
         return {
-            service: {"state": c["state"], "failures": c["failures"], "total_opens": c["total_opens"]}
+            service: {"state": c["state"], "failures": c["failures"], "total_opens": c["total_opens"], "last_error": c.get("last_error"), "last_error_at": c.get("last_error_at"), "retry_after": c.get("retry_after")}
             for service, c in self._circuits.items()
         }
 
