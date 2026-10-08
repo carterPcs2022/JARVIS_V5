@@ -42,11 +42,19 @@ def verify_token(request: Request, creds: HTTPAuthorizationCredentials = Depends
         raise HTTPException(503, "JARVIS authentication is not configured")
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
-    ip = request.client.host if request.client else "unknown"
-    _reject_if_blocked(ip)
-    if not creds or not hmac.compare_digest(creds.credentials, API_TOKEN):
+    ip = request.client.host if request.client.host else "unknown"
+    token_ok = bool(creds) and hmac.compare_digest(creds.credentials, API_TOKEN)
+    if not token_ok:
+        _reject_if_blocked(ip)
         _record_failed_auth_safe(ip)
         raise HTTPException(401, "Unauthorized — invalid token")
+
+    # A valid credential wins over a stale temporary failed-auth block.
+    try:
+        from services.sentinel import clear_failed_auth
+        clear_failed_auth(ip)
+    except Exception:
+        pass
     return True
 
 
