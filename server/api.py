@@ -180,12 +180,25 @@ async def security_gate_middleware(request: Request, call_next):
     # feeds it, right alongside the other request-level security checks
     # above. Read-only/alert-only, same as before — no auto-blocking.
     try:
-        from services.behavioral_security import behavioral
-        behavioral.record_request(
-            ip, request.url.path, request.method,
-            user_agent=request.headers.get("user-agent", ""),
-            body_size=len(body.encode()) if body else 0,
+        # Authenticated HUD traffic is expected to be bursty: startup can
+        # legitimately request many telemetry endpoints within seconds.
+        # Do not feed valid owner-authenticated requests into the generic
+        # anonymous behavioral anomaly detector, otherwise the HUD itself
+        # creates false RAPID_FIRE alerts.
+        auth_header = request.headers.get("authorization", "")
+        from config.settings import API_TOKEN
+        authenticated_owner = (
+            auth_header.startswith("Bearer ")
+            and bool(API_TOKEN)
+            and hmac.compare_digest(auth_header[7:].strip(), API_TOKEN)
         )
+        if not authenticated_owner:
+            from services.behavioral_security import behavioral
+            behavioral.record_request(
+                ip, request.url.path, request.method,
+                user_agent=request.headers.get("user-agent", ""),
+                body_size=len(body.encode()) if body else 0,
+            )
     except Exception:
         pass
 
