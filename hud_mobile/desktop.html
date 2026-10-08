@@ -383,6 +383,8 @@ body::before {
 .footer-dot.green { background: var(--green); box-shadow: 0 0 4px var(--green); }
 .footer-dot.yellow { background: var(--warn); box-shadow: 0 0 4px var(--warn); }
 .footer-dot.red { background: var(--danger); box-shadow: 0 0 4px var(--danger); }
+.footer-dot.speaking { animation: footer-dot-pulse 0.7s ease-in-out infinite; }
+@keyframes footer-dot-pulse { 0%,100% { transform: scale(1); opacity: .65; } 50% { transform: scale(1.8); opacity: 1; } }
 
 /* ── Overlay effects ── */
 .scanline { position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.015) 2px, rgba(0,0,0,0.015) 4px); pointer-events: none; z-index: 9999; }
@@ -723,6 +725,15 @@ const VOICE_STATUS_LABELS = { idle: 'READY', listening: 'LISTENING...', processi
 function setVoiceStatus(state) {
   voiceStatusView.className = 'voice-status-view' + (state !== 'idle' ? ' ' + state : '');
   voiceStatusLabel.textContent = VOICE_STATUS_LABELS[state] || 'READY';
+
+  // Keep the footer voice indicator tied to actual playback too.
+  // Engine availability is green; active speech adds a pulse.
+  const ed = document.getElementById('footer-el-dot');
+  if (ed) {
+    const speaking = state === 'speaking';
+    ed.classList.toggle('speaking', speaking);
+    if (speaking) ed.title = 'JARVIS is speaking';
+  }
 }
 
 const chatDrawer   = document.getElementById('chat-drawer');
@@ -1934,7 +1945,11 @@ async function pollStatus() {
     }
 
     const fd = document.getElementById('footer-friday-dot');
-    if (fd) fd.className = `footer-dot ${d.friday_online ? 'green' : 'yellow'}`;
+    const friday = d.friday || {};
+    if (fd) {
+      fd.className = `footer-dot ${friday.online ? 'green' : (friday.configured ? 'red' : 'yellow')}`;
+      fd.title = friday.reason || 'FRIDAY status unknown';
+    }
 
     const sandbox = d.sandbox || {};
     const taskEl = document.getElementById('sandbox-task');
@@ -2022,7 +2037,11 @@ async function pollVoiceStatus() {
     document.querySelectorAll('.voice-btn').forEach(b => b.classList.remove('active'));
     document.querySelector(`[data-engine="${s.active_engine}"]`)?.classList.add('active');
     const ed = document.getElementById('footer-el-dot');
-    if (ed) ed.className = `footer-dot ${s.active_engine === 'elevenlabs' ? 'green' : 'yellow'}`;
+    if (ed) {
+      const active = s.active_engine && s.active_engine !== 'none';
+      ed.className = `footer-dot ${active ? 'green' : 'red'}`;
+      ed.title = active ? `Voice engine: ${s.active_engine}` : 'No voice engine active';
+    }
     updateHudNode('voice', (s.active_engine && s.active_engine !== 'none') ? 'ok' : 'off');
   } catch (e) {
     updateHudNode('voice', 'off');
