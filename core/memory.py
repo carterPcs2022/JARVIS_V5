@@ -158,13 +158,22 @@ def _tokenize(text: str) -> list[str]:
 
 
 def store_long_term(user: str, ai: str, tags: list[str] | None = None):
+    from core.memory_gate import importance_score, is_safe_to_retain
+    text = f"{user} {ai}".strip()
+    explicit = bool(tags and any(t in {"important", "profile", "decision", "goal", "project"} for t in tags))
+    if not is_safe_to_retain(text):
+        log.warning("Memory gate rejected credential-like long-term memory")
+        return None
+    importance = importance_score(text, explicit=explicit)
+    if importance <= 0.0:
+        return None
     entries = _load(LONG_TERM_FILE)
-    text = f"{user} {ai}"
     entry = {
         "ts":     datetime.now().isoformat(),
         "user":   user,
         "ai":     ai,
         "tags":   tags or [],
+        "importance": importance,
         "tokens": _tokenize(text),
     }
     try:
