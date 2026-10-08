@@ -42,7 +42,7 @@ def verify_token(request: Request, creds: HTTPAuthorizationCredentials = Depends
         raise HTTPException(503, "JARVIS authentication is not configured")
     if ENVIRONMENT == "local" and os.getenv("DEV_MODE", "false").lower() == "true":
         return True
-    ip = request.client.host if request.client.host else "unknown"
+    ip = request.client.host if request.client else "unknown"
     token_ok = bool(creds) and hmac.compare_digest(creds.credentials, API_TOKEN)
     if not token_ok:
         _reject_if_blocked(ip)
